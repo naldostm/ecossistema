@@ -1,0 +1,215 @@
+{
+  "name": "O Grande Roteador Mestre (O Polvo)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "webhook-whatsapp-master",
+        "options": {}
+      },
+      "id": "1",
+      "name": "Webhook UaZAPI Master",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://tmpwmtpdxcvulglkahcg.supabase.co/rest/v1/colaboradores?telefone_whatsapp=eq.{{ $('Webhook UaZAPI Master').item.json.body.data.key.remoteJid.replace('@s.whatsapp.net', '') }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "[eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRtcHdtdHBkeGN2dWxnbGthaGNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwNTg0MDMsImV4cCI6MjA4OTYzNDQwM30.GRcj8PoXCMcWPEN5maZYD3kxndqpWfcegryLYANgggE]"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer [eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRtcHdtdHBkeGN2dWxnbGthaGNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwNTg0MDMsImV4cCI6MjA4OTYzNDQwM30.GRcj8PoXCMcWPEN5maZYD3kxndqpWfcegryLYANgggE]"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "2",
+      "name": "Busca Número no Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        400,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.body.length > 0 ? $json.body[0].cargo : 'Desconhecido' }}",
+        "rules": {
+          "rules": [
+            {
+              "value2": "Técnico",
+              "output": 0
+            },
+            {
+              "value2": "Engenheiro",
+              "output": 0
+            },
+            {
+              "value2": "Supervisor",
+              "output": 0
+            },
+            {
+              "value2": "Administrador",
+              "output": 1
+            },
+            {
+              "value2": "Diretor",
+              "output": 1
+            },
+            {
+              "value2": "Financeiro",
+              "output": 2
+            },
+            {
+              "value2": "Juridico",
+              "output": 3
+            }
+          ]
+        },
+        "fallbackOutput": 4
+      },
+      "id": "3",
+      "name": "Catraca dos Perfis (Switch)",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "4",
+      "name": "Executa Fluxo do IAN GILLAN",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        1000,
+        100
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "5",
+      "name": "Executa Fluxo do ARNALDO (Acesso Total)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        1000,
+        250
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "6",
+      "name": "Executa MÁRCIA (Financeiro)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        1000,
+        400
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "7",
+      "name": "Executa JÚLIA SAKAMOTO",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        1000,
+        550
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "8",
+      "name": "CLIENTE: Fluxo MARIA CECÍLIA",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        1000,
+        700
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook UaZAPI Master": {
+      "main": [
+        [
+          {
+            "node": "Busca Número no Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Busca Número no Supabase": {
+      "main": [
+        [
+          {
+            "node": "Catraca dos Perfis (Switch)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Catraca dos Perfis (Switch)": {
+      "main": [
+        [
+          {
+            "node": "Executa Fluxo do IAN GILLAN",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Executa Fluxo do ARNALDO (Acesso Total)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Executa MÁRCIA (Financeiro)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Executa JÚLIA SAKAMOTO",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "CLIENTE: Fluxo MARIA CECÍLIA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "1.0"
+}

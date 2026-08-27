@@ -1,0 +1,131 @@
+{
+  "name": "Fase 6: Recepcionista Maria Cecília (WhatsApp -> Supabase)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "webhook-evolution-api",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "1",
+      "name": "WhatsApp Webhook (Escuta as Mensagens)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "model": "gemini-1.5-flash",
+        "prompt": "={\n\"Mensagem do Cliente\": \"{{ $json.body.message }}\",\n\nInstrução Suprema: Leia o documento maria_cecilia_atendimento.md e atue como Maria Cecília. Sua missão agora é extrair e cuspir EXATAMENTE um objeto JSON formatado para mandar ao Supabase.\n}"
+      },
+      "id": "2",
+      "name": "Cérebro Gemini (Maria Cecília)",
+      "type": "n8n-nodes-base.googleGemini",
+      "typeVersion": 1,
+      "position": [
+        400,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://tmpwmtpdxcvulglkahcg.supabase.co/rest/v1/ordens_servico",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRtcHdtdHBkeGN2dWxnbGthaGNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwNTg0MDMsImV4cCI6MjA4OTYzNDQwM30.GRcj8PoXCMcWPEN5maZYD3kxndqpWfcegryLYANgggE"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRtcHdtdHBkeGN2dWxnbGthaGNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwNTg0MDMsImV4cCI6MjA4OTYzNDQwM30.GRcj8PoXCMcWPEN5maZYD3kxndqpWfcegryLYANgggE"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"servico_tipo\": \"{{ $json.text }}\",\n  \"status_ia\": \"Aberto\"\n}"
+      },
+      "id": "3",
+      "name": "Dispara OS pro Dashboard Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://free.uazapi.com/message/sendText/COLOQUE_AQUI_O_NOME_DA_SUA_INSTANCIA",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "4f7e433a-53ba-4b33-9d6e-8e229ba68dc4"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"number\": \"{{ $('WhatsApp Webhook (Escuta as Mensagens)').item.json.body.data.key.remoteJid }}\",\n  \"options\": {\n    \"delay\": 1200,\n    \"presence\": \"composing\"\n  },\n  \"textMessage\": {\n    \"text\": \"{{ $json.text }}\"\n  }\n}"
+      },
+      "id": "4",
+      "name": "Nuvem UaZapi (Responde no WhatsApp)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1000,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "WhatsApp Webhook (Escuta as Mensagens)": {
+      "main": [
+        [
+          {
+            "node": "Cérebro Gemini (Maria Cecília)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cérebro Gemini (Maria Cecília)": {
+      "main": [
+        [
+          {
+            "node": "Dispara OS pro Dashboard Supabase",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Nuvem UaZapi (Responde no WhatsApp)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "1.0"
+}

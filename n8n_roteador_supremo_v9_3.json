@@ -1,0 +1,362 @@
+{
+  "name": "Roteador Supremo V9.3 (Buffer Memory Architecture)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "webhook-whatsapp-master",
+        "options": {}
+      },
+      "name": "Webhook WhatsApp",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [ 0, 0 ]
+    },
+    {
+      "parameters": {
+        "url": "https://tmpwmtpdxcvulglkahcg.supabase.co/rest/v1/colaboradores?telefone_whatsapp=eq.{{ $('Webhook WhatsApp').item.json.body.data.key.remoteJid.replace('@s.whatsapp.net', '') }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "SEU_TOKEN_AQUI_SEM_COLCHETES" },
+            { "name": "Authorization", "value": "Bearer SEU_TOKEN_AQUI_SEM_COLCHETES" }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Busca Colaborador (Supabase)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [ 250, 0 ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst zapNode = $('Webhook WhatsApp').first();\nconst zapJson = zapNode?.json || {};\n\nconst dataRoot = zapJson.body?.data || zapJson.data || zapJson;\nconst msgRoot = dataRoot?.message || {};\nconst keyRoot = dataRoot?.key || {};\n\nconst rawNumber = keyRoot?.remoteJid || zapJson.body?.remoteJid || zapJson.body?.data?.remoteJid || zapNode?.json?.query?.remoteJid || \"\";\nconst rawText = msgRoot?.conversation || msgRoot?.extendedTextMessage?.text || zapJson.body?.text || zapJson.body?.data?.text || \"Apenas Mídia ou Áudio\";\n\nfor (const item of items) {\n  const cargo = item.json.cargo || \"Desconhecido\";\n  let agent = \"Maria Cecília\";\n  \n  if ([\"Técnico\", \"Engenheiro\", \"Supervisor\"].includes(cargo)) agent = \"Ian Gillan\";\n  if (cargo === \"Financeiro\") agent = \"Márcia Ribeiro\";\n  if ([\"Administrador\", \"Diretor\"].includes(cargo)) agent = \"Arquiteto Central\";\n\n  item.json.origem_rota = \"whatsapp\";\n  item.json.destino_agente = agent;\n  item.json.texto_usuario = rawText;\n  item.json.sessionId = rawNumber.replace(\"@s.whatsapp.net\", \"\") || \"telefone_nao_encontrado\";\n  item.json.wpp_jid = rawNumber;\n}\nreturn items;"
+      },
+      "name": "Normalizador Zap",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [ 500, 0 ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "webhook-erp-web",
+        "responseMode": "responseNode",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              { "name": "Access-Control-Allow-Origin", "value": "*" },
+              { "name": "Access-Control-Allow-Methods", "value": "POST, GET, OPTIONS" },
+              { "name": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization" }
+            ]
+          }
+        }
+      },
+      "name": "Webhook ERP Web",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [ 0, 300 ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nfor (const item of items) {\n  const body = item.json.body;\n  item.json.origem_rota = \"erp\";\n  item.json.destino_agente = body.agentTarget || \"Maria Cecília\";\n  item.json.texto_usuario = body.payload?.text || \"\";\n  item.json.sessionId = body.correlationId || \"erp-session\";\n  item.json.userRole = body.userRole;\n}\nreturn items;"
+      },
+      "name": "Normalizador ERP",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [ 250, 300 ]
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.destino_agente }}",
+        "rules": {
+          "rules": [
+            { "value2": "Maria Cecília", "output": 0 },
+            { "value2": "Ian Gillan", "output": 1 },
+            { "value2": "Márcia Ribeiro", "output": 2 },
+            { "value2": "Arquiteto Central", "output": 3 },
+            { "value2": "Arquiteto", "output": 3 }
+          ]
+        },
+        "fallbackOutput": 0
+      },
+      "name": "Switch dos Agentes",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [ 750, 150 ]
+    },
+    
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.texto_usuario }}",
+        "options": {
+          "systemMessage": "Você é a Maria Cecília. Mantenha as respostas concisas e educadas."
+        }
+      },
+      "name": "IA Agent Maria",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.6,
+      "position": [ 1050, -150 ]
+    },
+    {
+      "parameters": {},
+      "name": "Gemini Model 1",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [ 1050, 50 ]
+    },
+    {
+      "parameters": {
+        "sessionId": "={{ $json.sessionId }}"
+      },
+      "name": "Window Buffer Memory 1",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.2,
+      "position": [ 1200, 50 ]
+    },
+
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.texto_usuario }}",
+        "options": {
+          "systemMessage": "Você é o Ian Gillan. Responda num tom direto de obras."
+        }
+      },
+      "name": "IA Agent Ian",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.6,
+      "position": [ 1050, 200 ]
+    },
+    {
+      "parameters": {},
+      "name": "Gemini Model 2",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [ 1050, 400 ]
+    },
+    {
+      "parameters": {
+        "sessionId": "={{ $json.sessionId }}"
+      },
+      "name": "Window Buffer Memory 2",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.2,
+      "position": [ 1200, 400 ]
+    },
+
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.texto_usuario }}",
+        "options": {
+          "systemMessage": "Você é a Márcia Ribeiro. Foque em finanças e lucro."
+        }
+      },
+      "name": "IA Agent Marcia",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.6,
+      "position": [ 1050, 550 ]
+    },
+    {
+      "parameters": {},
+      "name": "Gemini Model 3",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [ 1050, 750 ]
+    },
+    {
+      "parameters": {
+        "sessionId": "={{ $json.sessionId }}"
+      },
+      "name": "Window Buffer Memory 3",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.2,
+      "position": [ 1200, 750 ]
+    },
+
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.texto_usuario }}",
+        "options": {
+          "systemMessage": "Você é o Arquiteto IA. Otimize processos globais."
+        }
+      },
+      "name": "IA Agent Arquiteto",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.6,
+      "position": [ 1050, 900 ]
+    },
+    {
+      "parameters": {},
+      "name": "Gemini Model 4",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [ 1050, 1100 ]
+    },
+    {
+      "parameters": {
+        "sessionId": "={{ $json.sessionId }}"
+      },
+      "name": "Window Buffer Memory 4",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.2,
+      "position": [ 1200, 1100 ]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "const entrada = $input.first().json;\nlet destino = 'erp';\nlet numero_zap = '';\n\ntry {\n  const zap = $('Normalizador Zap').first();\n  if (zap) {\n    destino = 'whatsapp';\n    numero_zap = zap.json.wpp_jid;\n  }\n} catch (e) {}\n\nreturn [{ json: { origem_rota: destino, wpp_jid: numero_zap, output: entrada.output || entrada.text } }];"
+      },
+      "name": "Identificador Seguro",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [ 1330, 350 ]
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.origem_rota }}",
+        "rules": {
+          "rules": [
+            { "value2": "whatsapp", "output": 0 },
+            { "value2": "erp", "output": 1 }
+          ]
+        }
+      },
+      "name": "Distribuidor de Resposta",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [ 1550, 350 ]
+    },
+    {
+      "parameters": {
+        "responseMode": "lastNode",
+        "respondWith": "json",
+        "responseBody": "={{ { dados: $json.output || $json.text, status: 'success' } }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              { "name": "Access-Control-Allow-Origin", "value": "*" },
+              { "name": "Access-Control-Allow-Methods", "value": "POST, GET, OPTIONS" },
+              { "name": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization" }
+            ]
+          }
+        }
+      },
+      "name": "Respond to Webhook (Tela Web)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [ 1800, 500 ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://arnaldotrentin.uazapi.com/send/text",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"number\": \"{{ $json.wpp_jid }}\",\n  \"text\": \"{{ $json.output || $json.text }}\"\n}",
+        "options": {}
+      },
+      "name": "Enviar ZAP Pela UaZAPI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [ 1800, 200 ]
+    }
+  ],
+  "connections": {
+    "Webhook WhatsApp": {
+      "main": [
+        [ { "node": "Busca Colaborador (Supabase)", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Busca Colaborador (Supabase)": {
+      "main": [
+        [ { "node": "Normalizador Zap", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Normalizador Zap": {
+      "main": [
+        [ { "node": "Switch dos Agentes", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Webhook ERP Web": {
+      "main": [
+        [ { "node": "Normalizador ERP", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Normalizador ERP": {
+      "main": [
+        [ { "node": "Switch dos Agentes", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Switch dos Agentes": {
+      "main": [
+        [ { "node": "IA Agent Maria", "type": "main", "index": 0 } ],
+        [ { "node": "IA Agent Ian", "type": "main", "index": 0 } ],
+        [ { "node": "IA Agent Marcia", "type": "main", "index": 0 } ],
+        [ { "node": "IA Agent Arquiteto", "type": "main", "index": 0 } ]
+      ]
+    },
+    
+    "Gemini Model 1": {
+      "ai_languageModel": [ [ { "node": "IA Agent Maria", "type": "ai_languageModel", "index": 0 } ] ]
+    },
+    "Window Buffer Memory 1": {
+      "ai_memory": [ [ { "node": "IA Agent Maria", "type": "ai_memory", "index": 0 } ] ]
+    },
+
+    "Gemini Model 2": {
+      "ai_languageModel": [ [ { "node": "IA Agent Ian", "type": "ai_languageModel", "index": 0 } ] ]
+    },
+    "Window Buffer Memory 2": {
+      "ai_memory": [ [ { "node": "IA Agent Ian", "type": "ai_memory", "index": 0 } ] ]
+    },
+
+    "Gemini Model 3": {
+      "ai_languageModel": [ [ { "node": "IA Agent Marcia", "type": "ai_languageModel", "index": 0 } ] ]
+    },
+    "Window Buffer Memory 3": {
+      "ai_memory": [ [ { "node": "IA Agent Marcia", "type": "ai_memory", "index": 0 } ] ]
+    },
+
+    "Gemini Model 4": {
+      "ai_languageModel": [ [ { "node": "IA Agent Arquiteto", "type": "ai_languageModel", "index": 0 } ] ]
+    },
+    "Window Buffer Memory 4": {
+      "ai_memory": [ [ { "node": "IA Agent Arquiteto", "type": "ai_memory", "index": 0 } ] ]
+    },
+
+    "IA Agent Maria": {
+      "main": [ [ { "node": "Identificador Seguro", "type": "main", "index": 0 } ] ]
+    },
+    "IA Agent Ian": {
+      "main": [ [ { "node": "Identificador Seguro", "type": "main", "index": 0 } ] ]
+    },
+    "IA Agent Marcia": {
+      "main": [ [ { "node": "Identificador Seguro", "type": "main", "index": 0 } ] ]
+    },
+    "IA Agent Arquiteto": {
+      "main": [ [ { "node": "Identificador Seguro", "type": "main", "index": 0 } ] ]
+    },
+
+    "Identificador Seguro": {
+      "main": [
+        [ { "node": "Distribuidor de Resposta", "type": "main", "index": 0 } ]
+      ]
+    },
+
+    "Distribuidor de Resposta": {
+      "main": [
+        [ { "node": "Enviar ZAP Pela UaZAPI", "type": "main", "index": 0 } ],
+        [ { "node": "Respond to Webhook (Tela Web)", "type": "main", "index": 0 } ]
+      ]
+    }
+  },
+  "settings": {},
+  "versionId": "9.3.0"
+}

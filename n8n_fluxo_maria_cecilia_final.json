@@ -1,0 +1,161 @@
+{
+  "name": "Maria Cecília (Workflow Oficial)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "webhook-whatsapp-recepcao",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "1",
+      "name": "Webhook WhatsApp",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        100,
+        300
+      ],
+      "webhookId": "bb4fe143-67c4-42b7-a37a-f99df87ffccd"
+    },
+    {
+      "parameters": {
+        "model": "models/gemini-1.5-flash",
+        "options": {}
+      },
+      "id": "2",
+      "name": "Google Gemini Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        400,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={\n\"Mensagem recebida\": \"{{ $json.body.data.message.conversation || $json.body.data.message.extendedTextMessage.text || 'Arquivo/Invisivel' }}\",\n\nLeia a mensagem recebida e atue como Maria Cecília de acordo com as diretrizes do Ecossistema Arnaldo Trentin.\nBasta responder naturalmente ao cliente.\n}"
+      },
+      "id": "3",
+      "name": "Inteligência Maria Cecilia",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [
+        500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://arnaldotrentin.uazapi.com/send/text",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "token",
+              "value": "e7ca3dea-7317-4502-894a-790655f77bb1"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ \"number\": $('Webhook WhatsApp').first().json.body.data.key.remoteJid.replace('@s.whatsapp.net', ''), \"text\": $json.text || $json.output }) }}"
+      },
+      "id": "4",
+      "name": "Enviar ZAP de Volta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        900,
+        450
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://tmpwmtpdxcvulglkahcg.supabase.co/rest/v1/ordens_servico",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRtcHdtdHBkeGN2dWxnbGthaGNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwNTg0MDMsImV4cCI6MjA4OTYzNDQwM30.GRcj8PoXCMcWPEN5maZYD3kxndqpWfcegryLYANgggE"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRtcHdtdHBkeGN2dWxnbGthaGNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwNTg0MDMsImV4cCI6MjA4OTYzNDQwM30.GRcj8PoXCMcWPEN5maZYD3kxndqpWfcegryLYANgggE"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"servico_tipo\": \"Registro de Interação (Maria Cecilia)\",\n  \"status_ia\": \"Aberto\"\n}"
+      },
+      "id": "5",
+      "name": "Salvar no Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        900,
+        150
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Inteligência Maria Cecilia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_model": [
+        [
+          {
+            "node": "Inteligência Maria Cecilia",
+            "type": "ai_model",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Inteligência Maria Cecilia": {
+      "main": [
+        [
+          {
+            "node": "Salvar no Supabase",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Enviar ZAP de Volta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "1.2"
+}

@@ -1,0 +1,37 @@
+{
+  "name": "N8N Moderno: Marcia Financeiro (WhatsApp -> Caixa)",
+  "nodes": [
+    {
+      "parameters": {"httpMethod": "POST", "path": "webhook-marcia", "responseMode": "lastNode"},
+      "id": "1", "name": "WhatsApp (Áudio ou Texto do Arnaldo)", "type": "n8n-nodes-base.webhook", "typeVersion": 1, "position": [100, 300]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=\"Áudio/Comando do CEO Arnaldo\": \"{{ $json.body.message }}\"\n\nInstrução Suprema: Você é a Diretora Financeira Márcia Ribeiro. Analise o comando. O output DEVE ser puramente código JSON para inserirmos no Livro Caixa do SQL. \"tipo_entrada_ou_saida\", \"descricao_resumida\", \"valor_numerico\" (só o float), \"categoria_financeira\"."
+      },
+      "id": "2", "name": "Message a model (Marcia)", "type": "@n8n/n8n-nodes-langchain.chainLlm", "typeVersion": 1.4, "position": [400, 300]
+    },
+    {
+      "parameters": {"model": "gemini-2.5-flash"},
+      "id": "3", "name": "Google Gemini Chat Model", "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini", "typeVersion": 1, "position": [400, 500]
+    },
+    {
+      "parameters": {
+        "url": "https://[SUA_URL].supabase.co/rest/v1/fluxo_caixa", "method": "POST", "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "apikey", "value": "[COLE_AQUI]" }, { "name": "Authorization", "value": "Bearer [COLE_AQUI]" }, { "name": "Content-Type", "value": "application/json" }] },
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={\n  \"tipo_movimentacao\": \"{{ $json.text.tipo_entrada_ou_saida }}\",\n  \"descricao\": \"{{ $json.text.descricao_resumida }}\",\n  \"valor\": {{ $json.text.valor_numerico }},\n  \"categoria\": \"{{ $json.text.categoria_financeira }}\"\n}"
+      },
+      "id": "4", "name": "Lança no Livro Caixa (Supabase)", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4, "position": [800, 300]
+    }
+  ],
+  "connections": {
+    "WhatsApp (Áudio ou Texto do Arnaldo)": { "main": [[{"node": "Message a model (Marcia)","type": "main","index": 0}]] },
+    "Message a model (Marcia)": { "main": [[{"node": "Lança no Livro Caixa (Supabase)","type": "main","index": 0}]] },
+    "Google Gemini Chat Model": { "ai_languageModel": [[{"node": "Message a model (Marcia)","type": "ai_languageModel","index": 0}]] }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "1.0"
+}

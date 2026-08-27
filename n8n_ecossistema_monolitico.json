@@ -1,0 +1,192 @@
+{
+  "name": "ECOSSISTEMA MONOLÍTICO (A Távola Redonda)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "webhook-whatsapp-master",
+        "options": {}
+      },
+      "id": "1",
+      "name": "Webhook UaZAPI Master",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [ 0, 450 ]
+    },
+    {
+      "parameters": {
+        "url": "https://tmpwmtpdxcvulglkahcg.supabase.co/rest/v1/colaboradores?telefone_whatsapp=eq.{{ $('Webhook UaZAPI Master').item.json.body.data.key.remoteJid.replace('@s.whatsapp.net', '') }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRtcHdtdHBkeGN2dWxnbGthaGNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwNTg0MDMsImV4cCI6MjA4OTYzNDQwM30.GRcj8PoXCMcWPEN5maZYD3kxndqpWfcegryLYANgggE" },
+            { "name": "Authorization", "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRtcHdtdHBkeGN2dWxnbGthaGNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwNTg0MDMsImV4cCI6MjA4OTYzNDQwM30.GRcj8PoXCMcWPEN5maZYD3kxndqpWfcegryLYANgggE" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "2",
+      "name": "Catraca do Supabase (Verifica Telefones)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [ 300, 450 ]
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.body.length > 0 ? $json.body[0].cargo : 'Desconhecido' }}",
+        "rules": {
+          "rules": [
+            { "value2": "Técnico", "output": 0 },
+            { "value2": "Administrador", "output": 1 },
+            { "value2": "Diretor", "output": 1 },
+            { "value2": "Financeiro", "output": 2 },
+            { "value2": "Juridico", "output": 3 }
+          ]
+        },
+        "fallbackOutput": 4
+      },
+      "id": "3",
+      "name": "O Grande Switch (Roteador de Vias)",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [ 600, 450 ]
+    },
+    {
+      "parameters": {
+        "model": "models/gemini-1.5-flash",
+        "options": {}
+      },
+      "id": "99",
+      "name": "Cérebro Central Gemini",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [ 850, 800 ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={\n\"Mensagem Recebida do Técnico\": \"{{ $('Webhook UaZAPI Master').first().json.body.data.message.conversation || $('Webhook UaZAPI Master').first().json.body.data.message.extendedTextMessage.text || 'Arquivo' }}\",\n\nVocê é Ian Gillan, 45 anos, supervisor técnico de HVAC e Elétrica.\nInteração: Fale apenas com os técnicos sobre os serviços. Registre, audite fotos de padrão técnico e instrua o campo.\nResponda naturalmente ao técnico."
+      },
+      "id": "4",
+      "name": "Mente IAN GILLAN (Obras)",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [ 900, 0 ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={\n\"Mensagem Recebida do Diretor\": \"{{ $('Webhook UaZAPI Master').first().json.body.data.message.conversation || $('Webhook UaZAPI Master').first().json.body.data.message.extendedTextMessage.text || 'Arquivo' }}\",\n\nVocê é o Assistente Executivo VIP de Arnaldo Trentin (O Diretor). Responda com obediência cega e passe panoramas sumários da empresa."
+      },
+      "id": "5",
+      "name": "Mente ARNALDO (Acesso VIP)",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [ 900, 200 ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={\n\"Mensagem Recebida do Time\": \"{{ $('Webhook UaZAPI Master').first().json.body.data.message.conversation || $('Webhook UaZAPI Master').first().json.body.data.message.extendedTextMessage.text || 'Arquivo' }}\",\n\nVocê é Márcia Ribeiro, 62 anos, financeira experiente.\nFoque nos orçamentos, aprovações de faturamentos e fluxo de caixa da empresa Arnaldo Trentin.\nResponda com naturalidade e austeridade financeira."
+      },
+      "id": "6",
+      "name": "Mente MÁRCIA (Financeiro)",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [ 900, 400 ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={\n\"Mensagem Recebida\": \"{{ $('Webhook UaZAPI Master').first().json.body.data.message.conversation || $('Webhook UaZAPI Master').first().json.body.data.message.extendedTextMessage.text || 'Arquivo' }}\",\n\nVocê é Júlia Sakamoto, Gerente Jurídica, compliance e emissora de PMOC.\nSeja extremamente incisiva, hiper-formal, focada em segurança legal e contratual.\nResponda avaliando o lado jurídico das demandas enviadas."
+      },
+      "id": "7",
+      "name": "Mente JÚLIA SAKAMOTO",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [ 900, 600 ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={\n\"Mensagem Recebida do Cliente\": \"{{ $('Webhook UaZAPI Master').first().json.body.data.message.conversation || $('Webhook UaZAPI Master').first().json.body.data.message.extendedTextMessage.text || 'Arquivo' }}\",\n\nVocê é Maria Cecília, 36 anos, secretária sênior da Arnaldo Trentin Serviços.\nSua personalidade é acolhedora e profissional. NUNCA dê preços diretos.\nResponda naturalmente focando em acolhimento e agendamento básico."
+      },
+      "id": "8",
+      "name": "Mente MARIA CECILIA (Clientes)",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [ 1200, 450 ]
+    },
+    {
+      "parameters": {
+        "url": "https://arnaldotrentin.uazapi.com/send/text",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "token", "value": "e7ca3dea-7317-4502-894a-790655f77bb1" },
+            { "name": "Accept", "value": "application/json" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ \"number\": $('Webhook UaZAPI Master').first().json.body.data.key.remoteJid.replace('@s.whatsapp.net', ''), \"text\": $json.text || $json.output }) }}"
+      },
+      "id": "10",
+      "name": "UaZAPI: Enviar para o ZAP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [ 1500, 300 ]
+    }
+  ],
+  "connections": {
+    "Webhook UaZAPI Master": {
+      "main": [
+        [ { "node": "Catraca do Supabase (Verifica Telefones)", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Catraca do Supabase (Verifica Telefones)": {
+      "main": [
+        [ { "node": "O Grande Switch (Roteador de Vias)", "type": "main", "index": 0 } ]
+      ]
+    },
+    "O Grande Switch (Roteador de Vias)": {
+      "main": [
+        [ { "node": "Mente IAN GILLAN (Obras)", "type": "main", "index": 0 } ],
+        [ { "node": "Mente ARNALDO (Acesso VIP)", "type": "main", "index": 0 } ],
+        [ { "node": "Mente MÁRCIA (Financeiro)", "type": "main", "index": 0 } ],
+        [ { "node": "Mente JÚLIA SAKAMOTO", "type": "main", "index": 0 } ],
+        [ { "node": "Mente MARIA CECILIA (Clientes)", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Cérebro Central Gemini": {
+      "ai_model": [
+        [ { "node": "Mente IAN GILLAN (Obras)", "type": "ai_model", "index": 0 } ],
+        [ { "node": "Mente ARNALDO (Acesso VIP)", "type": "ai_model", "index": 0 } ],
+        [ { "node": "Mente MÁRCIA (Financeiro)", "type": "ai_model", "index": 0 } ],
+        [ { "node": "Mente JÚLIA SAKAMOTO", "type": "ai_model", "index": 0 } ],
+        [ { "node": "Mente MARIA CECILIA (Clientes)", "type": "ai_model", "index": 0 } ]
+      ]
+    },
+    "Mente IAN GILLAN (Obras)": {
+      "main": [ [ { "node": "UaZAPI: Enviar para o ZAP", "type": "main", "index": 0 } ] ]
+    },
+    "Mente ARNALDO (Acesso VIP)": {
+      "main": [ [ { "node": "UaZAPI: Enviar para o ZAP", "type": "main", "index": 0 } ] ]
+    },
+    "Mente MÁRCIA (Financeiro)": {
+      "main": [ [ { "node": "UaZAPI: Enviar para o ZAP", "type": "main", "index": 0 } ] ]
+    },
+    "Mente JÚLIA SAKAMOTO": {
+      "main": [ [ { "node": "UaZAPI: Enviar para o ZAP", "type": "main", "index": 0 } ] ]
+    },
+    "Mente MARIA CECILIA (Clientes)": {
+      "main": [ [ { "node": "UaZAPI: Enviar para o ZAP", "type": "main", "index": 0 } ] ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "2.0"
+}

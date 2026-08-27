@@ -1,0 +1,21 @@
+{
+  "name": "Arnaldo Trentin Serviços",
+  "short_name": "AT Serviços",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#3b82f6",
+  "description": "Aplicativo de Gestão e OS para Arnaldo Trentin Serviços",
+  "icons": [
+    {
+      "src": "img/logotipo.jpeg",
+      "sizes": "192x192",
+      "type": "image/jpeg"
+    },
+    {
+      "src": "img/logotipo.jpeg",
+      "sizes": "512x512",
+      "type": "image/jpeg"
+    }
+  ]
+}

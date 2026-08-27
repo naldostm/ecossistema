@@ -1,0 +1,83 @@
+{
+  "name": "N8N Moderno: Supervisor Ian Gillan (Visão -> Supabase)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "webhook-evolution-api-ian",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "1",
+      "name": "WhatsApp (Aguardando Mensagem)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [ 100, 300 ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=\"Foto/Relato Recebido do Whatsapp\": \"{{ $json.body.message }}\"\n\nInstrução Suprema: Você é Ian Gillan. Esta mensagem e foto da obra vieram do telefone do técnico. Descreva anomalias visuais óbvias (fita silvertape solta, falta de cano, sujeira). O output DEVE ser apenas um código JSON com a propriedade \"mensagem\" e todo seu texto estruturado dentro dela.",
+        "options": {}
+      },
+      "id": "2",
+      "name": "Message a model (Ian)",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [ 400, 300 ]
+    },
+    {
+      "parameters": {
+        "model": "gemini-2.5-pro",
+        "options": {}
+      },
+      "id": "3",
+      "name": "Google Gemini Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [ 400, 500 ]
+    },
+    {
+      "parameters": {
+        "url": "https://[SUA_URL].supabase.co/rest/v1/notificacoes_internas",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "[COLE_AQUI]" },
+            { "name": "Authorization", "value": "Bearer [COLE_AQUI]" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"tipo\": \"Auditoria de Instalação (Ian)\",\n  \"mensagem\": \"{{ $json.text }}\",\n  \"lida\": false\n}"
+      },
+      "id": "4",
+      "name": "Salvar Laudo Visual no Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [ 800, 300 ]
+    }
+  ],
+  "connections": {
+    "WhatsApp (Aguardando Mensagem)": {
+      "main": [
+        [ { "node": "Message a model (Ian)", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Message a model (Ian)": {
+      "main": [
+        [ { "node": "Salvar Laudo Visual no Supabase", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [ { "node": "Message a model (Ian)", "type": "ai_languageModel", "index": 0 } ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "1.0"
+}

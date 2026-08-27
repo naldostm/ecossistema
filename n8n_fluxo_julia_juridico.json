@@ -1,0 +1,37 @@
+{
+  "name": "N8N Moderno: Júlia Sakamoto Jurídico (PMOC -> Supabase)",
+  "nodes": [
+    {
+      "parameters": {"httpMethod": "POST", "path": "webhook-julia", "responseMode": "lastNode"},
+      "id": "1", "name": "WhatsApp (Reunião Legal)", "type": "n8n-nodes-base.webhook", "typeVersion": 1, "position": [100, 300]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=\"Pedido Legal\": \"{{ $json.body.message }}\"\n\nInstrução Suprema: Você é Júlia Sakamoto. Foque na emissão do PMOC da Lei 13.589/2018. O output DEVE ser 100% código JSON. Crie: \"tipo\" (PMOC_Mensal/Avulso), \"valor_total_protegido\" (Float numérico), \"meses\" (Vigência inteira), \"clausulas_especiais\"."
+      },
+      "id": "2", "name": "Message a model (Julia)", "type": "@n8n/n8n-nodes-langchain.chainLlm", "typeVersion": 1.4, "position": [400, 300]
+    },
+    {
+      "parameters": {"model": "gemini-2.5-pro"},
+      "id": "3", "name": "Google Gemini Chat Model", "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini", "typeVersion": 1, "position": [400, 500]
+    },
+    {
+      "parameters": {
+        "url": "https://[SUA_URL].supabase.co/rest/v1/contratos_pmoc", "method": "POST", "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "apikey", "value": "[COLE_AQUI]" }, { "name": "Authorization", "value": "Bearer [COLE_AQUI]" }, { "name": "Content-Type", "value": "application/json" }] },
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={\n  \"tipo_contrato\": \"{{ $json.text.tipo }}\",\n  \"valor_contrato\": {{ $json.text.valor_total_protegido }},\n  \"vigencia_meses\": {{ $json.text.meses }},\n  \"clausulas_especiais\": \"{{ $json.text.clausulas_especiais }}\"\n}"
+      },
+      "id": "4", "name": "Minuta Contratual (Supabase)", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4, "position": [800, 300]
+    }
+  ],
+  "connections": {
+    "WhatsApp (Reunião Legal)": { "main": [[{"node": "Message a model (Julia)","type": "main","index": 0}]] },
+    "Message a model (Julia)": { "main": [[{"node": "Minuta Contratual (Supabase)","type": "main","index": 0}]] },
+    "Google Gemini Chat Model": { "ai_languageModel": [[{"node": "Message a model (Julia)","type": "ai_languageModel","index": 0}]] }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "1.0"
+}

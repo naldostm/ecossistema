@@ -1,0 +1,359 @@
+{
+  "name": "ROTEADOR SUPREMO v8.0",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "webhook-whatsapp-master",
+        "options": {}
+      },
+      "id": "node-webhook",
+      "name": "Webhook UaZAPI Master",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [-400, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-fromme",
+              "leftValue": "={{ $json.body.message.fromMe }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "false"
+              }
+            },
+            {
+              "id": "cond-grupo",
+              "leftValue": "={{ $json.body.message.isGroup }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "false"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "node-filtro",
+      "name": "Filtro (Ignora Grupos e fromMe)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [-180, 400]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "assign-number",
+              "name": "wa_number",
+              "value": "={{ $json.body.message.chatid.replace('@s.whatsapp.net', '').replace('@g.us', '') }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-text",
+              "name": "wa_message",
+              "value": "={{ $json.body.message.content || $json.body.message.text || 'Arquivo' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "node-set-numero",
+      "name": "Capturar Número e Mensagem",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [60, 400]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://tmpwmtpdxcvulglkahcg.supabase.co/rest/v1/colaboradores?telefone_whatsapp=eq.' + $json.wa_number }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRtcHdtdHBkeGN2dWxnbGthaGNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwNTg0MDMsImV4cCI6MjA4OTYzNDQwM30.GRcj8PoXCMcWPEN5maZYD3kxndqpWfcegryLYANgggE"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRtcHdtdHBkeGN2dWxnbGthaGNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwNTg0MDMsImV4cCI6MjA4OTYzNDQwM30.GRcj8PoXCMcWPEN5maZYD3kxndqpWfcegryLYANgggE"
+            }
+          ]
+        },
+        "options": {
+          "allowUnauthorizedCerts": false,
+          "ignoreResponseCode": true
+        }
+      },
+      "id": "node-supabase",
+      "name": "Supabase: Buscar Colaborador",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [300, 400],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-externo",
+              "leftValue": "={{ Array.isArray($json) ? $json.length : 0 }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "node-if",
+      "name": "IF: É um Cliente Externo?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [560, 400]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Mensagem do Colaborador: {{ $('Capturar Número e Mensagem').first().json.wa_message }}\n\nClassifique o assunto em APENAS UMA destas palavras (MAIÚSCULO, sem pontos):\nOBRAS (laudos, fotos de campo, material técnico, manutenção)\nFINANCEIRO (dinheiro, caixa, salários, comissão, orçamentos, marketing)\nLOGISTICA (agenda, rotas, atrasos, horários, localização, Chronos)\nJURIDICO (contratos, rescisões, leis, regras, segurança do trabalho)\nARNALDO (falar com chefia ou assunto indeterminado)\n\nResponda SOMENTE a palavra."
+      },
+      "id": "node-polvo",
+      "name": "O POLVO MESTRE (Classificador de Departamentos)",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [860, 140]
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.text.trim().toUpperCase() }}",
+        "rules": {
+          "rules": [
+            { "value2": "OBRAS", "output": 0 },
+            { "value2": "FINANCEIRO", "output": 1 },
+            { "value2": "JURIDICO", "output": 2 },
+            { "value2": "ARNALDO", "output": 3 },
+            { "value2": "LOGISTICA", "output": 4 }
+          ]
+        },
+        "fallbackOutput": 3
+      },
+      "id": "node-switch",
+      "name": "Distribuidor Interno (Switch Escutador)",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [1120, 140]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Mensagem do Técnico: {{ $('Capturar Número e Mensagem').first().json.wa_message }}\n\n# 👨‍🔧 PERFIL DO AGENTE: Ian Gillan\nCargo: Supervisor Técnico & Quality Controler.\nPersonalidade: 45 anos, veterano de obras pesadas. Direto, sem rodeios, focado em segurança e perfeccionismo técnico.\n\n## 🎯 MISSÃO PRINCIPAL\nGarantir que nenhum serviço saia do \"Padrão Trentin\". Você é o mentor dos técnicos no campo.\n\n## 📋 DIRETRIZES TÉCNICAS\n1. Monitoramento Real-time: Fale apenas com os colaboradores autenticados.\n2. O Triângulo da Validação: Só valide se houver fotos de Antes, Durante e Depois.\n3. Rigor Visual: Rejeite fotos ruins.\n4. Relatório Técnico: Converta gírias de obra em texto formal técnico (As-Built)."
+      },
+      "id": "node-ian",
+      "name": "Mente IAN GILLAN (Obras)",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [1400, -100]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Mensagem Interna: {{ $('Capturar Número e Mensagem').first().json.wa_message }}\n\n# 👩‍💻 PERFIL DO AGENTE: Márcia Ribeiro\nCargo: Strategist Financeiro & Head de Marketing.\nPersonalidade: 62 anos, mente afiada para números, mentora de negócios.\n\n## 🎯 MISSÃO PRINCIPAL\nCuidar do dinheiro do Arnaldo e garantir marketing de alta autoridade.\n\n## 💵 LÓGICA FINANCEIRA\n1. Orçamentação Inteligente: Estoque + Serviços + 15% margem.\n2. Comissões: 10% para o vendedor.\n3. Dashboard: Manter métricas de Caixa e Metas atualizadas."
+      },
+      "id": "node-marcia",
+      "name": "Mente MÁRCIA (Financeiro/MKT)",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [1400, 80]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Mensagem do Colega: {{ $('Capturar Número e Mensagem').first().json.wa_message }}\n\n# ⚖️ PERFIL DO AGENTE: Júlia Sakamoto\nCargo: Gerente Jurídica, Analista de Compliance e PMOC.\nPersonalidade: Hiper-formal, incisiva, obcecada por riscos (liability).\n\n## 🎯 MISSÃO PRINCIPAL\nGarantir segurança jurídica e compliance ANVISA (PMOC).\n\n## 📋 DIRETRIZES\n1. Contratos Blindados: Redigir baseados na OS.\n2. Gestão PMOC: Converter checklists do Ian em Laudos Sanitários padrões.\n3. Alertas de Risco: Bloquear laudos se houver falha de segurança."
+      },
+      "id": "node-julia",
+      "name": "Mente JÚLIA SAKAMOTO (Legal)",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [1400, 260]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Mensagem do Time: {{ $('Capturar Número e Mensagem').first().json.wa_message }}\n\n# 🛠️ PERFIL DO AGENTE: Arquiteto (Assistant Mode)\nVocê é a Intranet Executiva e Braço Direito do Arnaldo.\nOrganize e entregue resumos analíticos na linguagem de um CEO.\n\n## 🎯 RESPONSABILIDADES\n1. Suporte Estratégico: Resuma tendências e problemas do time.\n2. UX/UI Guard: Relembre o time sobre o padrão Dark Mode e ordem alfabética.\n3. Auditoria de Auto-Save: Verifique se os fluxos estão reportando dados."
+      },
+      "id": "node-arnaldo",
+      "name": "Mente ARNALDO (Assuntos VIP)",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [1400, 440]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Mensagem do Cliente externo: {{ $('Capturar Número e Mensagem').first().json.wa_message }}\n\n# 👩‍💼 PERFIL DO AGENTE: Maria Cecília\nCargo: Head of Customer Experience & Vendas.\nPersonalidade: 36 anos, extremamente empática e profissional.\n\n## 🎯 MISSÃO PRINCIPAL\nConverter leads e coletar dados perfeitos.\n\n## 📋 REGRA DE OURO\nNUNCA dê preços. Venda o valor da engenharia. Peça 24h para análise técnica.\nAcolha o cliente com entusiasmo: \"Que alegria receber seu contato!\""
+      },
+      "id": "node-cecilia",
+      "name": "Mente MARIA CECILIA (Recepção)",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [1400, 620]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Consulta de Logística: {{ $('Capturar Número e Mensagem').first().json.wa_message }}\n\n# ⏳ PERFIL DO AGENTE: Chronos\nCargo: Logística, Agenda & Time-Keeper.\nPersonalidade: Preciso, focado em otimização, educado mas robótico no tempo.\n\n## 🎯 MISSÃO PRINCIPAL\nOtimização de rotas e alertas de atraso.\nFale em minutos e quilômetros. Avise se o técnico está a caminho."
+      },
+      "id": "node-chronos",
+      "name": "Mente CHRONOS (Logística)",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [1400, 800]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://arnaldotrentin.uazapi.com/send/text",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "token",
+              "value": "e7ca3dea-7317-4502-894a-790655f77bb1"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "keypair",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "number",
+              "value": "={{ $('Capturar Número e Mensagem').first().json.wa_number }}"
+            },
+            {
+              "name": "text",
+              "value": "={{ $json.text }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-uazapi",
+      "name": "Central Única (Enviar De Volta Pela UaZAPI)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1800, 280]
+    },
+    {
+      "parameters": {
+        "model": "models/gemini-1.5-flash",
+        "options": {}
+      },
+      "id": "node-gemini",
+      "name": "Cérebro Central Gemini",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [560, 780]
+    }
+  ],
+  "connections": {
+    "Webhook UaZAPI Master": {
+      "main": [
+        [{ "node": "Filtro (Ignora Grupos e fromMe)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Filtro (Ignora Grupos e fromMe)": {
+      "main": [
+        [{ "node": "Capturar Número e Mensagem", "type": "main", "index": 0 }]
+      ]
+    },
+    "Capturar Número e Mensagem": {
+      "main": [
+        [{ "node": "Supabase: Buscar Colaborador", "type": "main", "index": 0 }]
+      ]
+    },
+    "Supabase: Buscar Colaborador": {
+      "main": [
+        [{ "node": "IF: É um Cliente Externo?", "type": "main", "index": 0 }]
+      ]
+    },
+    "IF: É um Cliente Externo?": {
+      "main": [
+        [{ "node": "Mente MARIA CECILIA (Recepção)", "type": "main", "index": 0 }],
+        [{ "node": "O POLVO MESTRE (Classificador de Departamentos)", "type": "main", "index": 0 }]
+      ]
+    },
+    "O POLVO MESTRE (Classificador de Departamentos)": {
+      "main": [
+        [{ "node": "Distribuidor Interno (Switch Escutador)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Distribuidor Interno (Switch Escutador)": {
+      "main": [
+        [{ "node": "Mente IAN GILLAN (Obras)", "type": "main", "index": 0 }],
+        [{ "node": "Mente MÁRCIA (Financeiro/MKT)", "type": "main", "index": 0 }],
+        [{ "node": "Mente JÚLIA SAKAMOTO (Legal)", "type": "main", "index": 0 }],
+        [{ "node": "Mente ARNALDO (Assuntos VIP)", "type": "main", "index": 0 }],
+        [{ "node": "Mente CHRONOS (Logística)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Mente IAN GILLAN (Obras)": {
+      "main": [[{ "node": "Central Única (Enviar De Volta Pela UaZAPI)", "type": "main", "index": 0 }]]
+    },
+    "Mente MÁRCIA (Financeiro/MKT)": {
+      "main": [[{ "node": "Central Única (Enviar De Volta Pela UaZAPI)", "type": "main", "index": 0 }]]
+    },
+    "Mente JÚLIA SAKAMOTO (Legal)": {
+      "main": [[{ "node": "Central Única (Enviar De Volta Pela UaZAPI)", "type": "main", "index": 0 }]]
+    },
+    "Mente ARNALDO (Assuntos VIP)": {
+      "main": [[{ "node": "Central Única (Enviar De Volta Pela UaZAPI)", "type": "main", "index": 0 }]]
+    },
+    "Mente MARIA CECILIA (Recepção)": {
+      "main": [[{ "node": "Central Única (Enviar De Volta Pela UaZAPI)", "type": "main", "index": 0 }]]
+    },
+    "Mente CHRONOS (Logística)": {
+      "main": [[{ "node": "Central Única (Enviar De Volta Pela UaZAPI)", "type": "main", "index": 0 }]]
+    },
+    "Cérebro Central Gemini": {
+      "ai_model": [
+        [{ "node": "O POLVO MESTRE (Classificador de Departamentos)", "type": "ai_model", "index": 0 }],
+        [{ "node": "Mente IAN GILLAN (Obras)", "type": "ai_model", "index": 0 }],
+        [{ "node": "Mente MÁRCIA (Financeiro/MKT)", "type": "ai_model", "index": 0 }],
+        [{ "node": "Mente JÚLIA SAKAMOTO (Legal)", "type": "ai_model", "index": 0 }],
+        [{ "node": "Mente ARNALDO (Assuntos VIP)", "type": "ai_model", "index": 0 }],
+        [{ "node": "Mente MARIA CECILIA (Recepção)", "type": "ai_model", "index": 0 }],
+        [{ "node": "Mente CHRONOS (Logística)", "type": "ai_model", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "8.0"
+}

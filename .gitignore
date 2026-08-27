@@ -1,0 +1,31 @@
+# === SECRETS (NUNCA VERSIONAR) ===
+.env
+.env.*
+.vercel.env
+supabase/functions/**/.env
+
+# === Build & Dependencies ===
+node_modules/
+dist/
+.vercel/
+
+# === OS Files ===
+desktop.ini
+Thumbs.db
+.DS_Store
+
+# === Virtual Environments & Local Tools ===
+OctoPrintEnv/
+OctoPrintEnv311/
+.agent/*.log
+.agent/*.pid
+v5/
+temp_uazapi/
+package/
+
+# === Debug / Temp ===
+*.txt
+!checklist_final.txt
+*.log
+
+

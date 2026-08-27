@@ -1,0 +1,342 @@
+{
+  "name": "ROTEADOR SUPREMO v7.0",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "webhook-whatsapp-master",
+        "options": {}
+      },
+      "id": "node-webhook",
+      "name": "Webhook UaZAPI Master",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [-400, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-fromme",
+              "leftValue": "={{ $json.body.message.fromMe }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "false"
+              }
+            },
+            {
+              "id": "cond-grupo",
+              "leftValue": "={{ $json.body.message.isGroup }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "false"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "node-filtro",
+      "name": "Filtro (Ignora Grupos e fromMe)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [-180, 400]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "assign-number",
+              "name": "wa_number",
+              "value": "={{ $json.body.message.chatid.replace('@s.whatsapp.net', '').replace('@g.us', '') }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-text",
+              "name": "wa_message",
+              "value": "={{ $json.body.message.content || $json.body.message.text || 'Arquivo' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "node-set-numero",
+      "name": "Capturar Número e Mensagem",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [60, 400]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://tmpwmtpdxcvulglkahcg.supabase.co/rest/v1/colaboradores?telefone_whatsapp=eq.' + $json.wa_number }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRtcHdtdHBkeGN2dWxnbGthaGNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwNTg0MDMsImV4cCI6MjA4OTYzNDQwM30.GRcj8PoXCMcWPEN5maZYD3kxndqpWfcegryLYANgggE"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRtcHdtdHBkeGN2dWxnbGthaGNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwNTg0MDMsImV4cCI6MjA4OTYzNDQwM30.GRcj8PoXCMcWPEN5maZYD3kxndqpWfcegryLYANgggE"
+            }
+          ]
+        },
+        "options": {
+          "allowUnauthorizedCerts": false,
+          "ignoreResponseCode": true
+        }
+      },
+      "id": "node-supabase",
+      "name": "Supabase: Buscar Colaborador",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [300, 400],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-externo",
+              "leftValue": "={{ Array.isArray($json) ? $json.length : 0 }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "node-if",
+      "name": "IF: É um Cliente Externo?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [560, 400]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Mensagem do Colaborador: {{ $('Capturar Número e Mensagem').first().json.wa_message }}\n\nClassifique o assunto em APENAS UMA destas palavras (MAIÚSCULO, sem pontos):\nOBRAS (laudos, fotos de campo, material técnico, manutenção)\nFINANCEIRO (dinheiro, caixa, salários, comissão, orçamentos, marketing)\nJURIDICO (contratos, rescisões, leis, regras, segurança do trabalho)\nARNALDO (falar com chefia ou assunto indeterminado)\n\nResponda SOMENTE a palavra."
+      },
+      "id": "node-polvo",
+      "name": "O POLVO MESTRE (Classificador de Departamentos)",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [860, 160]
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.text.trim().toUpperCase() }}",
+        "rules": {
+          "rules": [
+            { "value2": "OBRAS", "output": 0 },
+            { "value2": "FINANCEIRO", "output": 1 },
+            { "value2": "JURIDICO", "output": 2 },
+            { "value2": "ARNALDO", "output": 3 }
+          ]
+        },
+        "fallbackOutput": 3
+      },
+      "id": "node-switch",
+      "name": "Distribuidor Interno (Switch Escutador)",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [1120, 160]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Mensagem do Técnico: {{ $('Capturar Número e Mensagem').first().json.wa_message }}\n\nVocê é Ian Gillan, 45 anos, supervisor técnico de HVAC e Elétrica da Arnaldo Trentin.\nAvalie tecnicamente a situação com autoridade. Fale como líder de campo."
+      },
+      "id": "node-ian",
+      "name": "Mente IAN GILLAN (Obras)",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [1400, -80]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Mensagem Interna: {{ $('Capturar Número e Mensagem').first().json.wa_message }}\n\nVocê é Márcia Ribeiro, 62 anos, gestora financeira da Arnaldo Trentin.\nFoque em faturamentos, comissões, custos e fluxo de caixa. Demonstre agudeza financeira."
+      },
+      "id": "node-marcia",
+      "name": "Mente MÁRCIA (Financeiro/MKT)",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [1400, 100]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Mensagem do Colega: {{ $('Capturar Número e Mensagem').first().json.wa_message }}\n\nVocê é Júlia Sakamoto, Gerente Jurídica e emissora de Laudos PMOC da Arnaldo Trentin.\nSeja incisiva, hiper-formal e obcecada por compliance. Avalie riscos."
+      },
+      "id": "node-julia",
+      "name": "Mente JÚLIA SAKAMOTO (Legal)",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [1400, 280]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Mensagem do Time: {{ $('Capturar Número e Mensagem').first().json.wa_message }}\n\nVocê é a Intranet Executiva de Apoio ao Diretor Arnaldo Trentin.\nOrganize e entregue resumos curtos e analíticos na linguagem de um CEO."
+      },
+      "id": "node-arnaldo",
+      "name": "Mente ARNALDO (Assuntos VIP)",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [1400, 460]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Mensagem do Cliente externo: {{ $('Capturar Número e Mensagem').first().json.wa_message }}\n\nVocê é Maria Cecília, 36 anos, secretária sênior da Arnaldo Trentin Serviços.\nAcolha e inicie o atendimento externo. Não passe orçamentos. Prometa agendar com a Engenharia em até 24h."
+      },
+      "id": "node-cecilia",
+      "name": "Mente MARIA CECILIA (Recepção)",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [1400, 640]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://arnaldotrentin.uazapi.com/send/text",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "token",
+              "value": "e7ca3dea-7317-4502-894a-790655f77bb1"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "keypair",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "number",
+              "value": "={{ $('Capturar Número e Mensagem').first().json.wa_number }}"
+            },
+            {
+              "name": "text",
+              "value": "={{ $json.text }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-uazapi",
+      "name": "Central Única (Enviar De Volta Pela UaZAPI)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1700, 280]
+    },
+    {
+      "parameters": {
+        "model": "models/gemini-1.5-flash",
+        "options": {}
+      },
+      "id": "node-gemini",
+      "name": "Cérebro Central Gemini",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [560, 700]
+    }
+  ],
+  "connections": {
+    "Webhook UaZAPI Master": {
+      "main": [
+        [{ "node": "Filtro (Ignora Grupos e fromMe)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Filtro (Ignora Grupos e fromMe)": {
+      "main": [
+        [{ "node": "Capturar Número e Mensagem", "type": "main", "index": 0 }]
+      ]
+    },
+    "Capturar Número e Mensagem": {
+      "main": [
+        [{ "node": "Supabase: Buscar Colaborador", "type": "main", "index": 0 }]
+      ]
+    },
+    "Supabase: Buscar Colaborador": {
+      "main": [
+        [{ "node": "IF: É um Cliente Externo?", "type": "main", "index": 0 }]
+      ]
+    },
+    "IF: É um Cliente Externo?": {
+      "main": [
+        [{ "node": "Mente MARIA CECILIA (Recepção)", "type": "main", "index": 0 }],
+        [{ "node": "O POLVO MESTRE (Classificador de Departamentos)", "type": "main", "index": 0 }]
+      ]
+    },
+    "O POLVO MESTRE (Classificador de Departamentos)": {
+      "main": [
+        [{ "node": "Distribuidor Interno (Switch Escutador)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Distribuidor Interno (Switch Escutador)": {
+      "main": [
+        [{ "node": "Mente IAN GILLAN (Obras)", "type": "main", "index": 0 }],
+        [{ "node": "Mente MÁRCIA (Financeiro/MKT)", "type": "main", "index": 0 }],
+        [{ "node": "Mente JÚLIA SAKAMOTO (Legal)", "type": "main", "index": 0 }],
+        [{ "node": "Mente ARNALDO (Assuntos VIP)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Mente IAN GILLAN (Obras)": {
+      "main": [[{ "node": "Central Única (Enviar De Volta Pela UaZAPI)", "type": "main", "index": 0 }]]
+    },
+    "Mente MÁRCIA (Financeiro/MKT)": {
+      "main": [[{ "node": "Central Única (Enviar De Volta Pela UaZAPI)", "type": "main", "index": 0 }]]
+    },
+    "Mente JÚLIA SAKAMOTO (Legal)": {
+      "main": [[{ "node": "Central Única (Enviar De Volta Pela UaZAPI)", "type": "main", "index": 0 }]]
+    },
+    "Mente ARNALDO (Assuntos VIP)": {
+      "main": [[{ "node": "Central Única (Enviar De Volta Pela UaZAPI)", "type": "main", "index": 0 }]]
+    },
+    "Mente MARIA CECILIA (Recepção)": {
+      "main": [[{ "node": "Central Única (Enviar De Volta Pela UaZAPI)", "type": "main", "index": 0 }]]
+    },
+    "Cérebro Central Gemini": {
+      "ai_model": [
+        [{ "node": "O POLVO MESTRE (Classificador de Departamentos)", "type": "ai_model", "index": 0 }],
+        [{ "node": "Mente IAN GILLAN (Obras)", "type": "ai_model", "index": 0 }],
+        [{ "node": "Mente MÁRCIA (Financeiro/MKT)", "type": "ai_model", "index": 0 }],
+        [{ "node": "Mente JÚLIA SAKAMOTO (Legal)", "type": "ai_model", "index": 0 }],
+        [{ "node": "Mente ARNALDO (Assuntos VIP)", "type": "ai_model", "index": 0 }],
+        [{ "node": "Mente MARIA CECILIA (Recepção)", "type": "ai_model", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "7.0"
+}

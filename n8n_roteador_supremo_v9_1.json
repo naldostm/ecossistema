@@ -1,0 +1,351 @@
+{
+  "name": "Roteador Supremo V9.1 (WhatsApp + Web App)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "webhook-whatsapp-master",
+        "options": {}
+      },
+      "name": "Webhook WhatsApp",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [ 0, 0 ]
+    },
+    {
+      "parameters": {
+        "url": "https://tmpwmtpdxcvulglkahcg.supabase.co/rest/v1/colaboradores?telefone_whatsapp=eq.{{ $('Webhook WhatsApp').item.json.body.data.key.remoteJid.replace('@s.whatsapp.net', '') }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "AQUI_O_SEU_TOKEN_SEM_COLCHETES" },
+            { "name": "Authorization", "value": "Bearer AQUI_O_SEU_TOKEN_SEM_COLCHETES" }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Busca Colaborador (Supabase)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [ 250, 0 ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst zap = $('Webhook WhatsApp').first().json.body;\n\nfor (const item of items) {\n  const cargo = item.json.cargo || \"Desconhecido\";\n  let agent = \"Maria Cecília\";\n  \n  if ([\"Técnico\", \"Engenheiro\", \"Supervisor\"].includes(cargo)) agent = \"Ian Gillan\";\n  if (cargo === \"Financeiro\") agent = \"Márcia Ribeiro\";\n  if ([\"Administrador\", \"Diretor\"].includes(cargo)) agent = \"Arquiteto Central\";\n\n  item.json.origem_rota = \"whatsapp\";\n  item.json.destino_agente = agent;\n  item.json.texto_usuario = zap.data?.message?.conversation || zap.data?.message?.extendedTextMessage?.text || \"Mídia recebida\";\n  item.json.session_id = zap.data?.key?.remoteJid?.replace(\"@s.whatsapp.net\", \"\") || \"zap-desconhecido\";\n  item.json.wpp_jid = zap.data?.key?.remoteJid;\n}\nreturn items;"
+      },
+      "name": "Normalizador Zap",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [ 500, 0 ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "webhook-erp-web",
+        "options": {}
+      },
+      "name": "Webhook ERP Web",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [ 0, 300 ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nfor (const item of items) {\n  const body = item.json.body;\n  item.json.origem_rota = \"erp\";\n  item.json.destino_agente = body.agentTarget || \"Maria Cecília\";\n  item.json.texto_usuario = body.payload?.text || \"\";\n  item.json.session_id = body.correlationId || \"erp-session\";\n  item.json.userRole = body.userRole;\n}\nreturn items;"
+      },
+      "name": "Normalizador ERP",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [ 250, 300 ]
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.destino_agente }}",
+        "rules": {
+          "rules": [
+            { "value2": "Maria Cecília", "output": 0 },
+            { "value2": "Ian Gillan", "output": 1 },
+            { "value2": "Márcia Ribeiro", "output": 2 },
+            { "value2": "Arquiteto Central", "output": 3 },
+            { "value2": "Arquiteto", "output": 3 }
+          ]
+        },
+        "fallbackOutput": 0
+      },
+      "name": "Switch dos Agentes",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [ 750, 150 ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.texto_usuario }}",
+        "options": {
+          "systemMessage": "Você é a Maria Cecília. Mantenha as respostas concisas e educadas."
+        }
+      },
+      "name": "IA Maria",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [ 1050, -150 ]
+    },
+    {
+      "parameters": {},
+      "name": "Gemini Model 1",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [ 1050, 50 ]
+    },
+    {
+      "parameters": {
+        "sessionId": "={{ $json.session_id }}",
+        "tableName": "n8n_chat_messages"
+      },
+      "name": "Memória 1",
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.1,
+      "position": [ 1200, 50 ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.texto_usuario }}",
+        "options": {
+          "systemMessage": "Você é o Ian Gillan. Responda num tom direto de obras."
+        }
+      },
+      "name": "IA Ian Gillan",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [ 1050, 200 ]
+    },
+    {
+      "parameters": {},
+      "name": "Gemini Model 2",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [ 1050, 400 ]
+    },
+    {
+      "parameters": {
+        "sessionId": "={{ $json.session_id }}",
+        "tableName": "n8n_chat_messages"
+      },
+      "name": "Memória 2",
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.1,
+      "position": [ 1200, 400 ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.texto_usuario }}",
+        "options": {
+          "systemMessage": "Você é a Márcia Ribeiro. Foque em finanças e lucro."
+        }
+      },
+      "name": "IA Marcia",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [ 1050, 550 ]
+    },
+    {
+      "parameters": {},
+      "name": "Gemini Model 3",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [ 1050, 750 ]
+    },
+    {
+      "parameters": {
+        "sessionId": "={{ $json.session_id }}",
+        "tableName": "n8n_chat_messages"
+      },
+      "name": "Memória 3",
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.1,
+      "position": [ 1200, 750 ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.texto_usuario }}",
+        "options": {
+          "systemMessage": "Você é o Arquiteto IA. Otimize os processos e a visão global."
+        }
+      },
+      "name": "IA Arquiteto",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [ 1050, 900 ]
+    },
+    {
+      "parameters": {},
+      "name": "Gemini Model 4",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [ 1050, 1100 ]
+    },
+    {
+      "parameters": {
+        "sessionId": "={{ $json.session_id }}",
+        "tableName": "n8n_chat_messages"
+      },
+      "name": "Memória 4",
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.1,
+      "position": [ 1200, 1100 ]
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $('Normalizador Zap').item.json.origem_rota || $('Normalizador ERP').item.json.origem_rota }}",
+        "rules": {
+          "rules": [
+            { "value2": "whatsapp", "output": 0 },
+            { "value2": "erp", "output": 1 }
+          ]
+        }
+      },
+      "name": "Distribuidor de Resposta",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [ 1450, 350 ]
+    },
+    {
+      "parameters": {
+        "responseMode": "lastNode",
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "name": "Respond to Webhook (Tela Web)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [ 1700, 500 ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "SUA_API_DO_UAZAPI/message/sendText",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "number", "value": "={{ $('Normalizador Zap').item.json.wpp_jid }}" },
+            { "name": "text", "value": "={{ $json.text }}" }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Enviar ZAP Pela UaZAPI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [ 1700, 200 ]
+    }
+  ],
+  "connections": {
+    "Webhook WhatsApp": {
+      "main": [
+        [ { "node": "Busca Colaborador (Supabase)", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Busca Colaborador (Supabase)": {
+      "main": [
+        [ { "node": "Normalizador Zap", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Normalizador Zap": {
+      "main": [
+        [ { "node": "Switch dos Agentes", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Webhook ERP Web": {
+      "main": [
+        [ { "node": "Normalizador ERP", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Normalizador ERP": {
+      "main": [
+        [ { "node": "Switch dos Agentes", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Switch dos Agentes": {
+      "main": [
+        [ { "node": "IA Maria", "type": "main", "index": 0 } ],
+        [ { "node": "IA Ian Gillan", "type": "main", "index": 0 } ],
+        [ { "node": "IA Marcia", "type": "main", "index": 0 } ],
+        [ { "node": "IA Arquiteto", "type": "main", "index": 0 } ],
+        [ { "node": "IA Arquiteto", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Gemini Model 1": {
+      "ai_languageModel": [
+        [ { "node": "IA Maria", "type": "ai_languageModel", "index": 0 } ]
+      ]
+    },
+    "Memória 1": {
+      "ai_memory": [
+        [ { "node": "IA Maria", "type": "ai_memory", "index": 0 } ]
+      ]
+    },
+    "Gemini Model 2": {
+      "ai_languageModel": [
+        [ { "node": "IA Ian Gillan", "type": "ai_languageModel", "index": 0 } ]
+      ]
+    },
+    "Memória 2": {
+      "ai_memory": [
+        [ { "node": "IA Ian Gillan", "type": "ai_memory", "index": 0 } ]
+      ]
+    },
+    "Gemini Model 3": {
+      "ai_languageModel": [
+        [ { "node": "IA Marcia", "type": "ai_languageModel", "index": 0 } ]
+      ]
+    },
+    "Memória 3": {
+      "ai_memory": [
+        [ { "node": "IA Marcia", "type": "ai_memory", "index": 0 } ]
+      ]
+    },
+    "Gemini Model 4": {
+      "ai_languageModel": [
+        [ { "node": "IA Arquiteto", "type": "ai_languageModel", "index": 0 } ]
+      ]
+    },
+    "Memória 4": {
+      "ai_memory": [
+        [ { "node": "IA Arquiteto", "type": "ai_memory", "index": 0 } ]
+      ]
+    },
+    "IA Maria": {
+      "main": [
+        [ { "node": "Distribuidor de Resposta", "type": "main", "index": 0 } ]
+      ]
+    },
+    "IA Ian Gillan": {
+      "main": [
+        [ { "node": "Distribuidor de Resposta", "type": "main", "index": 0 } ]
+      ]
+    },
+    "IA Marcia": {
+      "main": [
+        [ { "node": "Distribuidor de Resposta", "type": "main", "index": 0 } ]
+      ]
+    },
+    "IA Arquiteto": {
+      "main": [
+        [ { "node": "Distribuidor de Resposta", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Distribuidor de Resposta": {
+      "main": [
+        [ { "node": "Enviar ZAP Pela UaZAPI", "type": "main", "index": 0 } ],
+        [ { "node": "Respond to Webhook (Tela Web)", "type": "main", "index": 0 } ]
+      ]
+    }
+  },
+  "settings": {},
+  "versionId": "9.1.0"
+}
