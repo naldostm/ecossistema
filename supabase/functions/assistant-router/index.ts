@@ -363,6 +363,28 @@ serve(async (req) => {
       };
       const directUrl = getDirectUrl();
 
+      // Helper para detectar o MIME Type exato (Gemini precisa de audio/ogg para notas de voz do WhatsApp)
+      const resolveMediaMime = (base64Str: string, isAudio: boolean, suggested?: string): string => {
+          if (suggested && suggested.includes('/')) {
+              const s = suggested.toLowerCase().trim();
+              if (s.includes('ogg') || s.includes('opus')) return 'audio/ogg';
+              if (s.includes('mpeg') || s.includes('mp3')) return 'audio/mp3';
+              if (s.includes('mp4') || s.includes('m4a') || s.includes('aac')) return 'audio/mp4';
+              if (s.includes('wav')) return 'audio/wav';
+              if (s.includes('jpeg') || s.includes('jpg')) return 'image/jpeg';
+              if (s.includes('png')) return 'image/png';
+              if (s.includes('webp')) return 'image/webp';
+              return s;
+          }
+          if (base64Str.startsWith('T2dnUw')) return 'audio/ogg'; // Magic bytes OggS
+          if (base64Str.startsWith('SUQz') || base64Str.startsWith('/+NI')) return 'audio/mp3'; // ID3 / MPEG
+          if (base64Str.startsWith('AAAA') || base64Str.substring(0, 40).includes('ZnR5cA')) return 'audio/mp4'; // ftyp
+          if (base64Str.startsWith('UklGR')) return 'audio/wav'; // RIFF
+          if (base64Str.startsWith('/9j/')) return 'image/jpeg'; // JPEG
+          if (base64Str.startsWith('iVBORw')) return 'image/png'; // PNG
+          return isAudio ? 'audio/ogg' : 'image/jpeg';
+      };
+
       // Caso 1: Baixar diretamente se a URL pública estiver no payload
       if (hasMedia && directUrl) {
           try {
@@ -371,41 +393,41 @@ serve(async (req) => {
               if (fileReq.ok) {
                   const buffer = await fileReq.arrayBuffer();
                   const pureBase64 = encodeBase64(buffer);
-                  const mimeType = hasAudio ? "audio/mpeg" : "image/jpeg";
+                  const mimeType = resolveMediaMime(pureBase64, hasAudio, payloadMime);
                   mediaPart = { inlineData: { mimeType: mimeType, data: pureBase64 } };
                   if (!userMessage || forceAnalysisText) {
-                      userMessage = hasAudio ? "[O cliente enviou um ÁUDIO anexo]" : "[O cliente enviou uma FOTO]";
+                      userMessage = hasAudio ? "[🎙️ Áudio de Voz enviado pelo cliente]" : "[📷 Foto enviada pelo cliente]";
                       forceAnalysisText = true;
                   }
-                  console.log(`[SUCESSO] Mídia baixada diretamente da URL do payload! length: ${pureBase64.length}`);
+                  console.log(`[SUCESSO] Mídia baixada diretamente da URL! MIME: ${mimeType} | length: ${pureBase64.length}`);
               } else {
-                  console.log(`[FALHA MÍDIA] Falha ao baixar diretamente da URL do payload. Status: ${fileReq.status}`);
+                  console.log(`[FALHA MÍDIA] Falha ao baixar diretamente da URL. Status: ${fileReq.status}`);
               }
           } catch(err: any) {
-              console.error("[FALHA MÍDIA] Erro ao baixar diretamente da URL do payload:", err?.message || err);
+              console.error("[FALHA MÍDIA] Erro ao baixar diretamente da URL:", err?.message || err);
           }
       }
 
       // Caso 2: Tentar base64 direto do payload
       if (!mediaPart && hasMedia && payloadBase64) {
           const pureBase64 = payloadBase64.includes('base64,') ? payloadBase64.split('base64,')[1] : payloadBase64;
-          const mimeType = hasAudio ? "audio/mpeg" : "image/jpeg";
+          const mimeType = resolveMediaMime(pureBase64, hasAudio, payloadMime);
           mediaPart = { inlineData: { mimeType: mimeType, data: pureBase64 } };
-          if (!userMessage) {
-              userMessage = hasAudio ? "[O cliente enviou uma MENSAGEM DE ÁUDIO]" : "[O cliente enviou uma FOTO]";
+          if (!userMessage || forceAnalysisText) {
+              userMessage = hasAudio ? "[🎙️ Áudio de Voz enviado pelo cliente]" : "[📷 Foto enviada pelo cliente]";
               forceAnalysisText = true;
           }
-          console.log(`[SUCESSO] Mídia achada no PAYLOAD direto! length: ${pureBase64.length}`);
+          console.log(`[SUCESSO] Mídia encontrada no PAYLOAD direto! MIME: ${mimeType} | length: ${pureBase64.length}`);
       } 
-      // Caso 3: Chamar a API de download do UazAPI com retry e delay para mitigar condições de corrida
+      // Caso 3: Chamar a API de download do UazAPI com retry e delay
       else if (!mediaPart && hasMedia && messageId && uazapiUrl && uazapiToken) {
-          const downloadWithRetry = async (retries = 2, delayMs = 1500) => {
+          const downloadWithRetry = async (retries = 2, delayMs = 1200) => {
               const activeDownloadToken = payload?.token || uazapiToken || '';
               
               for (let attempt = 1; attempt <= retries; attempt++) {
                   try {
                       if (attempt === 1 && delayMs > 0) {
-                          console.log(`[MÍDIA] Aguardando ${delayMs}ms para o gateway UazAPI sincronizar o arquivo...`);
+                          console.log(`[MÍDIA] Aguardando ${delayMs}ms para gateway UazAPI liberar buffer...`);
                           await new Promise(r => setTimeout(r, delayMs));
                       }
                       
@@ -413,54 +435,46 @@ serve(async (req) => {
                       const mediaReq = await fetch(`${uazapiUrl}/message/download?token=${activeDownloadToken}`, {
                           method: "POST",
                           headers: { "Content-Type": "application/json", "token": activeDownloadToken },
-                          body: JSON.stringify({ id: messageId })
+                          body: JSON.stringify({ id: messageId, messageId: messageId, key: { id: messageId } })
                       });
                       
                       console.log(`[MÍDIA] Tentativa ${attempt} respondeu com status: ${mediaReq.status}`);
                       
                       if (mediaReq.ok) {
                           const mediaData = await mediaReq.json();
-                          const base64Raw = mediaData?.base64Data || mediaData?.base64 || mediaData?.data?.base64 || mediaData?.media;
-                          const mimeType = mediaData?.mimetype || (hasAudio ? "audio/mpeg" : "image/jpeg");
+                          const base64Raw = mediaData?.base64Data || mediaData?.base64 || mediaData?.data?.base64 || mediaData?.media || mediaData?.data?.media;
+                          const suggestedMime = mediaData?.mimetype || payloadMime;
                           
                           if (base64Raw) {
                               const pureBase64 = base64Raw.includes('base64,') ? base64Raw.split('base64,')[1] : base64Raw;
-                              const isActuallyAudio = mimeType.includes('audio');
+                              const mimeType = resolveMediaMime(pureBase64, hasAudio, suggestedMime);
                               mediaPart = { inlineData: { mimeType: mimeType, data: pureBase64 } };
                               if (!userMessage || forceAnalysisText) {
-                                  userMessage = isActuallyAudio ? "[O cliente enviou um ÁUDIO anexo]" : "[O cliente enviou uma FOTO]";
+                                  userMessage = hasAudio ? "[🎙️ Áudio de Voz enviado pelo cliente]" : "[📷 Foto enviada pelo cliente]";
                                   forceAnalysisText = true;
                               }
-                              console.log(`[SUCESSO] Mídia baixada na tentativa ${attempt}! MIME: ${mimeType}`);
+                              console.log(`[SUCESSO] Mídia baixada da UazAPI na tentativa ${attempt}! MIME: ${mimeType}`);
                               return true;
-                          } else if (mediaData?.fileURL) {
-                              console.log(`[MÍDIA] URL física detectada na tentativa ${attempt}: ${mediaData.fileURL}`);
-                              const fileReq = await fetch(mediaData.fileURL);
+                          } else if (mediaData?.fileURL || mediaData?.url) {
+                              const targetFileUrl = mediaData?.fileURL || mediaData?.url;
+                              console.log(`[MÍDIA] URL física retornada: ${targetFileUrl}`);
+                              const fileReq = await fetch(targetFileUrl);
                               if (fileReq.ok) {
                                   const buffer = await fileReq.arrayBuffer();
                                   const pureBase64 = encodeBase64(buffer);
-                                  const isActuallyAudio = mimeType.includes('audio') || mediaData.fileURL.endsWith('.mp3') || mediaData.fileURL.endsWith('.ogg');
+                                  const mimeType = resolveMediaMime(pureBase64, hasAudio, suggestedMime);
                                   mediaPart = { inlineData: { mimeType: mimeType, data: pureBase64 } };
                                   if (!userMessage || forceAnalysisText) {
-                                      userMessage = isActuallyAudio ? "[O cliente enviou um ÁUDIO anexo]" : "[O cliente enviou uma FOTO]";
+                                      userMessage = hasAudio ? "[🎙️ Áudio de Voz enviado pelo cliente]" : "[📷 Foto enviada pelo cliente]";
                                       forceAnalysisText = true;
                                   }
-                                  console.log(`[SUCESSO] Mídia convertida da URL física na tentativa ${attempt}! MIME: ${mimeType}`);
+                                  console.log(`[SUCESSO] Mídia baixada da URL física na tentativa ${attempt}! MIME: ${mimeType}`);
                                   return true;
-                              } else {
-                                  console.log(`[FALHA MÍDIA] URL física recusou conexão na tentativa ${attempt}. Status: ${fileReq.status}`);
                               }
                           }
-                      } else {
-                          const errText = await mediaReq.text();
-                          console.log(`[FALHA MÍDIA] Tentativa ${attempt} falhou. Status: ${mediaReq.status}. Body: ${errText.substring(0, 200)}`);
                       }
                   } catch (err: any) {
                       console.error(`[FALHA MÍDIA] Erro na tentativa ${attempt}:`, err?.message || err);
-                  }
-                  
-                  if (attempt < retries) {
-                      await new Promise(r => setTimeout(r, 2000));
                   }
               }
               return false;
@@ -471,7 +485,7 @@ serve(async (req) => {
               await supabase.from('agent_memory').insert({ 
                   phone: 'DEBUG_AUDIO', 
                   role: 'user', 
-                  content: `Falha total no download da mídia após tentativas. ID: ${messageId}` 
+                  content: `Falha no download da mídia. ID: ${messageId}` 
               });
           }
       } else if (hasMedia && !messageId) {

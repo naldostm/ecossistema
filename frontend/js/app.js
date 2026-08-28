@@ -7116,11 +7116,33 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
 
                 // Mensagem do Cliente (User)
                 if (msg.role === 'user') {
+                    let cleanUserText = (msg.content || '').replace(/\[MSG_ID:[^\]]+\]\s*/g, '');
+                    const isAudioMsg = cleanUserText.includes('Áudio') || cleanUserText.includes('audio') || cleanUserText.includes('🎙️') || cleanUserText.includes('voz');
+                    const isPhotoMsg = cleanUserText.includes('Foto') || cleanUserText.includes('📷') || cleanUserText.includes('imagem');
+
+                    let mediaBadge = '';
+                    if (isAudioMsg) {
+                        mediaBadge = `
+                            <div style="display:flex; align-items:center; gap:8px; background:rgba(37,211,102,0.12); padding:6px 10px; border-radius:6px; border:1px solid rgba(37,211,102,0.25); margin-bottom:6px;">
+                                <i class="fa-solid fa-microphone-lines" style="color:#25D366; font-size:1rem;"></i>
+                                <span style="font-size:0.82rem; font-weight:700; color:#25D366;">Mensagem de Áudio (WhatsApp)</span>
+                            </div>
+                        `;
+                    } else if (isPhotoMsg) {
+                        mediaBadge = `
+                            <div style="display:flex; align-items:center; gap:8px; background:rgba(52,152,219,0.12); padding:6px 10px; border-radius:6px; border:1px solid rgba(52,152,219,0.25); margin-bottom:6px;">
+                                <i class="fa-solid fa-camera" style="color:#3498db; font-size:1rem;"></i>
+                                <span style="font-size:0.82rem; font-weight:700; color:#3498db;">Foto / Imagem Anexada</span>
+                            </div>
+                        `;
+                    }
+
                     return `
                         <div style="display:flex; justify-content:flex-start; margin-bottom:6px;">
                             <div style="background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); padding: 10px 14px; border-radius: 12px 12px 12px 2px; max-width: 75%; color: var(--text-primary); font-size: 0.9rem; line-height: 1.4; word-break: break-word;">
                                 <div style="font-size: 0.72rem; font-weight: 700; color: var(--text-muted); margin-bottom: 3px;">${clientName}</div>
-                                <div style="white-space: pre-wrap;">${msg.content}</div>
+                                ${mediaBadge}
+                                <div style="white-space: pre-wrap;">${cleanUserText}</div>
                                 <div style="text-align: right; font-size: 0.68rem; color: var(--text-muted); margin-top: 4px;">${time}</div>
                             </div>
                         </div>
@@ -7128,7 +7150,8 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
                 }
 
                 // Mensagem de Arnaldo ou Maria Cecília (Model)
-                const isArnaldo = msg.content && (msg.content.includes('👨‍🔧') || msg.content.toLowerCase().startsWith('arnaldo'));
+                let cleanModelText = (msg.content || '').replace(/\[MSG_ID:[^\]]+\]\s*/g, '');
+                const isArnaldo = cleanModelText && (cleanModelText.includes('👨‍🔧') || cleanModelText.toLowerCase().startsWith('arnaldo'));
                 const bubbleBg = isArnaldo ? 'rgba(41, 128, 185, 0.2)' : 'rgba(37, 211, 102, 0.12)';
                 const bubbleBorder = isArnaldo ? '1px solid rgba(41, 128, 185, 0.4)' : '1px solid rgba(37, 211, 102, 0.3)';
                 const tagColor = isArnaldo ? '#3498db' : '#25D366';
@@ -7138,7 +7161,7 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
                     <div style="display:flex; justify-content:flex-end; margin-bottom:6px;">
                         <div style="background: ${bubbleBg}; border: ${bubbleBorder}; padding: 10px 14px; border-radius: 12px 12px 2px 12px; max-width: 75%; color: var(--text-primary); font-size: 0.9rem; line-height: 1.4; word-break: break-word;">
                             <div style="font-size: 0.72rem; font-weight: 700; color: ${tagColor}; margin-bottom: 3px;">${tagLabel}</div>
-                            <div style="white-space: pre-wrap;">${msg.content}</div>
+                            <div style="white-space: pre-wrap;">${cleanModelText}</div>
                             <div style="text-align: right; font-size: 0.68rem; color: var(--text-muted); margin-top: 4px;">${time}</div>
                         </div>
                     </div>
