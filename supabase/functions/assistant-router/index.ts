@@ -287,8 +287,52 @@ serve(async (req) => {
       let mediaPart = null;
       let forceAnalysisText = false;
 
-      // Extrair o ID da mensagem do webhook payload (vários formatos possíveis)
+      // 1. Extrair o ID da mensagem do webhook payload (vários formatos possíveis)
       const messageId = payload?.data?.key?.id || payload?.message?.id || payload?.message?.key?.id || payload?.key?.id || msgNode?.id || "";
+
+      // 2. Blindagem contra mensagens vazias (acks/status updates/updates sem texto ou áudio)
+      if (!userMessage && !hasAudio && !hasImage) {
+          console.log(`[IGNORADO] Evento vazio de status/ack para ${remoteJid}.`);
+          return;
+      }
+
+      // 3. Deduplicação por ID Único no Banco de Dados (Evita repetições de webhooks paralelos)
+      if (messageId && messageId.trim().length > 0) {
+          const { data: existingMsgId } = await supabase
+              .from('agent_memory')
+              .select('id')
+              .eq('phone', remoteJid)
+              .like('content', `%[MSG_ID:${messageId}]%`)
+              .limit(1);
+              
+          if (existingMsgId && existingMsgId.length > 0) {
+              console.log(`[DEDUPLICADOR ID] Mensagem já processada anteriormente (ID: ${messageId}). Abortando.`);
+              return;
+          }
+      }
+
+      // 4. Deduplicação por Conteúdo de Texto Idêntico nos últimos 15 segundos
+      if (userMessage && userMessage.trim().length > 0) {
+          const fifteenSecsAgo = new Date(Date.now() - 15000).toISOString();
+          const { data: recentSameText } = await supabase
+              .from('agent_memory')
+              .select('id, content')
+              .eq('phone', remoteJid)
+              .eq('role', 'user')
+              .gte('created_at', fifteenSecsAgo)
+              .limit(5);
+
+          const cleanUserText = userMessage.trim().toLowerCase();
+          const isDuplicateText = (recentSameText || []).some(m => {
+              const stored = (m.content || '').toLowerCase();
+              return stored.includes(cleanUserText) && cleanUserText.length > 2;
+          });
+
+          if (isDuplicateText) {
+              console.log(`[DEDUPLICADOR TEXTO] Mensagem duplicada recebida em menos de 15s para ${remoteJid}. Abortando.`);
+              return;
+          }
+      }
 
       console.log(`[DIAG] msgType=${msgType} | hasAudio=${hasAudio} | hasImage=${hasImage} | hasMedia=${hasMedia} | userMessage='${userMessage}' | messageId='${messageId}' | msgNodeKeys=${Object.keys(msgNode||{}).join(',')}`);
 
@@ -476,7 +520,8 @@ serve(async (req) => {
       // Agrupa mensagens sequenciais do cliente e evita respostas duplicadas.
       // =========================================================================
 
-      const exactUserPayload = `Mensagem do Cliente (${pushName}): ${userMessage}`;
+      const msgIdTag = messageId ? `[MSG_ID:${messageId}] ` : '';
+      const exactUserPayload = `${msgIdTag}Mensagem do Cliente (${pushName}): ${userMessage}`;
       
       // 1. O Isolate insere imediatamente a mensagem do usuário no banco
       const { data: insertedData, error: insertError } = await supabase.from('agent_memory').insert({
@@ -529,11 +574,12 @@ serve(async (req) => {
       let squashedHistory: any[] = [];
       let lastRole: string | null = null;
       for (const msg of rawHistory) {
+          const cleanContent = (msg.content || '').replace(/\[MSG_ID:[^\]]+\]\s*/g, '');
           const r = msg.role === 'model' ? 'model' : 'user';
           if (r === lastRole && squashedHistory.length > 0) {
-              squashedHistory[squashedHistory.length - 1].parts[0].text += `\n${msg.content}`;
+              squashedHistory[squashedHistory.length - 1].parts[0].text += `\n${cleanContent}`;
           } else {
-              squashedHistory.push({ role: r, parts: [{ text: msg.content }] });
+              squashedHistory.push({ role: r, parts: [{ text: cleanContent }] });
               lastRole = r;
           }
       }
