@@ -6771,12 +6771,11 @@ document.addEventListener('DOMContentLoaded', () => {
 console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.');
 
 // ==============================================================================
-// 📱 CENTRAL DE MENSAGENS — MARIA CECÍLIA OUTBOUND (v1.1)
+// 📱 CENTRAL DE ATENDIMENTO — LIVE CRM, OUTBOUND & LISTA NEGRA (v2.0)
 // ==============================================================================
 (function() {
     const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || '').trim();
     const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
-    const CAMPAIGN_FUNCTION_URL = `${SUPABASE_URL}/functions/v1/campaign-sender`;
     
     let campaignTipo = 'atendimento';
     let campaignClients = [];
@@ -6785,7 +6784,11 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
     let _supaClient = null;
     let _campaignInitialized = false;
 
-    // Singleton Supabase client (reuses auth session from localStorage)
+    // Live CRM State
+    let currentLivePhone = null;
+    let liveConversations = [];
+    let liveClientsMap = {};
+
     function getSupa() {
         if (!_supaClient) {
             _supaClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -6797,17 +6800,617 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
     const _origShowSection = window.showSection;
     window.showSection = function(targetId) {
         _origShowSection(targetId);
-        if (targetId === 'view-mensagens' && !_campaignInitialized) {
-            _campaignInitialized = true;
-            loadCampaignClients();
-            loadCampaignHistory();
-        } else if (targetId === 'view-mensagens') {
+        if (targetId === 'view-mensagens') {
+            if (!_campaignInitialized) {
+                _campaignInitialized = true;
+            }
+            window.loadLiveConversations();
+            window.loadBlacklistTable();
             loadCampaignClients();
             loadCampaignHistory();
         }
     };
 
-    // === CATEGORY SELECTION ===
+    // ==========================================================================
+    // 🔀 NAVEGAÇÃO ENTRE ABAS
+    // ==========================================================================
+    window.switchMensagensTab = function(tabName) {
+        document.querySelectorAll('.tab-btn-msg').forEach(btn => {
+            btn.style.background = 'var(--surface-light)';
+            btn.style.color = 'var(--text-primary)';
+            btn.style.border = '1px solid var(--border-color)';
+        });
+        document.querySelectorAll('.msg-subpane').forEach(p => p.style.display = 'none');
+
+        const activeBtn = document.getElementById(`btn-tab-${tabName}`);
+        const activePane = document.getElementById(`pane-mensagens-${tabName}`);
+
+        if (activeBtn) {
+            activeBtn.style.background = 'rgba(37,211,102,0.18)';
+            activeBtn.style.color = '#25D366';
+            activeBtn.style.border = '1px solid rgba(37,211,102,0.4)';
+        }
+        if (activePane) {
+            activePane.style.display = 'block';
+        }
+
+        if (tabName === 'live') {
+            window.loadLiveConversations();
+        } else if (tabName === 'campanhas') {
+            loadCampaignClients();
+            loadCampaignHistory();
+        } else if (tabName === 'blacklist') {
+            window.loadBlacklistTable();
+        }
+    };
+
+    // ==========================================================================
+    // 💬 LIVE CRM: CONVERSAS AO VIVO (WHATSAPP INBOX)
+    // ==========================================================================
+    window.loadLiveConversations = async function() {
+        const container = document.getElementById('live-chat-conversations-list');
+        if (!container) return;
+
+        try {
+            const supa = getSupa();
+            
+            // 1. Carrega clientes para cruzar nomes
+            const { data: clientsData } = await supa.from('clientes').select('id, nome_cliente, whatsapp, endereco_completo');
+            liveClientsMap = {};
+            (clientsData || []).forEach(c => {
+                if (c.whatsapp) {
+                    const clean = c.whatsapp.replace(/\D/g, '');
+                    liveClientsMap[clean] = c;
+                    if (clean.startsWith('55')) liveClientsMap[clean.substring(2)] = c;
+                }
+            });
+
+            // 2. Carrega mensagens de agent_memory
+            const { data: memories, error } = await supa.from('agent_memory')
+                .select('phone, role, content, created_at')
+                .order('created_at', { ascending: false })
+                .limit(1000);
+
+            if (error) {
+                console.error('[LIVE CRM] Erro ao carregar memórias:', error);
+                container.innerHTML = `<div style="color:var(--accent-red); padding:15px; font-size:0.85rem;">Erro: ${error.message}</div>`;
+                return;
+            }
+
+            if (!memories || memories.length === 0) {
+                container.innerHTML = '<div style="text-align:center; padding:30px 10px; color:var(--text-muted); font-size:0.85rem;">Nenhuma conversa registrada ainda.</div>';
+                return;
+            }
+
+            // Agrupar por telefone
+            const grouped = {};
+            memories.forEach(m => {
+                if (!m.phone || m.phone === 'GLOBAL_CONFIG' || m.phone.includes('@g.us')) return;
+                const cleanPhone = m.phone.replace(/\D/g, '');
+                if (!cleanPhone || cleanPhone.length < 8) return;
+
+                if (!grouped[cleanPhone]) {
+                    grouped[cleanPhone] = {
+                        phone: cleanPhone,
+                        messages: [],
+                        lastMessage: m.content || '',
+                        lastTime: m.created_at,
+                        status: 'ativo' // 'ativo', 'pausado', 'ignorado'
+                    };
+                }
+                grouped[cleanPhone].messages.push(m);
+            });
+
+            // Determinar o status de cada conversa baseado no comando mais recente
+            let blacklistCount = 0;
+            const convList = Object.values(grouped).map(conv => {
+                // Procurar último comando de status
+                const statusCmd = conv.messages.find(m => 
+                    m.content === 'BOT_IGNORAR' || 
+                    m.content === 'AMIGO_IGNORAR' || 
+                    m.content === 'LISTA_NEGRA' || 
+                    m.content === 'BOT_PAUSADO' || 
+                    m.content === 'BOT_ATIVO'
+                );
+
+                if (statusCmd) {
+                    if (statusCmd.content === 'BOT_IGNORAR' || statusCmd.content === 'AMIGO_IGNORAR' || statusCmd.content === 'LISTA_NEGRA') {
+                        conv.status = 'ignorado';
+                        blacklistCount++;
+                    } else if (statusCmd.content === 'BOT_PAUSADO') {
+                        conv.status = 'pausado';
+                    } else {
+                        conv.status = 'ativo';
+                    }
+                }
+
+                // Cliente associado
+                const clientObj = liveClientsMap[conv.phone] || liveClientsMap[conv.phone.replace(/^55/, '')];
+                conv.clientName = clientObj ? clientObj.nome_cliente : `WhatsApp ${conv.phone}`;
+                conv.endereco = clientObj ? clientObj.endereco_completo : '';
+
+                // Filtrar última mensagem legível (ignorar comandos internos)
+                const lastVisibleMsg = conv.messages.find(m => 
+                    m.content && 
+                    !['BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA', 'BOT_PAUSADO', 'BOT_ATIVO'].includes(m.content)
+                );
+                conv.displayLastMsg = lastVisibleMsg ? lastVisibleMsg.content : 'Conversa iniciada';
+
+                return conv;
+            });
+
+            // Atualiza badge de blacklist
+            const badgeEl = document.getElementById('count-blacklist');
+            if (badgeEl) badgeEl.textContent = blacklistCount;
+
+            liveConversations = convList;
+            renderLiveConversationsList();
+
+            // Se tem conversa selecionada, recarrega
+            if (currentLivePhone) {
+                window.selectLiveConversation(currentLivePhone);
+            }
+
+        } catch (err) {
+            console.error('[LIVE CRM] Erro geral:', err);
+        }
+    };
+
+    function renderLiveConversationsList() {
+        const container = document.getElementById('live-chat-conversations-list');
+        if (!container) return;
+
+        const search = (document.getElementById('live-chat-search')?.value || '').toLowerCase();
+        
+        const filtered = liveConversations.filter(c => {
+            if (!search) return true;
+            return c.clientName.toLowerCase().includes(search) || c.phone.includes(search);
+        });
+
+        if (filtered.length === 0) {
+            container.innerHTML = '<div style="text-align:center; padding:25px; color:var(--text-muted); font-size:0.85rem;">Nenhuma conversa encontrada.</div>';
+            return;
+        }
+
+        container.innerHTML = filtered.map(c => {
+            const isSelected = c.phone === currentLivePhone;
+            const bg = isSelected ? 'rgba(37,211,102,0.15)' : 'rgba(255,255,255,0.03)';
+            const border = isSelected ? '1px solid #25D366' : '1px solid rgba(255,255,255,0.06)';
+            
+            let statusBadge = `<span style="font-size:0.68rem; padding:2px 6px; border-radius:4px; font-weight:700; background:rgba(37,211,102,0.15); color:#25D366;">🟢 Maria Ativa</span>`;
+            if (c.status === 'pausado') {
+                statusBadge = `<span style="font-size:0.68rem; padding:2px 6px; border-radius:4px; font-weight:700; background:rgba(230,126,34,0.15); color:#e67e22;">🟠 Humano</span>`;
+            } else if (c.status === 'ignorado') {
+                statusBadge = `<span style="font-size:0.68rem; padding:2px 6px; border-radius:4px; font-weight:700; background:rgba(231,76,60,0.15); color:#e74c3c;">🚫 Amigo / Ignorado</span>`;
+            }
+
+            const initial = (c.clientName || 'W').charAt(0).toUpperCase();
+            const timeStr = c.lastTime ? new Date(c.lastTime).toLocaleTimeString('pt-BR', {hour: '2-digit', minute: '2-digit'}) : '';
+            const safeSnippet = (c.displayLastMsg || '').substring(0, 45) + ((c.displayLastMsg || '').length > 45 ? '...' : '');
+
+            return `
+                <div onclick="window.selectLiveConversation('${c.phone}')" style="background: ${bg}; border: ${border}; border-radius: 10px; padding: 10px 12px; cursor: pointer; transition: all 0.2s; display: flex; gap: 10px; align-items: center;">
+                    <div style="width: 38px; height: 38px; border-radius: 50%; background: var(--surface-light); border: 1px solid var(--border-color); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 0.95rem; color: var(--accent-green); flex-shrink: 0;">
+                        ${initial}
+                    </div>
+                    <div style="flex: 1; min-width: 0;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+                            <span style="font-weight: 700; font-size: 0.88rem; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${c.clientName}</span>
+                            <span style="font-size: 0.7rem; color: var(--text-muted);">${timeStr}</span>
+                        </div>
+                        <div style="font-size: 0.78rem; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 4px;">
+                            ${safeSnippet}
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-size: 0.72rem; color: var(--text-muted);">${c.phone}</span>
+                            ${statusBadge}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    window.filterLiveConversations = function() {
+        renderLiveConversationsList();
+    };
+
+    window.selectLiveConversation = async function(phone) {
+        currentLivePhone = phone;
+        renderLiveConversationsList();
+
+        const headerActions = document.getElementById('live-chat-header-actions');
+        const footer = document.getElementById('live-chat-footer');
+        const nameEl = document.getElementById('live-chat-contact-name');
+        const phoneEl = document.getElementById('live-chat-contact-phone');
+        const avatarEl = document.getElementById('live-chat-contact-avatar');
+        const statusBadge = document.getElementById('live-chat-status-badge');
+        const btnPause = document.getElementById('btn-toggle-pause-chat');
+        const btnBlacklist = document.getElementById('btn-toggle-blacklist-chat');
+        const stream = document.getElementById('live-chat-messages-stream');
+
+        if (headerActions) headerActions.style.display = 'flex';
+        if (footer) footer.style.display = 'flex';
+
+        const conv = liveConversations.find(c => c.phone === phone);
+        const clientName = conv ? conv.clientName : `WhatsApp ${phone}`;
+        
+        if (nameEl) nameEl.textContent = clientName;
+        if (phoneEl) phoneEl.textContent = `${phone} ${conv?.endereco ? '• ' + conv.endereco : ''}`;
+        if (avatarEl) avatarEl.textContent = clientName.charAt(0).toUpperCase();
+
+        // Atualizar botões e badge
+        const currentStatus = conv ? conv.status : 'ativo';
+        if (statusBadge) {
+            if (currentStatus === 'pausado') {
+                statusBadge.style.background = 'rgba(230,126,34,0.15)';
+                statusBadge.style.color = '#e67e22';
+                statusBadge.style.border = '1px solid rgba(230,126,34,0.3)';
+                statusBadge.innerHTML = '🟠 Atendimento Humano (IA Pausada)';
+            } else if (currentStatus === 'ignorado') {
+                statusBadge.style.background = 'rgba(231,76,60,0.15)';
+                statusBadge.style.color = '#e74c3c';
+                statusBadge.style.border = '1px solid rgba(231,76,60,0.3)';
+                statusBadge.innerHTML = '🚫 Amigo / Ignorado';
+            } else {
+                statusBadge.style.background = 'rgba(37,211,102,0.15)';
+                statusBadge.style.color = '#25D366';
+                statusBadge.style.border = '1px solid rgba(37,211,102,0.3)';
+                statusBadge.innerHTML = '🤖 Maria Cecília Ativa';
+            }
+        }
+
+        if (btnPause) {
+            if (currentStatus === 'pausado') {
+                btnPause.innerHTML = '<i class="fa-solid fa-play"></i> Reativar Maria';
+                btnPause.style.background = 'rgba(37,211,102,0.2)';
+                btnPause.style.color = '#25D366';
+            } else {
+                btnPause.innerHTML = '<i class="fa-solid fa-pause"></i> Pausar IA';
+                btnPause.style.background = 'var(--surface-light)';
+                btnPause.style.color = 'var(--text-primary)';
+            }
+        }
+
+        if (btnBlacklist) {
+            if (currentStatus === 'ignorado') {
+                btnBlacklist.innerHTML = '<i class="fa-solid fa-check"></i> Desbloquear IA';
+            } else {
+                btnBlacklist.innerHTML = '<i class="fa-solid fa-ban"></i> Ignorar IA';
+            }
+        }
+
+        // Carregar mensagens históricas
+        stream.innerHTML = '<div style="text-align:center; padding:30px; color:var(--text-muted);"><i class="fa-solid fa-spinner fa-spin"></i> Carregando mensagens...</div>';
+
+        try {
+            const supa = getSupa();
+            const { data: messages, error } = await supa.from('agent_memory')
+                .select('*')
+                .eq('phone', phone)
+                .order('created_at', { ascending: true });
+
+            if (error) {
+                stream.innerHTML = `<div style="color:var(--accent-red); padding:15px;">Erro ao carregar mensagens: ${error.message}</div>`;
+                return;
+            }
+
+            if (!messages || messages.length === 0) {
+                stream.innerHTML = '<div style="text-align:center; padding:30px; color:var(--text-muted);">Nenhuma mensagem registrada.</div>';
+                return;
+            }
+
+            stream.innerHTML = messages.map(msg => {
+                const time = msg.created_at ? new Date(msg.created_at).toLocaleTimeString('pt-BR', {hour: '2-digit', minute: '2-digit'}) : '';
+                
+                // Pills de comandos de sistema
+                if (msg.content === 'BOT_PAUSADO') {
+                    return `<div style="text-align:center; margin:6px 0;"><span style="background:rgba(230,126,34,0.15); color:#e67e22; border:1px solid rgba(230,126,34,0.3); font-size:0.72rem; padding:3px 10px; border-radius:12px; font-weight:700;"><i class="fa-solid fa-pause"></i> Atendimento Humano assumido (IA Pausada)</span></div>`;
+                }
+                if (msg.content === 'BOT_ATIVO') {
+                    return `<div style="text-align:center; margin:6px 0;"><span style="background:rgba(37,211,102,0.15); color:#25D366; border:1px solid rgba(37,211,102,0.3); font-size:0.72rem; padding:3px 10px; border-radius:12px; font-weight:700;"><i class="fa-solid fa-play"></i> Maria Cecília reassumiu o atendimento</span></div>`;
+                }
+                if (msg.content === 'BOT_IGNORAR' || msg.content === 'AMIGO_IGNORAR' || msg.content === 'LISTA_NEGRA') {
+                    return `<div style="text-align:center; margin:6px 0;"><span style="background:rgba(231,76,60,0.15); color:#e74c3c; border:1px solid rgba(231,76,60,0.3); font-size:0.72rem; padding:3px 10px; border-radius:12px; font-weight:700;"><i class="fa-solid fa-shield-halved"></i> Contato adicionado à Lista Negra (IA Silenciada)</span></div>`;
+                }
+
+                // Mensagem do Cliente (User)
+                if (msg.role === 'user') {
+                    return `
+                        <div style="display:flex; justify-content:flex-start; margin-bottom:6px;">
+                            <div style="background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); padding: 10px 14px; border-radius: 12px 12px 12px 2px; max-width: 75%; color: var(--text-primary); font-size: 0.9rem; line-height: 1.4; word-break: break-word;">
+                                <div style="font-size: 0.72rem; font-weight: 700; color: var(--text-muted); margin-bottom: 3px;">${clientName}</div>
+                                <div style="white-space: pre-wrap;">${msg.content}</div>
+                                <div style="text-align: right; font-size: 0.68rem; color: var(--text-muted); margin-top: 4px;">${time}</div>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                // Mensagem de Arnaldo ou Maria Cecília (Model)
+                const isArnaldo = msg.content && (msg.content.includes('👨‍🔧') || msg.content.toLowerCase().startsWith('arnaldo'));
+                const bubbleBg = isArnaldo ? 'rgba(41, 128, 185, 0.2)' : 'rgba(37, 211, 102, 0.12)';
+                const bubbleBorder = isArnaldo ? '1px solid rgba(41, 128, 185, 0.4)' : '1px solid rgba(37, 211, 102, 0.3)';
+                const tagColor = isArnaldo ? '#3498db' : '#25D366';
+                const tagLabel = isArnaldo ? '👨‍🔧 Arnaldo Trentin | Gestor' : '👩‍💼 Maria Cecília | Atendimento';
+
+                return `
+                    <div style="display:flex; justify-content:flex-end; margin-bottom:6px;">
+                        <div style="background: ${bubbleBg}; border: ${bubbleBorder}; padding: 10px 14px; border-radius: 12px 12px 2px 12px; max-width: 75%; color: var(--text-primary); font-size: 0.9rem; line-height: 1.4; word-break: break-word;">
+                            <div style="font-size: 0.72rem; font-weight: 700; color: ${tagColor}; margin-bottom: 3px;">${tagLabel}</div>
+                            <div style="white-space: pre-wrap;">${msg.content}</div>
+                            <div style="text-align: right; font-size: 0.68rem; color: var(--text-muted); margin-top: 4px;">${time}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            // Scroll down
+            stream.scrollTop = stream.scrollHeight;
+
+        } catch (err) {
+            console.error('[LIVE CRM] Erro ao carregar mensagens:', err);
+        }
+    };
+
+    // Pausar / Reativar IA na conversa
+    window.toggleCurrentChatPause = async function() {
+        if (!currentLivePhone) return;
+        const conv = liveConversations.find(c => c.phone === currentLivePhone);
+        const isPaused = conv && conv.status === 'pausado';
+        const newCmd = isPaused ? 'BOT_ATIVO' : 'BOT_PAUSADO';
+
+        try {
+            const supa = getSupa();
+            await supa.from('agent_memory').insert({
+                phone: currentLivePhone,
+                role: 'user',
+                content: newCmd
+            });
+
+            window.loadLiveConversations();
+        } catch (err) {
+            alert('Erro ao alterar status da IA: ' + err.message);
+        }
+    };
+
+    // Bloquear / Desbloquear na Lista Negra direto da conversa
+    window.toggleCurrentChatBlacklist = async function() {
+        if (!currentLivePhone) return;
+        const conv = liveConversations.find(c => c.phone === currentLivePhone);
+        const isIgnored = conv && conv.status === 'ignorado';
+        const newCmd = isIgnored ? 'BOT_ATIVO' : 'BOT_IGNORAR';
+
+        if (!isIgnored) {
+            if (!confirm(`Deseja adicionar ${conv?.clientName || currentLivePhone} à Lista Negra?\n\nA Maria Cecília NUNCA MAIS responderá para este número.`)) return;
+        }
+
+        try {
+            const supa = getSupa();
+            await supa.from('agent_memory').insert({
+                phone: currentLivePhone,
+                role: 'user',
+                content: newCmd
+            });
+
+            window.loadLiveConversations();
+            window.loadBlacklistTable();
+        } catch (err) {
+            alert('Erro ao alterar Lista Negra: ' + err.message);
+        }
+    };
+
+    // Enviar mensagem manual assinada como Arnaldo
+    window.sendManualMessageAsArnaldo = async function() {
+        if (!currentLivePhone) return;
+        const input = document.getElementById('live-chat-reply-input');
+        const text = input?.value?.trim();
+        if (!text) return;
+
+        const btn = document.getElementById('btn-send-manual-msg');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Enviando...';
+
+        const formattedText = `👨‍🔧 *Arnaldo Trentin:* ${text}`;
+
+        try {
+            const supa = getSupa();
+            
+            // 1. Grava a mensagem na memória
+            await supa.from('agent_memory').insert({
+                phone: currentLivePhone,
+                role: 'model',
+                content: formattedText
+            });
+
+            // 2. Garante a pausa do robô para este cliente
+            await supa.from('agent_memory').insert({
+                phone: currentLivePhone,
+                role: 'user',
+                content: 'BOT_PAUSADO'
+            });
+
+            // 3. Dispara via Edge Function / UazAPI
+            await supa.functions.invoke('assistant-router', {
+                body: {
+                    action: 'send_manual_text',
+                    telefone_destino: currentLivePhone,
+                    mensagem: formattedText
+                }
+            });
+
+            input.value = '';
+            window.selectLiveConversation(currentLivePhone);
+
+        } catch (err) {
+            console.error('[LIVE CRM] Erro ao enviar mensagem manual:', err);
+            // Mesmo se a Edge Function falhar, a mensagem fica gravada no banco
+            input.value = '';
+            window.selectLiveConversation(currentLivePhone);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-user-tie"></i> Enviar como Arnaldo';
+        }
+    };
+
+    // Executar Ordem de IA para a Maria Cecília
+    window.executeAiActiveCommand = async function() {
+        if (!currentLivePhone) return;
+        const input = document.getElementById('live-chat-ai-cmd-input');
+        const cmdText = input?.value?.trim();
+        if (!cmdText) return;
+
+        const btn = document.getElementById('btn-exec-ai-cmd');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+
+        try {
+            const supa = getSupa();
+            const conv = liveConversations.find(c => c.phone === currentLivePhone);
+            const clientName = conv?.clientName || 'Cliente';
+
+            const fullPrompt = `Arnaldo (Gestor) ordenou para Maria Cecília: ${cmdText} para o cliente ${clientName} no telefone ${currentLivePhone}`;
+
+            const { data, error } = await supa.functions.invoke('assistant-router', {
+                body: {
+                    message: {
+                        text: fullPrompt,
+                        fromMe: true,
+                        remoteJid: currentLivePhone
+                    }
+                }
+            });
+
+            input.value = '';
+            setTimeout(() => {
+                window.selectLiveConversation(currentLivePhone);
+            }, 1800);
+
+        } catch (err) {
+            alert('Erro ao processar comando da IA: ' + err.message);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Disparar Ordem';
+        }
+    };
+
+    // ==========================================================================
+    // 🚫 LISTA NEGRA: GESTÃO DE CONTATOS PESSOAIS & AMIGOS
+    // ==========================================================================
+    window.loadBlacklistTable = async function() {
+        const tbody = document.querySelector('#table-blacklist-contacts tbody');
+        if (!tbody) return;
+
+        try {
+            const supa = getSupa();
+            const { data: list, error } = await supa.from('agent_memory')
+                .select('phone, created_at')
+                .in('content', ['BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA'])
+                .order('created_at', { ascending: false });
+
+            if (error) {
+                tbody.innerHTML = `<tr><td colspan="4" style="color:var(--accent-red);">Erro: ${error.message}</td></tr>`;
+                return;
+            }
+
+            // Agrupar únicos
+            const uniquePhones = {};
+            (list || []).forEach(item => {
+                if (item.phone && !uniquePhones[item.phone]) {
+                    uniquePhones[item.phone] = item;
+                }
+            });
+
+            const blacklisted = Object.values(uniquePhones);
+            const badgeEl = document.getElementById('count-blacklist');
+            if (badgeEl) badgeEl.textContent = blacklisted.length;
+
+            if (blacklisted.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:20px; color:var(--text-muted);">Nenhum número na Lista Negra. Todos os contatos são atendidos normalmente.</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = blacklisted.map(item => {
+                const clientObj = liveClientsMap[item.phone] || liveClientsMap[item.phone.replace(/^55/, '')];
+                const nome = clientObj ? clientObj.nome_cliente : 'Amigo / Contato Pessoal';
+                const dateStr = item.created_at ? new Date(item.created_at).toLocaleDateString('pt-BR') : '-';
+
+                return `
+                    <tr>
+                        <td style="font-weight: 700; color: #e74c3c;">${item.phone}</td>
+                        <td style="font-weight: 600;">${nome}</td>
+                        <td style="color: var(--text-muted); font-size: 0.85rem;">${dateStr}</td>
+                        <td>
+                            <button class="action-btn" onclick="window.removeContactFromBlacklist('${item.phone}')" style="background: rgba(37,211,102,0.15); color: #25D366; border: 1px solid rgba(37,211,102,0.3); font-size: 0.8rem; padding: 4px 10px;">
+                                <i class="fa-solid fa-unlock"></i> Desbloquear IA
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+
+        } catch (err) {
+            console.error('[BLACKLIST] Erro:', err);
+        }
+    };
+
+    window.addContactToBlacklist = async function() {
+        const inputNome = document.getElementById('blacklist-input-nome');
+        const inputPhone = document.getElementById('blacklist-input-phone');
+        const phone = inputPhone?.value?.trim().replace(/\D/g, '');
+        const nome = inputNome?.value?.trim();
+
+        if (!phone || phone.length < 8) {
+            alert('Por favor, digite um número de telefone WhatsApp válido.');
+            return;
+        }
+
+        let fullPhone = phone;
+        if (!fullPhone.startsWith('55') && fullPhone.length <= 11) {
+            fullPhone = '55' + fullPhone;
+        }
+
+        try {
+            const supa = getSupa();
+            await supa.from('agent_memory').insert({
+                phone: fullPhone,
+                role: 'user',
+                content: 'BOT_IGNORAR'
+            });
+
+            if (inputNome) inputNome.value = '';
+            if (inputPhone) inputPhone.value = '';
+
+            alert(`✅ Número ${fullPhone} adicionado à Lista Negra com sucesso!\nA Maria Cecília nunca mais responderá para este contato.`);
+            window.loadBlacklistTable();
+            window.loadLiveConversations();
+
+        } catch (err) {
+            alert('Erro ao adicionar à Lista Negra: ' + err.message);
+        }
+    };
+
+    window.removeContactFromBlacklist = async function(phone) {
+        if (!confirm(`Deseja desbloquear o número ${phone}?\n\nA Maria Cecília voltará a responder quando este contato mandar mensagem.`)) return;
+
+        try {
+            const supa = getSupa();
+            await supa.from('agent_memory').insert({
+                phone: phone,
+                role: 'user',
+                content: 'BOT_ATIVO'
+            });
+
+            window.loadBlacklistTable();
+            window.loadLiveConversations();
+        } catch (err) {
+            alert('Erro ao desbloquear: ' + err.message);
+        }
+    };
+
+    // ==========================================================================
+    // 📢 CAMPANHAS & OUTBOUND
+    // ==========================================================================
     window.setCampaignCategory = function(btn, tipo) {
         campaignTipo = tipo;
         document.querySelectorAll('.campaign-cat-btn').forEach(b => {
@@ -6817,7 +7420,6 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
         btn.style.border = '2px solid #25D366';
         btn.style.background = 'rgba(37,211,102,0.1)';
         
-        // Reset preview
         const previewArea = document.getElementById('campaign-preview-area');
         const sendBtn = document.getElementById('btn-campaign-send');
         if (previewArea) previewArea.style.display = 'none';
@@ -6827,7 +7429,6 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
         loadCampaignClients();
     };
 
-    // === LOAD CLIENTS WITH SMART FILTERING ===
     async function loadCampaignClients() {
         const supa = getSupa();
         const tbody = document.querySelector('#table-campaign-clients tbody');
@@ -6950,7 +7551,6 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
                 }
 
             } else {
-                // Atendimento: all clients
                 enrichedClients = clientes.map(c => ({ ...c, contexto: c.endereco_completo || 'Cliente cadastrado' }));
             }
 
@@ -7012,7 +7612,6 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
         }));
     }
 
-    // === PREVIEW ===
     window.gerarPreviaCampanha = async function() {
         const selected = getSelectedClients();
         if (selected.length === 0) {
@@ -7078,7 +7677,6 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
         area.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
-    // === SEND CAMPAIGN ===
     window.enviarCampanha = async function() {
         if (!campaignPreviewData) {
             alert('Gere a prévia primeiro.');
@@ -7122,6 +7720,7 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
                 document.querySelectorAll('.campaign-check').forEach(cb => cb.checked = false);
                 
                 loadCampaignHistory();
+                window.loadLiveConversations();
             } else {
                 alert('Erro ao enviar: ' + (data.error || 'Erro desconhecido'));
             }
@@ -7134,7 +7733,6 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
         }
     };
 
-    // === HISTORY ===
     window.loadCampaignHistory = async function() {
         const tbody = document.querySelector('#table-campaign-history tbody');
         if (!tbody) return;
@@ -7186,7 +7784,8 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
         }
     };
 
-    console.log('[CentralMensagens v1.1] Módulo Maria Cecília Outbound carregado.');
+    console.log('[CentralAtendimento v2.0] Live CRM, Outbound e Lista Negra carregados.');
 })();
+
 
 

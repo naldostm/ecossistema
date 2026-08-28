@@ -33,8 +33,12 @@ FALANDO COM PRESTADORES TÉCNICOS SÊNIOS (FRANCISCO E MAXWELL):
 - Se seu contexto disser que está falando com "Sr Francisco" ou "Sr Maxwell", não tente vender. Colete os relatórios de instalação e fotos deles, agradeça seus colegas de trabalho.
 
 AÇÃO MÁGICA - QUANDO DISPARAR:
-Assim que você concluir a coleta de dados de um cliente novo ou coletar os detalhes do serviço, pare a conversa e retorne IMEDIATAMENTE APENAS o JSON abaixo e MAIS NADA:
+1. Assim que você concluir a coleta de dados de um cliente novo ou coletar os detalhes do serviço, retorne IMEDIATAMENTE APENAS o JSON abaixo:
 {"acao": "CRIAR_CADASTRO", "nome_cliente": "Nome", "endereco_completo": "Endereço", "cpf_cnpj": "Opcional", "relato": "Forte Resumo do Caso", "mensagem_pro_cliente": "Seu agradecimento confirmando que está passando tudo para orçamentistas."}
+
+2. COMANDO DO GESTOR (ARNALDO):
+Se o Arnaldo pedir para você chamar, entrar em contato ou oferecer algum serviço/promoção/preventiva para um cliente específico ou número de telefone, monte a mensagem persuasiva e retorne APENAS o JSON:
+{"acao": "DISPARAR_CONTATO_ATIVO", "telefone_destino": "5511999999999", "nome_cliente": "Nome", "mensagem_gerada": "Texto completo, acolhedor e persuasivo para o cliente...", "confirmacao_gestor": "✅ Perfeito, Arnaldo! Já enviei a mensagem para o cliente."}
 
 REGRAS FINAIS:
 - Nunca use jargões de robô. Não invente valores, prazos de execução. Só cite o prazo do orçamento (48hrs).
@@ -198,7 +202,7 @@ serve(async (req) => {
           return;
       }
 
-      // CONTROLE DE PAUSA (Atendimento Humano Individual)
+      // CONTROLE DE PAUSA E COMANDOS DO GESTOR (Atendimento Humano Individual)
       const isMessageFromMe = payload?.message?.fromMe || payload?.fromMe || payload?.data?.key?.fromMe;
       const sentByApi = payload?.message?.wasSentByApi === true || payload?.data?.message?.wasSentByApi === true || payload?.wasSentByApi === true;
       
@@ -208,31 +212,48 @@ serve(async (req) => {
           // Se for uma mensagem digitada manualmente pelo humano (não-API)
           if (isMessageFromMe && !sentByApi && userMessage && userMessage.trim().length > 0) {
               const myText = userMessage.trim().toLowerCase();
-              if (myText === '/retomar') {
+              if (myText === '/ignorar' || myText === '/amigo' || myText === '/blacklist') {
+                  await supabase.from('agent_memory').insert({ phone: remoteJid, role: 'user', content: 'BOT_IGNORAR' });
+                  console.log(`[LISTA NEGRA] Contato ${remoteJid} adicionado à Lista Negra permanentemente.`);
+                  return;
+              }
+              if (myText === '/retomar' || myText === '/ativo') {
                   await supabase.from('agent_memory').insert({ phone: remoteJid, role: 'user', content: 'BOT_ATIVO' });
                   console.log(`[ATENDIMENTO HUMANO] Robô RETOMADO para o cliente ${remoteJid}`);
                   return;
               }
+              if (myText === '/pausar') {
+                  await supabase.from('agent_memory').insert({ phone: remoteJid, role: 'user', content: 'BOT_PAUSADO' });
+                  console.log(`[ATENDIMENTO HUMANO] Robô PAUSADO para o cliente ${remoteJid}`);
+                  return;
+              }
               // Caso o humano apenas mandou qualquer mensagem (ex: "Bom dia, aqui é o Arnaldo"), pausamos automaticamente
               await supabase.from('agent_memory').insert({ phone: remoteJid, role: 'user', content: 'BOT_PAUSADO' });
-              console.log(`[ATENDIMENTO HUMANO] Pausa Automática ativada ou confirmada no JID: ${remoteJid}`);
+              console.log(`[ATENDIMENTO HUMANO] Pausa Automática ativada no JID: ${remoteJid}`);
           }
           return;
       }
 
-      // VERIFICAÇÃO DE PAUSA TÉCNICA
+      // VERIFICAÇÃO DE LISTA NEGRA E PAUSA TÉCNICA
       const { data: pauseState } = await supabase
           .from('agent_memory')
           .select('content')
           .eq('phone', remoteJid)
           .eq('role', 'user')
-          .in('content', ['BOT_PAUSADO', 'BOT_ATIVO'])
+          .in('content', ['BOT_PAUSADO', 'BOT_ATIVO', 'BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA'])
           .order('created_at', { ascending: false })
           .limit(1);
           
-      if (pauseState && pauseState.length > 0 && pauseState[0].content === 'BOT_PAUSADO') {
-          console.log(`[PAUSADO] O robô está pausado manualmente para ${remoteJid}. Ignorando fluxo.`);
-          return;
+      if (pauseState && pauseState.length > 0) {
+          const state = pauseState[0].content;
+          if (state === 'BOT_IGNORAR' || state === 'AMIGO_IGNORAR' || state === 'LISTA_NEGRA') {
+              console.log(`[LISTA NEGRA] O robô está permanentemente ignorado para ${remoteJid} (Amigo/Família).`);
+              return;
+          }
+          if (state === 'BOT_PAUSADO') {
+              console.log(`[PAUSADO] O robô está pausado manualmente para ${remoteJid}. Ignorando fluxo.`);
+              return;
+          }
       }
 
       // evolution api / uazapi types para áudio ou imagem
@@ -600,6 +621,34 @@ serve(async (req) => {
                   if (insertErr) console.error("[ACTION] Erro ao inserir cliente:", insertErr);
                   else console.log(`[ACTION] ✅ CLIENTE SALVO: ${actionData.nome_cliente} | ${remoteJid}`);
                   whatsAppText = actionData.mensagem_pro_cliente || "✅ Perfeito! Tudo registrado e encaminhado aos responsáveis. Retornaremos assim que possível!";
+              }
+              else if (actionData.acao === "DISPARAR_CONTATO_ATIVO" && actionData.telefone_destino) {
+                  let targetPhone = String(actionData.telefone_destino).replace(/\D/g, '');
+                  if (!targetPhone.startsWith('55') && targetPhone.length <= 11) targetPhone = '55' + targetPhone;
+                  
+                  // Salva a mensagem no histórico do cliente para a IA manter o contexto
+                  await supabase.from('agent_memory').insert({
+                      phone: targetPhone,
+                      role: 'model',
+                      content: actionData.mensagem_gerada
+                  });
+
+                  // Dispara via UazAPI / WhatsApp
+                  if (uazapiUrl) {
+                      try {
+                          const endpoint = uazapiUrl.endsWith('/') ? `${uazapiUrl}send/text` : `${uazapiUrl}/send/text`;
+                          const activeToken = payload?.token || uazapiToken || '';
+                          await fetch(endpoint, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json', 'token': activeToken },
+                              body: JSON.stringify({ number: targetPhone, text: actionData.mensagem_gerada })
+                          });
+                          console.log(`[DISPARO ATIVO SUCESSO] Mensagem enviada para ${targetPhone}`);
+                      } catch (sendErr) {
+                          console.error("[DISPARO ATIVO ERRO] Falha ao enviar:", sendErr);
+                      }
+                  }
+                  whatsAppText = actionData.confirmacao_gestor || `✅ Mensagem enviada para ${actionData.nome_cliente || targetPhone} no WhatsApp!`;
               }
           }
       } catch(e) {

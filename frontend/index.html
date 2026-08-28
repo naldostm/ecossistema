@@ -490,102 +490,245 @@
                     </div>
                 </div>
 
-                <!-- VIEW: CENTRAL DE MENSAGENS — MARIA CECÍLIA OUTBOUND -->
+                <!-- VIEW: CENTRAL DE MENSAGENS — MARIA CECÍLIA LIVE CRM & OUTBOUND -->
                 <div id="view-mensagens" class="view-page" style="display:none;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;">
-                        <h2 style="font-size: 1.5rem; font-weight: 800; color: #25D366;"><i class="fa-brands fa-whatsapp"></i> Central de Mensagens — Maria Cecília</h2>
-                        <span class="agent-tag" style="background: rgba(37,211,102,0.15); color: #25D366; border: 1px solid rgba(37,211,102,0.3);">Outbound Inteligente</span>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <div>
+                            <h2 style="font-size: 1.5rem; font-weight: 800; color: #25D366; margin-bottom: 4px;"><i class="fa-brands fa-whatsapp"></i> Central de Atendimento — Maria Cecília</h2>
+                            <p style="font-size: 0.85rem; color: var(--text-muted);">Atendimento ao vivo, disparos ativos de vendas e gestão de contatos pessoais.</p>
+                        </div>
+                        <span class="agent-tag" style="background: rgba(37,211,102,0.15); color: #25D366; border: 1px solid rgba(37,211,102,0.3); font-size: 0.85rem; padding: 6px 14px;">
+                            <i class="fa-solid fa-bolt"></i> Live CRM + Outbound
+                        </span>
                     </div>
 
-                    <!-- CATEGORIAS -->
-                    <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 25px;" id="campaign-categories">
-                        <button class="glass-panel campaign-cat-btn active" data-tipo="atendimento" onclick="window.setCampaignCategory(this, 'atendimento')" style="padding: 18px 12px; text-align: center; cursor: pointer; border: 2px solid #25D366; border-radius: 12px; background: rgba(37,211,102,0.1); transition: all 0.3s;">
-                            <div style="font-size: 1.8rem; margin-bottom: 8px;">👋</div>
-                            <div style="font-weight: 700; font-size: 0.85rem; color: var(--text-primary);">Atendimento</div>
-                            <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 4px;">Novos clientes</div>
+                    <!-- ABAS DE NAVEGAÇÃO -->
+                    <div style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;" id="mensagens-nav-tabs">
+                        <button class="action-btn tab-btn-msg active" id="btn-tab-live" onclick="window.switchMensagensTab('live')" style="background: rgba(37,211,102,0.18); color: #25D366; border: 1px solid rgba(37,211,102,0.4); padding: 10px 18px; font-weight: 700; border-radius: 8px; font-size: 0.85rem;">
+                            <i class="fa-solid fa-comments"></i> Conversas ao Vivo
                         </button>
-                        <button class="glass-panel campaign-cat-btn" data-tipo="orcamento" onclick="window.setCampaignCategory(this, 'orcamento')" style="padding: 18px 12px; text-align: center; cursor: pointer; border: 2px solid transparent; border-radius: 12px; transition: all 0.3s;">
-                            <div style="font-size: 1.8rem; margin-bottom: 8px;">💰</div>
-                            <div style="font-weight: 700; font-size: 0.85rem; color: var(--text-primary);">Orçamento</div>
-                            <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 4px;">Enviar propostas</div>
+                        <button class="action-btn tab-btn-msg" id="btn-tab-campanhas" onclick="window.switchMensagensTab('campanhas')" style="background: var(--surface-light); color: var(--text-primary); border: 1px solid var(--border-color); padding: 10px 18px; font-weight: 700; border-radius: 8px; font-size: 0.85rem;">
+                            <i class="fa-solid fa-bullhorn"></i> Campanhas & Prospecção
                         </button>
-                        <button class="glass-panel campaign-cat-btn" data-tipo="confirmacao" onclick="window.setCampaignCategory(this, 'confirmacao')" style="padding: 18px 12px; text-align: center; cursor: pointer; border: 2px solid transparent; border-radius: 12px; transition: all 0.3s;">
-                            <div style="font-size: 1.8rem; margin-bottom: 8px;">✅</div>
-                            <div style="font-weight: 700; font-size: 0.85rem; color: var(--text-primary);">Confirmação</div>
-                            <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 4px;">Agendam. de OS</div>
-                        </button>
-                        <button class="glass-panel campaign-cat-btn" data-tipo="pos_venda" onclick="window.setCampaignCategory(this, 'pos_venda')" style="padding: 18px 12px; text-align: center; cursor: pointer; border: 2px solid transparent; border-radius: 12px; transition: all 0.3s;">
-                            <div style="font-size: 1.8rem; margin-bottom: 8px;">⭐</div>
-                            <div style="font-weight: 700; font-size: 0.85rem; color: var(--text-primary);">Pós-venda</div>
-                            <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 4px;">Garantia / Satisf.</div>
-                        </button>
-                        <button class="glass-panel campaign-cat-btn" data-tipo="cobranca" onclick="window.setCampaignCategory(this, 'cobranca')" style="padding: 18px 12px; text-align: center; cursor: pointer; border: 2px solid transparent; border-radius: 12px; transition: all 0.3s;">
-                            <div style="font-size: 1.8rem; margin-bottom: 8px;">💳</div>
-                            <div style="font-weight: 700; font-size: 0.85rem; color: var(--text-primary);">Cobrança</div>
-                            <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 4px;">Pagamentos</div>
+                        <button class="action-btn tab-btn-msg" id="btn-tab-blacklist" onclick="window.switchMensagensTab('blacklist')" style="background: var(--surface-light); color: var(--text-primary); border: 1px solid var(--border-color); padding: 10px 18px; font-weight: 700; border-radius: 8px; font-size: 0.85rem;">
+                            <i class="fa-solid fa-user-shield"></i> Lista Negra / Amigos (<span id="count-blacklist">0</span>)
                         </button>
                     </div>
 
-                    <!-- BRIEFING -->
-                    <div class="glass-panel" style="padding: 20px; margin-bottom: 20px; border-left: 4px solid #25D366;">
-                        <label style="font-weight: 700; font-size: 0.9rem; color: #25D366; display: block; margin-bottom: 10px;">
-                            <i class="fa-solid fa-pen-to-square"></i> Briefing para Maria Cecília
-                        </label>
-                        <textarea id="campaign-briefing" rows="3" class="modal-input" placeholder="Ex: Ofereça revisão preventiva de inverno com 15% de desconto para quem fechar até sexta..." style="width: 100%; color: #000; background: #fff; border: 1px solid rgba(37,211,102,0.4); border-radius: 8px; font-size: 0.9rem; resize: vertical;"></textarea>
-                        <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 5px;"><i class="fa-solid fa-lightbulb"></i> Quanto mais detalhado, melhor a Maria Cecília personaliza. Se vazio, ela segue o padrão da categoria.</div>
-                    </div>
+                    <!-- PANE 1: CONVERSAS AO VIVO (LIVE CRM INBOX) -->
+                    <div id="pane-mensagens-live" class="msg-subpane" style="display: block;">
+                        <div style="display: grid; grid-template-columns: 340px 1fr; gap: 16px; min-height: 640px; height: calc(100vh - 280px);">
+                            
+                            <!-- COLUNA ESQUERDA: LISTA DE CONVERSAS -->
+                            <div class="glass-panel" style="display: flex; flex-direction: column; padding: 14px; border-radius: 12px; height: 100%; overflow: hidden;">
+                                <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                                    <input type="text" id="live-chat-search" class="modal-input" placeholder="Buscar cliente ou telefone..." style="flex: 1; font-size: 0.85rem; color: #000; background: #fff; border: 1px solid var(--border-color); padding: 8px 12px; border-radius: 8px;" onkeyup="window.filterLiveConversations()">
+                                    <button class="action-btn" onclick="window.loadLiveConversations()" title="Atualizar conversas" style="background: var(--surface-light); padding: 8px 12px; font-size: 0.85rem; border-radius: 8px;">
+                                        <i class="fa-solid fa-rotate"></i>
+                                    </button>
+                                </div>
+                                
+                                <div id="live-chat-conversations-list" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px;">
+                                    <div style="text-align: center; padding: 30px 10px; color: var(--text-muted); font-size: 0.85rem;">
+                                        <i class="fa-solid fa-spinner fa-spin" style="font-size: 1.5rem; margin-bottom: 8px; display: block;"></i> Carregando conversas do WhatsApp...
+                                    </div>
+                                </div>
+                            </div>
 
-                    <!-- SELETOR DE CLIENTES -->
-                    <div class="glass-panel table-container" style="margin-bottom: 20px;">
-                        <div class="widget-header">
-                            <h2><i class="fa-solid fa-users"></i> Clientes <span id="campaign-client-count" style="font-size: 0.8rem; color: var(--text-muted);">(carregando...)</span></h2>
-                            <div style="display: flex; gap: 10px; align-items: center;">
-                                <input type="text" id="campaign-search" class="modal-input" placeholder="Buscar cliente..." style="width: 200px; color: #000; background: #fff; border: 1px solid var(--border-color); font-size: 0.85rem;" onkeyup="window.filterCampaignClients()">
-                                <button class="action-btn" onclick="window.toggleAllCampaignChecks()" style="background: var(--surface-light); font-size: 0.8rem; padding: 6px 12px;"><i class="fa-solid fa-check-double"></i> Todos</button>
+                            <!-- COLUNA DIREITA: FEED DO CHAT SELECIONADO -->
+                            <div class="glass-panel" id="live-chat-main-area" style="display: flex; flex-direction: column; padding: 0; border-radius: 12px; height: 100%; overflow: hidden; border: 1px solid rgba(255,255,255,0.08);">
+                                
+                                <!-- HEADER DO CHAT -->
+                                <div id="live-chat-header" style="display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--border-color); background: rgba(0,0,0,0.25);">
+                                    <div style="display: flex; align-items: center; gap: 12px;">
+                                        <div id="live-chat-contact-avatar" style="width: 42px; height: 42px; border-radius: 50%; background: #25D366; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 1.1rem;">
+                                            ?
+                                        </div>
+                                        <div>
+                                            <div id="live-chat-contact-name" style="font-weight: 700; font-size: 1rem; color: var(--text-primary);">Selecione uma conversa</div>
+                                            <div id="live-chat-contact-phone" style="font-size: 0.8rem; color: var(--text-muted);">-</div>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- AÇÕES RÁPIDAS NO HEADER -->
+                                    <div id="live-chat-header-actions" style="display: none; gap: 8px; align-items: center;">
+                                        <span id="live-chat-status-badge" style="font-size: 0.75rem; padding: 4px 10px; border-radius: 20px; font-weight: 700; background: rgba(37,211,102,0.15); color: #25D366; border: 1px solid rgba(37,211,102,0.3);">
+                                            🤖 Maria Cecília Ativa
+                                        </span>
+                                        <button class="action-btn" id="btn-toggle-pause-chat" onclick="window.toggleCurrentChatPause()" style="background: var(--surface-light); font-size: 0.8rem; padding: 6px 12px; border-radius: 6px;" title="Pausar ou reativar IA para este cliente">
+                                            <i class="fa-solid fa-pause"></i> Pausar IA
+                                        </button>
+                                        <button class="action-btn" id="btn-toggle-blacklist-chat" onclick="window.toggleCurrentChatBlacklist()" style="background: rgba(231,76,60,0.15); color: #e74c3c; border: 1px solid rgba(231,76,60,0.3); font-size: 0.8rem; padding: 6px 12px; border-radius: 6px;" title="Marcar como amigo para a IA nunca falar">
+                                            <i class="fa-solid fa-ban"></i> Ignorar IA
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- STREAM DE MENSAGENS -->
+                                <div id="live-chat-messages-stream" style="flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 12px; background: rgba(0,0,0,0.15);">
+                                    <div style="text-align: center; margin: auto; color: var(--text-muted); font-size: 0.9rem;">
+                                        <i class="fa-brands fa-whatsapp" style="font-size: 2.5rem; color: #25D366; margin-bottom: 10px; display: block; opacity: 0.6;"></i>
+                                        Selecione uma conversa ao lado para visualizar e interagir em tempo real.
+                                    </div>
+                                </div>
+
+                                <!-- FOOTER COM ENVIO MANUAL E COMANDO DA IA -->
+                                <div id="live-chat-footer" style="display: none; padding: 14px 18px; border-top: 1px solid var(--border-color); background: rgba(0,0,0,0.3); flex-direction: column; gap: 10px;">
+                                    
+                                    <!-- RESPOSTA MANUAL COMO ARNALDO -->
+                                    <div style="display: flex; gap: 10px; align-items: center;">
+                                        <input type="text" id="live-chat-reply-input" class="modal-input" placeholder="Digite uma resposta manual para o cliente..." style="flex: 1; color: #000; background: #fff; border: 1px solid var(--border-color); padding: 10px 14px; border-radius: 8px; font-size: 0.9rem;" onkeydown="if(event.key==='Enter') window.sendManualMessageAsArnaldo()">
+                                        <button class="action-btn" id="btn-send-manual-msg" onclick="window.sendManualMessageAsArnaldo()" style="background: #2980b9; color: #fff; font-weight: 700; padding: 0 18px; height: 42px; border-radius: 8px; white-space: nowrap;">
+                                            <i class="fa-solid fa-user-tie"></i> Enviar como Arnaldo
+                                        </button>
+                                    </div>
+
+                                    <!-- CAIXA DE COMANDO RÁPIDO PARA MARIA CECÍLIA (⚡) -->
+                                    <div style="display: flex; gap: 10px; align-items: center; background: rgba(37,211,102,0.06); padding: 8px 12px; border-radius: 8px; border: 1px dashed rgba(37,211,102,0.4);">
+                                        <span style="font-size: 0.8rem; font-weight: 800; color: #25D366; white-space: nowrap;"><i class="fa-solid fa-bolt"></i> Ordem para Maria:</span>
+                                        <input type="text" id="live-chat-ai-cmd-input" class="modal-input" placeholder="Ex: Ofereça a preventiva com 10% de desconto se ele fechar para esta semana..." style="flex: 1; color: #000; background: #fff; border: 1px solid rgba(37,211,102,0.3); padding: 6px 10px; border-radius: 6px; font-size: 0.85rem;" onkeydown="if(event.key==='Enter') window.executeAiActiveCommand()">
+                                        <button class="action-btn" id="btn-exec-ai-cmd" onclick="window.executeAiActiveCommand()" style="background: #25D366; color: #fff; font-weight: 700; padding: 0 14px; height: 34px; border-radius: 6px; font-size: 0.8rem; white-space: nowrap;">
+                                            <i class="fa-solid fa-paper-plane"></i> Disparar Ordem
+                                        </button>
+                                    </div>
+
+                                </div>
+
                             </div>
                         </div>
-                        <div id="campaign-clients-list" style="max-height: 350px; overflow-y: auto;">
-                            <table class="data-table" id="table-campaign-clients">
-                                <thead><tr>
-                                    <th style="width: 40px;"></th>
-                                    <th>Cliente</th>
-                                    <th>WhatsApp</th>
-                                    <th>Contexto</th>
-                                </tr></thead>
+                    </div>
+
+                    <!-- PANE 2: CAMPANHAS & PROSPECÇÃO (OUTBOUND) -->
+                    <div id="pane-mensagens-campanhas" class="msg-subpane" style="display: none;">
+                        <!-- CATEGORIAS -->
+                        <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 25px;" id="campaign-categories">
+                            <button class="glass-panel campaign-cat-btn active" data-tipo="atendimento" onclick="window.setCampaignCategory(this, 'atendimento')" style="padding: 18px 12px; text-align: center; cursor: pointer; border: 2px solid #25D366; border-radius: 12px; background: rgba(37,211,102,0.1); transition: all 0.3s;">
+                                <div style="font-size: 1.8rem; margin-bottom: 8px;">👋</div>
+                                <div style="font-weight: 700; font-size: 0.85rem; color: var(--text-primary);">Atendimento</div>
+                                <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 4px;">Novos clientes</div>
+                            </button>
+                            <button class="glass-panel campaign-cat-btn" data-tipo="orcamento" onclick="window.setCampaignCategory(this, 'orcamento')" style="padding: 18px 12px; text-align: center; cursor: pointer; border: 2px solid transparent; border-radius: 12px; transition: all 0.3s;">
+                                <div style="font-size: 1.8rem; margin-bottom: 8px;">💰</div>
+                                <div style="font-weight: 700; font-size: 0.85rem; color: var(--text-primary);">Orçamento</div>
+                                <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 4px;">Enviar propostas</div>
+                            </button>
+                            <button class="glass-panel campaign-cat-btn" data-tipo="confirmacao" onclick="window.setCampaignCategory(this, 'confirmacao')" style="padding: 18px 12px; text-align: center; cursor: pointer; border: 2px solid transparent; border-radius: 12px; transition: all 0.3s;">
+                                <div style="font-size: 1.8rem; margin-bottom: 8px;">✅</div>
+                                <div style="font-weight: 700; font-size: 0.85rem; color: var(--text-primary);">Confirmação</div>
+                                <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 4px;">Agendam. de OS</div>
+                            </button>
+                            <button class="glass-panel campaign-cat-btn" data-tipo="pos_venda" onclick="window.setCampaignCategory(this, 'pos_venda')" style="padding: 18px 12px; text-align: center; cursor: pointer; border: 2px solid transparent; border-radius: 12px; transition: all 0.3s;">
+                                <div style="font-size: 1.8rem; margin-bottom: 8px;">⭐</div>
+                                <div style="font-weight: 700; font-size: 0.85rem; color: var(--text-primary);">Pós-venda</div>
+                                <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 4px;">Garantia / Satisf.</div>
+                            </button>
+                            <button class="glass-panel campaign-cat-btn" data-tipo="cobranca" onclick="window.setCampaignCategory(this, 'cobranca')" style="padding: 18px 12px; text-align: center; cursor: pointer; border: 2px solid transparent; border-radius: 12px; transition: all 0.3s;">
+                                <div style="font-size: 1.8rem; margin-bottom: 8px;">💳</div>
+                                <div style="font-weight: 700; font-size: 0.85rem; color: var(--text-primary);">Cobrança</div>
+                                <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 4px;">Pagamentos</div>
+                            </button>
+                        </div>
+
+                        <!-- BRIEFING -->
+                        <div class="glass-panel" style="padding: 20px; margin-bottom: 20px; border-left: 4px solid #25D366;">
+                            <label style="font-weight: 700; font-size: 0.9rem; color: #25D366; display: block; margin-bottom: 10px;">
+                                <i class="fa-solid fa-pen-to-square"></i> Briefing para Maria Cecília
+                            </label>
+                            <textarea id="campaign-briefing" rows="3" class="modal-input" placeholder="Ex: Ofereça revisão preventiva de inverno com 15% de desconto para quem fechar até sexta..." style="width: 100%; color: #000; background: #fff; border: 1px solid rgba(37,211,102,0.4); border-radius: 8px; font-size: 0.9rem; resize: vertical;"></textarea>
+                            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 5px;"><i class="fa-solid fa-lightbulb"></i> Quanto mais detalhado, melhor a Maria Cecília personaliza. Se vazio, ela segue o padrão da categoria.</div>
+                        </div>
+
+                        <!-- SELETOR DE CLIENTES -->
+                        <div class="glass-panel table-container" style="margin-bottom: 20px;">
+                            <div class="widget-header">
+                                <h2><i class="fa-solid fa-users"></i> Clientes <span id="campaign-client-count" style="font-size: 0.8rem; color: var(--text-muted);">(carregando...)</span></h2>
+                                <div style="display: flex; gap: 10px; align-items: center;">
+                                    <input type="text" id="campaign-search" class="modal-input" placeholder="Buscar cliente..." style="width: 200px; color: #000; background: #fff; border: 1px solid var(--border-color); font-size: 0.85rem;" onkeyup="window.filterCampaignClients()">
+                                    <button class="action-btn" onclick="window.toggleAllCampaignChecks()" style="background: var(--surface-light); font-size: 0.8rem; padding: 6px 12px;"><i class="fa-solid fa-check-double"></i> Todos</button>
+                                </div>
+                            </div>
+                            <div id="campaign-clients-list" style="max-height: 350px; overflow-y: auto;">
+                                <table class="data-table" id="table-campaign-clients">
+                                    <thead><tr>
+                                        <th style="width: 40px;"></th>
+                                        <th>Cliente</th>
+                                        <th>WhatsApp</th>
+                                        <th>Contexto</th>
+                                    </tr></thead>
+                                    <tbody><!-- Dinâmico --></tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- AÇÕES -->
+                        <div style="display: flex; gap: 15px; margin-bottom: 25px;">
+                            <button class="action-btn" id="btn-campaign-preview" onclick="window.gerarPreviaCampanha()" style="background: rgba(37,211,102,0.2); border: 1px solid #25D366; color: #25D366; height: 48px; padding: 0 30px; font-weight: 800; font-size: 0.95rem; flex: 1;">
+                                <i class="fa-solid fa-eye"></i> Gerar Prévia das Mensagens
+                            </button>
+                            <button class="action-btn" id="btn-campaign-send" onclick="window.enviarCampanha()" style="background: #25D366; color: #fff; height: 48px; padding: 0 30px; font-weight: 800; font-size: 0.95rem; flex: 1;" disabled>
+                                <i class="fa-brands fa-whatsapp"></i> Enviar Campanha
+                            </button>
+                        </div>
+
+                        <!-- PRÉVIA DAS MENSAGENS -->
+                        <div id="campaign-preview-area" style="display: none; margin-bottom: 25px;">
+                            <div class="glass-panel" style="padding: 20px; border-left: 4px solid var(--accent-orange);">
+                                <h3 style="color: var(--accent-orange); margin-bottom: 15px;"><i class="fa-solid fa-eye"></i> Prévia — Revise antes de enviar</h3>
+                                <div id="campaign-preview-cards" style="display: flex; flex-direction: column; gap: 12px;"></div>
+                            </div>
+                        </div>
+
+                        <!-- HISTÓRICO -->
+                        <div class="glass-panel table-container">
+                            <div class="widget-header">
+                                <h2 style="font-size: 1rem;"><i class="fa-solid fa-clock-rotate-left"></i> Histórico de Envios</h2>
+                                <button class="action-btn" onclick="window.loadCampaignHistory()" style="background: var(--surface-light); font-size: 0.8rem;"><i class="fa-solid fa-rotate"></i></button>
+                            </div>
+                            <table class="data-table" id="table-campaign-history">
+                                <thead><tr><th>Data</th><th>Tipo</th><th>Cliente</th><th>Mensagem</th><th>Status</th></tr></thead>
                                 <tbody><!-- Dinâmico --></tbody>
                             </table>
                         </div>
                     </div>
 
-                    <!-- AÇÕES -->
-                    <div style="display: flex; gap: 15px; margin-bottom: 25px;">
-                        <button class="action-btn" id="btn-campaign-preview" onclick="window.gerarPreviaCampanha()" style="background: rgba(37,211,102,0.2); border: 1px solid #25D366; color: #25D366; height: 48px; padding: 0 30px; font-weight: 800; font-size: 0.95rem; flex: 1;">
-                            <i class="fa-solid fa-eye"></i> Gerar Prévia das Mensagens
-                        </button>
-                        <button class="action-btn" id="btn-campaign-send" onclick="window.enviarCampanha()" style="background: #25D366; color: #fff; height: 48px; padding: 0 30px; font-weight: 800; font-size: 0.95rem; flex: 1;" disabled>
-                            <i class="fa-brands fa-whatsapp"></i> Enviar Campanha
-                        </button>
-                    </div>
+                    <!-- PANE 3: LISTA NEGRA / CONTATOS PESSOAIS & AMIGOS -->
+                    <div id="pane-mensagens-blacklist" class="msg-subpane" style="display: none;">
+                        <div class="glass-panel" style="padding: 20px; margin-bottom: 20px; border-left: 4px solid #e74c3c;">
+                            <h3 style="color: #e74c3c; font-size: 1.1rem; margin-bottom: 8px;">
+                                <i class="fa-solid fa-shield-halved"></i> Proteção de Contatos Pessoais e Amigos
+                            </h3>
+                            <p style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.5;">
+                                A Maria Cecília <strong>nunca enviará mensagens e nem responderá</strong> para os números cadastrados nesta lista. Seus amigos, familiares e contatos pessoais podem conversar com você normalmente pelo seu WhatsApp nativo sem nenhuma interferência da IA.
+                            </p>
+                        </div>
 
-                    <!-- PRÉVIA DAS MENSAGENS -->
-                    <div id="campaign-preview-area" style="display: none; margin-bottom: 25px;">
-                        <div class="glass-panel" style="padding: 20px; border-left: 4px solid var(--accent-orange);">
-                            <h3 style="color: var(--accent-orange); margin-bottom: 15px;"><i class="fa-solid fa-eye"></i> Prévia — Revise antes de enviar</h3>
-                            <div id="campaign-preview-cards" style="display: flex; flex-direction: column; gap: 12px;"></div>
+                        <!-- CADASTRO RÁPIDO NA LISTA NEGRA -->
+                        <div class="glass-panel" style="padding: 20px; margin-bottom: 20px;">
+                            <h4 style="font-size: 0.95rem; font-weight: 700; color: var(--text-primary); margin-bottom: 14px;">
+                                <i class="fa-solid fa-user-plus"></i> Adicionar Número à Lista Negra
+                            </h4>
+                            <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                                <input type="text" id="blacklist-input-nome" class="modal-input" placeholder="Nome do amigo ou familiar (Ex: Marcos Amigo)" style="flex: 1; min-width: 200px; color: #000; background: #fff; border: 1px solid var(--border-color); padding: 10px 12px; border-radius: 8px; font-size: 0.85rem;">
+                                <input type="text" id="blacklist-input-phone" class="modal-input" placeholder="Telefone WhatsApp (Ex: 11999999999)" style="flex: 1; min-width: 200px; color: #000; background: #fff; border: 1px solid var(--border-color); padding: 10px 12px; border-radius: 8px; font-size: 0.85rem;">
+                                <button class="action-btn" onclick="window.addContactToBlacklist()" style="background: #e74c3c; color: #fff; font-weight: 700; padding: 0 24px; height: 42px; border-radius: 8px;">
+                                    <i class="fa-solid fa-ban"></i> Bloquear para IA
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- TABELA DE NÚMEROS BLOQUEADOS -->
+                        <div class="glass-panel table-container">
+                            <div class="widget-header">
+                                <h2><i class="fa-solid fa-users-slash"></i> Contatos Bloqueados da IA</h2>
+                                <button class="action-btn" onclick="window.loadBlacklistTable()" style="background: var(--surface-light); font-size: 0.8rem;"><i class="fa-solid fa-rotate"></i></button>
+                            </div>
+                            <table class="data-table" id="table-blacklist-contacts">
+                                <thead><tr><th>Telefone</th><th>Identificação</th><th>Data de Bloqueio</th><th>Ações</th></tr></thead>
+                                <tbody><!-- Dinâmico --></tbody>
+                            </table>
                         </div>
                     </div>
 
-                    <!-- HISTÓRICO -->
-                    <div class="glass-panel table-container">
-                        <div class="widget-header">
-                            <h2 style="font-size: 1rem;"><i class="fa-solid fa-clock-rotate-left"></i> Histórico de Envios</h2>
-                            <button class="action-btn" onclick="window.loadCampaignHistory()" style="background: var(--surface-light); font-size: 0.8rem;"><i class="fa-solid fa-rotate"></i></button>
-                        </div>
-                        <table class="data-table" id="table-campaign-history">
-                            <thead><tr><th>Data</th><th>Tipo</th><th>Cliente</th><th>Mensagem</th><th>Status</th></tr></thead>
-                            <tbody><!-- Dinâmico --></tbody>
-                        </table>
-                    </div>
                 </div>
 
                 <!-- VIEW: PROPOSTAS & ORÇAMENTOS (NOVO) -->
