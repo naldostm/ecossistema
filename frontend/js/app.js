@@ -7116,23 +7116,48 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
 
                 // Mensagem do Cliente (User)
                 if (msg.role === 'user') {
-                    let cleanUserText = (msg.content || '').replace(/\[MSG_ID:[^\]]+\]\s*/g, '');
-                    const isAudioMsg = cleanUserText.includes('Áudio') || cleanUserText.includes('audio') || cleanUserText.includes('🎙️') || cleanUserText.includes('voz');
-                    const isPhotoMsg = cleanUserText.includes('Foto') || cleanUserText.includes('📷') || cleanUserText.includes('imagem');
+                    let cleanUserText = (msg.content || '');
+                    
+                    let base64Audio = null;
+                    let base64Image = null;
+                    
+                    const audioMatch = cleanUserText.match(/\[MEDIA_AUDIO_B64:([^\|]+)\|([^\]]+)\]/);
+                    if (audioMatch) {
+                        base64Audio = `data:${audioMatch[1]};base64,${audioMatch[2]}`;
+                    }
+                    
+                    const imageMatch = cleanUserText.match(/\[MEDIA_IMAGE_B64:([^\|]+)\|([^\]]+)\]/);
+                    if (imageMatch) {
+                        base64Image = `data:${imageMatch[1]};base64,${imageMatch[2]}`;
+                    }
+
+                    cleanUserText = cleanUserText
+                        .replace(/\[MSG_ID:[^\]]+\]\s*/g, '')
+                        .replace(/\[MEDIA_AUDIO_B64:[^\]]+\]\s*/g, '')
+                        .replace(/\[MEDIA_IMAGE_B64:[^\]]+\]\s*/g, '');
+
+                    const isAudioMsg = base64Audio || cleanUserText.includes('Áudio') || cleanUserText.includes('audio') || cleanUserText.includes('🎙️') || cleanUserText.includes('voz');
+                    const isPhotoMsg = base64Image || cleanUserText.includes('Foto') || cleanUserText.includes('📷') || cleanUserText.includes('imagem');
 
                     let mediaBadge = '';
                     if (isAudioMsg) {
                         mediaBadge = `
-                            <div style="display:flex; align-items:center; gap:8px; background:rgba(37,211,102,0.12); padding:6px 10px; border-radius:6px; border:1px solid rgba(37,211,102,0.25); margin-bottom:6px;">
-                                <i class="fa-solid fa-microphone-lines" style="color:#25D366; font-size:1rem;"></i>
-                                <span style="font-size:0.82rem; font-weight:700; color:#25D366;">Mensagem de Áudio (WhatsApp)</span>
+                            <div style="display:flex; flex-direction:column; gap:8px; background:rgba(37,211,102,0.12); padding:6px 10px; border-radius:6px; border:1px solid rgba(37,211,102,0.25); margin-bottom:6px;">
+                                <div style="display:flex; align-items:center; gap:8px;">
+                                    <i class="fa-solid fa-microphone-lines" style="color:#25D366; font-size:1rem;"></i>
+                                    <span style="font-size:0.82rem; font-weight:700; color:#25D366;">Mensagem de Áudio (WhatsApp)</span>
+                                </div>
+                                ${base64Audio ? `<audio controls src="${base64Audio}" style="width: 100%; height: 40px; margin-top: 5px; outline: none; border-radius: 4px;"></audio>` : ''}
                             </div>
                         `;
                     } else if (isPhotoMsg) {
                         mediaBadge = `
-                            <div style="display:flex; align-items:center; gap:8px; background:rgba(52,152,219,0.12); padding:6px 10px; border-radius:6px; border:1px solid rgba(52,152,219,0.25); margin-bottom:6px;">
-                                <i class="fa-solid fa-camera" style="color:#3498db; font-size:1rem;"></i>
-                                <span style="font-size:0.82rem; font-weight:700; color:#3498db;">Foto / Imagem Anexada</span>
+                            <div style="display:flex; flex-direction:column; gap:8px; background:rgba(52,152,219,0.12); padding:6px 10px; border-radius:6px; border:1px solid rgba(52,152,219,0.25); margin-bottom:6px;">
+                                <div style="display:flex; align-items:center; gap:8px;">
+                                    <i class="fa-solid fa-camera" style="color:#3498db; font-size:1rem;"></i>
+                                    <span style="font-size:0.82rem; font-weight:700; color:#3498db;">Foto / Imagem Anexada</span>
+                                </div>
+                                ${base64Image ? `<img src="${base64Image}" style="max-width: 100%; border-radius: 6px; margin-top: 5px;" alt="Imagem do Cliente" />` : ''}
                             </div>
                         `;
                     }

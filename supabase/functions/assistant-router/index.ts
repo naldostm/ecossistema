@@ -550,8 +550,16 @@ serve(async (req) => {
       // =========================================================================
 
       const msgIdTag = messageId ? `[MSG_ID:${messageId}] ` : '';
-      const exactUserPayload = `${msgIdTag}Mensagem do Cliente (${pushName}): ${userMessage}`;
+      let exactUserPayload = `${msgIdTag}Mensagem do Cliente (${pushName}): ${userMessage}`;
       
+      if (mediaPart && mediaPart.inlineData) {
+          if (hasAudio) {
+              exactUserPayload += `\n[MEDIA_AUDIO_B64:${mediaPart.inlineData.mimeType}|${mediaPart.inlineData.data}]`;
+          } else {
+              exactUserPayload += `\n[MEDIA_IMAGE_B64:${mediaPart.inlineData.mimeType}|${mediaPart.inlineData.data}]`;
+          }
+      }
+
       // 1. O Isolate insere imediatamente a mensagem do usuário no banco
       const { data: insertedData, error: insertError } = await supabase.from('agent_memory').insert({
           phone: remoteJid,
@@ -603,7 +611,10 @@ serve(async (req) => {
       let squashedHistory: any[] = [];
       let lastRole: string | null = null;
       for (const msg of rawHistory) {
-          const cleanContent = (msg.content || '').replace(/\[MSG_ID:[^\]]+\]\s*/g, '');
+          const cleanContent = (msg.content || '')
+              .replace(/\[MSG_ID:[^\]]+\]\s*/g, '')
+              .replace(/\[MEDIA_AUDIO_B64:[^\]]+\]\s*/g, '')
+              .replace(/\[MEDIA_IMAGE_B64:[^\]]+\]\s*/g, '');
           const r = msg.role === 'model' ? 'model' : 'user';
           if (r === lastRole && squashedHistory.length > 0) {
               squashedHistory[squashedHistory.length - 1].parts[0].text += `\n${cleanContent}`;
@@ -619,7 +630,11 @@ serve(async (req) => {
       }
 
       // A última entrada no squashedHistory agora é a mensagem consolidada do cliente
-      let currentPrompt = exactUserPayload;
+      let currentPrompt = exactUserPayload
+          .replace(/\[MSG_ID:[^\]]+\]\s*/g, '')
+          .replace(/\[MEDIA_AUDIO_B64:[^\]]+\]\s*/g, '')
+          .replace(/\[MEDIA_IMAGE_B64:[^\]]+\]\s*/g, '');
+          
       if (squashedHistory.length > 0 && squashedHistory[squashedHistory.length - 1].role === 'user') {
           const lastTurn = squashedHistory.pop();
           currentPrompt = lastTurn.parts[0].text;
