@@ -100,14 +100,23 @@ serve(async (req) => {
   if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
 
   let payload;
+  let rawText = "";
   try {
-      payload = await req.json();
-      console.log("[PAYLOAD UAZAPI LIDO - COMPLETO]:", JSON.stringify(payload));
-      if (req.url.includes('?rawlog=1')) {
-          await supabase.from('agent_memory').insert({ phone: 'DEBUG_AUDIO', role: 'system', content: JSON.stringify(payload) });
+      rawText = await req.text();
+      try {
+          payload = JSON.parse(rawText);
+      } catch (parseErr) {
+          const { error: insErr } = await supabase.from('agent_memory').insert({ phone: 'DEBUG_AUDIO', role: 'user', content: 'JSON PARSE ERROR. Raw text: ' + rawText.substring(0, 1000) });
+          if (insErr) console.error("DEBUG INSERT ERROR:", insErr);
+          return new Response("Bad Request Payload", { status: 400 });
       }
+      
+      console.log("[PAYLOAD UAZAPI LIDO - COMPLETO]:", rawText);
+      const { error: insErr2 } = await supabase.from('agent_memory').insert({ phone: 'DEBUG_AUDIO', role: 'user', content: rawText });
+      if (insErr2) console.error("DEBUG INSERT ERROR 2:", insErr2);
   } catch (err) {
-      console.error("[CRITICAL] Falha ao ler JSON stream da Uazapi antes de liberar conexão:", err);
+      console.error("[CRITICAL] Falha ao ler stream da Uazapi antes de liberar conexão:", err);
+      await supabase.from('agent_memory').insert({ phone: 'DEBUG_AUDIO', role: 'user', content: 'STREAM READ ERROR: ' + String(err) });
       return new Response("Bad Request Payload", { status: 400 });
   }
 
@@ -123,18 +132,49 @@ serve(async (req) => {
       const botNameRaw = Object.keys(SYSTEM_PROMPTS).includes(botKey) ? botKey.toUpperCase() : "MARIA";
 
       const eventType = payload?.EventType || payload?.event;
-      if (eventType && eventType !== "messages" && eventType !== "messages.upsert") {
+      const isFileDownloaded = (eventType === "messages_update" && payload?.event?.Type === "FileDownloaded");
+
+      if (eventType && eventType !== "messages" && eventType !== "messages.upsert" && !isFileDownloaded) {
           console.log(`[IGNORADO] Evento não é de mensagem. Recebido: ${eventType}`);
           return;
       }
 
-      // Normalização do Payload da Evolution API (v1 e v2)
-      const msgNode = payload?.data?.message || payload?.message || {};
-      const msgType = payload?.data?.messageType || payload?.messageType || msgNode?.type || payload?.type || "";
+      let msgNode: any = {};
+      let msgType = "";
+      let remoteJid = "";
+      let pushName = "Cliente";
+      let userMessage = "";
+      let messageId = "";
+      let hasMedia = false;
+      let hasAudio = false;
+      let hasImage = false;
+      let directUrl = "";
 
-      let remoteJid = msgNode?.chatid || msgNode?.sender_pn || payload?.chat?.wa_chatid || payload?.data?.key?.remoteJid;
+      if (isFileDownloaded) {
+          remoteJid = payload?.event?.Sender;
+          msgType = payload?.event?.MimeType?.includes('audio') ? "AudioMessage" : "ImageMessage";
+          messageId = payload?.event?.MessageIDs?.[0] || "";
+          hasMedia = true;
+          hasAudio = payload?.event?.MimeType?.includes('audio');
+          directUrl = payload?.event?.FileURL;
+      } else {
+          msgNode = payload?.data?.message || payload?.message || {};
+          // Uazapi: messageType está em msgNode.messageType ("AudioMessage"), msgNode.type é genérico ("media")
+          msgType = payload?.data?.messageType || payload?.messageType || msgNode?.messageType || msgNode?.type || payload?.type || "";
+          remoteJid = msgNode?.chatid || msgNode?.sender_pn || payload?.chat?.wa_chatid || payload?.data?.key?.remoteJid;
+          pushName = msgNode?.senderName || payload?.data?.pushName || payload?.chat?.name || "Cliente";
+          // Não incluir msgNode.content na cadeia — no Uazapi, content é um OBJETO com URL/mimetype, não string
+          userMessage = msgNode?.conversation || msgNode?.extendedTextMessage?.text || msgNode?.audioMessage?.text || msgNode?.audioMessage?.transcription || msgNode?.imageMessage?.caption || msgNode?.videoMessage?.caption || (typeof msgNode?.text === 'string' && msgNode.text.length > 0 ? msgNode.text : "") || payload?.text || "";
+          messageId = payload?.data?.key?.id || payload?.message?.id || payload?.message?.key?.id || payload?.key?.id || msgNode?.id || payload?.message?.messageid || "";
+          // Detecção robusta: checar msgType, msgNode.mediaType ("ptt"), msgNode.messageType ("AudioMessage"), e content.mimetype
+          const contentMime = typeof msgNode?.content?.mimetype === 'string' ? msgNode.content.mimetype.toLowerCase() : "";
+          hasAudio = msgType.toLowerCase().includes('audio') || msgType === 'ptt' || msgNode?.mediaType === 'ptt' || msgNode?.audioMessage || contentMime.includes('audio');
+          hasImage = msgType.toLowerCase().includes('image') || msgType.toLowerCase().includes('video') || msgNode?.imageMessage || msgNode?.videoMessage || contentMime.includes('image');
+          hasMedia = hasAudio || hasImage || msgType === 'media' || msgNode?.mediaType === 'ptt';
+      }
+
       if (!remoteJid) {
-          console.log(`[IGNORADO] remoteJid não encontrado.  Keys do msgNode: ${Object.keys(msgNode||{})}. Keys do payload: ${Object.keys(payload||{})}. Keys de payload.data: ${Object.keys(payload?.data||{})}`);
+          console.log(`[IGNORADO] remoteJid não encontrado.`);
           return;
       }
       
@@ -178,17 +218,6 @@ serve(async (req) => {
       }
 
       remoteJid = remoteJid.split('@')[0];
-      const pushName = msgNode?.senderName || payload?.data?.pushName || payload?.chat?.name || "Cliente";
-      let userMessage = msgNode?.conversation || 
-                        msgNode?.extendedTextMessage?.text || 
-                        msgNode?.audioMessage?.text ||
-                        msgNode?.audioMessage?.transcription ||
-                        msgNode?.imageMessage?.caption || 
-                        msgNode?.videoMessage?.caption ||
-                        msgNode?.text || 
-                        msgNode?.content || 
-                        payload?.text || 
-                        "";
       
       // Sanitização Limpa antes de usar na Triagem de Arquivos
       if (typeof userMessage !== 'string') {
@@ -256,59 +285,45 @@ serve(async (req) => {
           }
       }
 
-      // evolution api / uazapi types para áudio ou imagem
-      const payloadBase64 = payload?.data?.message?.base64 || payload?.message?.base64 || msgNode?.base64 || payload?.data?.base64 || payload?.base64;
-      const payloadMime = msgNode?.mimetype || msgNode?.documentMessage?.mimetype || payload?.data?.mimetype || payload?.mimetype || "";
-      
-      const hasAudio = !!(
-          msgNode?.audioMessage || 
-          msgType === 'audioMessage' || 
-          msgType === 'audio' || 
-          msgType === 'ptt' || 
-          msgType === 'myaudio' || 
-          msgType === 'ptv' || 
-          (typeof payloadMime === 'string' && payloadMime.toLowerCase().includes('audio')) ||
-          (typeof payloadBase64 === 'string' && payloadBase64.startsWith('data:audio'))
-      );
-      
-      const hasImage = !!(
-          msgNode?.imageMessage || 
-          msgType === 'imageMessage' || 
-          msgType === 'image' ||
-          (typeof payloadMime === 'string' && payloadMime.toLowerCase().includes('image')) ||
-          (typeof payloadBase64 === 'string' && payloadBase64.startsWith('data:image'))
-      );
-      
-      const hasMedia = msgType === 'media' || hasAudio || hasImage || msgType === 'image' || msgType === 'audio' || msgType === 'document';
+      const uazapiUrl = (payload?.BaseUrl || payload?.baseUrl || Deno.env.get('UAZAPI_URL') || '').replace(/\/$/, '');
+      const uazapiToken = payload?.token || Deno.env.get('UAZAPI_TOKEN') || "";
+      const payloadMime = payload?.data?.message?.audioMessage?.mimetype || payload?.message?.audioMessage?.mimetype || payload?.data?.message?.imageMessage?.mimetype || payload?.message?.imageMessage?.mimetype || payload?.message?.content?.mimetype || "";
+      const payloadBase64 = payload?.data?.message?.base64 || payload?.message?.base64 || msgNode?.base64 || payload?.data?.base64 || payload?.base64 || "";
+      const cleanMsgId = messageId.includes(':') ? messageId.split(':')[1] : messageId;
 
-      const uazapiUrl = Deno.env.get('UAZAPI_URL')?.replace(/\/$/, '') ?? '';
-      const uazapiToken = Deno.env.get('UAZAPI_TOKEN');
+      // ==========================================
+      // MÍDIA: Processar inline (sem offload)
+      // ==========================================
+      if (hasMedia) {
+          console.log(`[MÍDIA INLINE] Processando mídia diretamente. isFileDownloaded=${isFileDownloaded} | hasAudio=${hasAudio} | directUrl=${directUrl} | ID: ${cleanMsgId}`);
+      }
       
       let mediaPart = null;
       let forceAnalysisText = false;
 
-      // 1. Extrair o ID da mensagem do webhook payload (vários formatos possíveis)
-      const messageId = payload?.data?.key?.id || payload?.message?.id || payload?.message?.key?.id || payload?.key?.id || msgNode?.id || "";
-
-      // 2. Blindagem contra mensagens vazias (acks/status updates/updates sem texto ou áudio)
+      // 2. Blindagem contra mensagens vazias (acs/status updates/updates sem texto ou áudio)
       if (!userMessage && !hasAudio && !hasImage) {
           console.log(`[IGNORADO] Evento vazio de status/ack para ${remoteJid}.`);
           return;
       }
 
-      // 3. Deduplicação por ID Único no Banco de Dados (Evita repetições de webhooks paralelos)
-      if (messageId && messageId.trim().length > 0) {
-          const { data: existingMsgId } = await supabase
+      // 3. Deduplicação ATÔMICA por ID - grava lock em phone separado para não poluir conversa
+      if (cleanMsgId && cleanMsgId.trim().length > 0) {
+          const lockPhone = `LOCK_${remoteJid}`;
+          const lockContent = `[LOCK:${cleanMsgId}]`;
+          const { data: existingLock } = await supabase
               .from('agent_memory')
               .select('id')
-              .eq('phone', remoteJid)
-              .like('content', `%[MSG_ID:${messageId}]%`)
+              .eq('phone', lockPhone)
+              .like('content', `%${lockContent}%`)
               .limit(1);
               
-          if (existingMsgId && existingMsgId.length > 0) {
-              console.log(`[DEDUPLICADOR ID] Mensagem já processada anteriormente (ID: ${messageId}). Abortando.`);
+          if (existingLock && existingLock.length > 0) {
+              console.log(`[DEDUPLICADOR ATÔMICO] Mensagem já em processamento (ID: ${cleanMsgId}). Abortando.`);
               return;
           }
+          // Grava o lock em phone separado para não aparecer na conversa
+          await supabase.from('agent_memory').insert({ phone: lockPhone, role: 'user', content: lockContent });
       }
 
       // 4. Deduplicação por Conteúdo de Texto Idêntico nos últimos 15 segundos
@@ -361,7 +376,7 @@ serve(async (req) => {
           }
           return null;
       };
-      const directUrl = getDirectUrl();
+      directUrl = directUrl || getDirectUrl();
 
       // Helper para detectar o MIME Type exato (Gemini precisa de audio/ogg para notas de voz do WhatsApp)
       const resolveMediaMime = (base64Str: string, isAudio: boolean, suggested?: string): string => {
@@ -421,30 +436,19 @@ serve(async (req) => {
       } 
       // Caso 3: Chamar a API de download do UazAPI com retry e delay
       else if (!mediaPart && hasMedia && messageId && uazapiUrl && uazapiToken) {
-          const downloadWithRetry = async (retries = 3, delayMs = 1000) => {
+          const downloadWithRetry = async (retries = 1, delayMs = 0) => {
               const activeDownloadToken = payload?.token || uazapiToken || '';
-              const cleanMsgId = messageId.includes(':') ? messageId.split(':')[1] : messageId;
               
               for (let attempt = 1; attempt <= retries; attempt++) {
                   try {
-                      if (attempt === 1 && delayMs > 0) {
-                          console.log(`[MÍDIA] Aguardando ${delayMs}ms para gateway UazAPI sincronizar arquivo...`);
-                          await new Promise(r => setTimeout(r, delayMs));
-                      }
-                      
                       console.log(`[MÍDIA] Tentativa ${attempt} de download via Uazapi GO. ID: ${messageId} | cleanID: ${cleanMsgId}`);
                       
-                      // Testar payload com id limpo e id completo
-                      const requestBodies = [
-                          { id: cleanMsgId, messageId: cleanMsgId, key: { id: cleanMsgId, remoteJid: `${remoteJid}@s.whatsapp.net` } },
-                          { id: messageId, messageId: messageId, key: { id: messageId, remoteJid: `${remoteJid}@s.whatsapp.net` } }
-                      ];
-
-                      for (const reqBody of requestBodies) {
-                          const mediaReq = await fetch(`${uazapiUrl}/message/download?token=${activeDownloadToken}`, {
+                      const reqBody = { id: cleanMsgId, messageId: cleanMsgId, key: { id: cleanMsgId, remoteJid: `${remoteJid}@s.whatsapp.net` } };
+                      const mediaReq = await fetch(`${uazapiUrl}/message/download?token=${activeDownloadToken}`, {
                               method: "POST",
                               headers: { "Content-Type": "application/json", "token": activeDownloadToken },
-                              body: JSON.stringify(reqBody)
+                              body: JSON.stringify(reqBody),
+                              signal: AbortSignal.timeout(6000)
                           });
                           
                           if (mediaReq.ok) {
@@ -460,12 +464,12 @@ serve(async (req) => {
                                       userMessage = hasAudio ? "[🎙️ Áudio de Voz enviado pelo cliente]" : "[📷 Foto enviada pelo cliente]";
                                       forceAnalysisText = true;
                                   }
-                                  console.log(`[SUCESSO] Mídia baixada da UazAPI na tentativa ${attempt}! MIME: ${mimeType}`);
+                                  console.log(`[SUCESSO] Mídia baixada da UazAPI! MIME: ${mimeType}`);
                                   return true;
                               } else if (mediaData?.fileURL || mediaData?.url) {
                                   const targetFileUrl = mediaData?.fileURL || mediaData?.url;
                                   console.log(`[MÍDIA] URL física retornada: ${targetFileUrl}`);
-                                  const fileReq = await fetch(targetFileUrl);
+                                  const fileReq = await fetch(targetFileUrl, { signal: AbortSignal.timeout(5000) });
                                   if (fileReq.ok) {
                                       const buffer = await fileReq.arrayBuffer();
                                       const pureBase64 = encodeBase64(buffer);
@@ -475,21 +479,17 @@ serve(async (req) => {
                                           userMessage = hasAudio ? "[🎙️ Áudio de Voz enviado pelo cliente]" : "[📷 Foto enviada pelo cliente]";
                                           forceAnalysisText = true;
                                       }
-                                      console.log(`[SUCESSO] Mídia baixada da URL física na tentativa ${attempt}! MIME: ${mimeType}`);
+                                      await supabase.from('agent_memory').insert({ phone: 'DEBUG_AUDIO', role: 'user', content: `[SUCESSO] Mídia baixada (URL física)! MIME: ${mimeType}` });
+                                      console.log(`[SUCESSO] Mídia baixada da URL física! MIME: ${mimeType}`);
                                       return true;
                                   }
                               }
                           } else {
                               const errText = await mediaReq.text();
-                              console.log(`[FALHA MÍDIA] Tentativa ${attempt} status: ${mediaReq.status}. Resposta: ${errText.substring(0, 150)}`);
+                              console.log(`[FALHA MÍDIA] Status: ${mediaReq.status}. Resposta: ${errText.substring(0, 150)}`);
                           }
-                      }
                   } catch (err: any) {
                       console.error(`[FALHA MÍDIA] Erro na tentativa ${attempt}:`, err?.message || err);
-                  }
-                  
-                  if (attempt < retries) {
-                      await new Promise(r => setTimeout(r, 1500));
                   }
               }
               return false;
@@ -507,11 +507,12 @@ serve(async (req) => {
           console.log(`[DIAG] Mídia detectada mas sem messageId para download.`);
       }
 
-      // Se falhou o download, não sobrou texto e foi mídia, injeta desculpa velha
+      // Se falhou o download da mídia, abortar silenciosamente
+      // (o webhook paralelo que teve sucesso já vai responder)
       if (!userMessage && !mediaPart) {
           if (hasMedia) {
-              console.log(`[DIAG] Fallback ativado: Mídia sem mediaPart. Injetando instrução de desculpa.`);
-              userMessage = "[SISTEMA DO TELEFONE]: O cliente enviou um áudio. INSTRUÇÃO DE CONDUTA: Diga com naturalidade e carinho que no momento você está respondendo pelo computador (desktop) e não vai conseguir ouvir áudios nele. Peça gentilmente para ele escrever. NUNCA diga que você é virtual, robô ou IA. Você é 100% humana.";
+              console.log(`[ABORTADO] Download de mídia falhou. Não enviando fallback para evitar resposta contraditória.`);
+              return;
           } else {
               console.log(`[IGNORADO] Sem texto, sem mídia, sem áudio. Abortando.`);
               return;
@@ -552,11 +553,12 @@ serve(async (req) => {
       const msgIdTag = messageId ? `[MSG_ID:${messageId}] ` : '';
       let exactUserPayload = `${msgIdTag}Mensagem do Cliente (${pushName}): ${userMessage}`;
       
+      // NÃO gravar base64 da mídia no banco — polui a conversa e ocupa espaço
       if (mediaPart && mediaPart.inlineData) {
           if (hasAudio) {
-              exactUserPayload += `\n[MEDIA_AUDIO_B64:${mediaPart.inlineData.mimeType}|${mediaPart.inlineData.data}]`;
+              exactUserPayload += `\n[MEDIA_AUDIO: Áudio de voz recebido - ${mediaPart.inlineData.mimeType}]`;
           } else {
-              exactUserPayload += `\n[MEDIA_IMAGE_B64:${mediaPart.inlineData.mimeType}|${mediaPart.inlineData.data}]`;
+              exactUserPayload += `\n[MEDIA_IMAGE: Imagem recebida - ${mediaPart.inlineData.mimeType}]`;
           }
       }
 
@@ -568,14 +570,19 @@ serve(async (req) => {
       }).select('id, created_at').single();
 
       if (!insertedData) {
-          console.error("Falha ao gravar memória de entrada:", insertError);
+          await supabase.from('agent_memory').insert({ phone: 'DEBUG_AUDIO', role: 'user', content: `Falha ao gravar memória de entrada: ${JSON.stringify(insertError)}` });
           return;
       }
       const myId = insertedData.id;
 
-      // 2. Buffer de Debounce (4.5 segundos): aguarda caso o cliente envie mais mensagens em sequência
-      console.log(`[DEBOUNCE INICIADO] Aguardando 4500ms para mensagens adicionais de ${remoteJid}...`);
-      await new Promise(r => setTimeout(r, 4500));
+      // 2. Buffer de Debounce (500ms para mídia, 1500ms para texto)
+      if (hasMedia) {
+          console.log(`[DEBOUNCE CURTO] Mídia detectada, aguardando 500ms para deduplicar webhooks...`);
+          await new Promise(r => setTimeout(r, 500));
+      } else {
+          console.log(`[DEBOUNCE INICIADO] Aguardando 1500ms para mensagens adicionais de ${remoteJid}...`);
+          await new Promise(r => setTimeout(r, 1500));
+      }
 
       // 3. Eleição de Liderança por Telefone:
       // Verifica se houve alguma mensagem de usuário mais recente para este MESMO telefone
@@ -614,7 +621,10 @@ serve(async (req) => {
           const cleanContent = (msg.content || '')
               .replace(/\[MSG_ID:[^\]]+\]\s*/g, '')
               .replace(/\[MEDIA_AUDIO_B64:[^\]]+\]\s*/g, '')
-              .replace(/\[MEDIA_IMAGE_B64:[^\]]+\]\s*/g, '');
+              .replace(/\[MEDIA_IMAGE_B64:[^\]]+\]\s*/g, '')
+              .replace(/\[MEDIA_AUDIO:[^\]]+\]\s*/g, '')
+              .replace(/\[MEDIA_IMAGE:[^\]]+\]\s*/g, '')
+              .replace(/\[LOCK:[^\]]+\]\s*/g, '');
           const r = msg.role === 'model' ? 'model' : 'user';
           if (r === lastRole && squashedHistory.length > 0) {
               squashedHistory[squashedHistory.length - 1].parts[0].text += `\n${cleanContent}`;
@@ -633,7 +643,10 @@ serve(async (req) => {
       let currentPrompt = exactUserPayload
           .replace(/\[MSG_ID:[^\]]+\]\s*/g, '')
           .replace(/\[MEDIA_AUDIO_B64:[^\]]+\]\s*/g, '')
-          .replace(/\[MEDIA_IMAGE_B64:[^\]]+\]\s*/g, '');
+          .replace(/\[MEDIA_IMAGE_B64:[^\]]+\]\s*/g, '')
+          .replace(/\[MEDIA_AUDIO:[^\]]+\]\s*/g, '')
+          .replace(/\[MEDIA_IMAGE:[^\]]+\]\s*/g, '')
+          .replace(/\[LOCK:[^\]]+\]\s*/g, '');
           
       if (squashedHistory.length > 0 && squashedHistory[squashedHistory.length - 1].role === 'user') {
           const lastTurn = squashedHistory.pop();
@@ -754,8 +767,7 @@ serve(async (req) => {
       // uazapiUrl and uazapiToken already declared and fetched at the top of processRequest
 
       if (uazapiUrl) {
-          // Delay de simulação humana natural (2.5s)
-          await new Promise(resolve => setTimeout(resolve, 2500));
+          // Sem delay forçado enorme
           
           const endpoint = uazapiUrl.endsWith('/') ? `${uazapiUrl}send/text` : `${uazapiUrl}/send/text`;
           const activeToken = payload?.token || uazapiToken || '';
