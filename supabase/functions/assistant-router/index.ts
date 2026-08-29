@@ -87,17 +87,28 @@ declare const EdgeRuntime: any;
 const processingLocks = new Set<string>();
 
 serve(async (req) => {
+  // CORS headers para chamadas do frontend (painel web)
+  const corsHeaders = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  };
+
+  if (req.method === 'OPTIONS') {
+    return new Response('OK', { status: 200, headers: corsHeaders });
+  }
+
   // 1. Handshake Inicial (Saúde da Função)
   if (req.method === "GET") {
       const url = new URL(req.url);
       if (url.searchParams.get("debug") === "secret123") {
           const { data } = await supabase.from('agent_memory').select('*').in('phone', ['DEBUG_AUDIO', 'GLOBAL_CONFIG', 'TEST']).order('created_at', {ascending: false}).limit(10);
-          return new Response(JSON.stringify(data, null, 2), { status: 200, headers: { 'Content-Type': 'application/json' } });
+          return new Response(JSON.stringify(data, null, 2), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
-      return new Response("🤖 Maria Cecília Edge Router está Online!", { status: 200 });
+      return new Response("🤖 Maria Cecília Edge Router está Online!", { status: 200, headers: corsHeaders });
   }
 
-  if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
+  if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405, headers: corsHeaders });
 
   let payload;
   let rawText = "";
@@ -108,16 +119,56 @@ serve(async (req) => {
       } catch (parseErr) {
           const { error: insErr } = await supabase.from('agent_memory').insert({ phone: 'DEBUG_AUDIO', role: 'user', content: 'JSON PARSE ERROR. Raw text: ' + rawText.substring(0, 1000) });
           if (insErr) console.error("DEBUG INSERT ERROR:", insErr);
-          return new Response("Bad Request Payload", { status: 400 });
+          return new Response("Bad Request Payload", { status: 400, headers: corsHeaders });
       }
       
       console.log("[PAYLOAD UAZAPI LIDO - COMPLETO]:", rawText);
-      const { error: insErr2 } = await supabase.from('agent_memory').insert({ phone: 'DEBUG_AUDIO', role: 'user', content: rawText });
-      if (insErr2) console.error("DEBUG INSERT ERROR 2:", insErr2);
+      if (payload?.action !== 'send_manual_text') {
+          const { error: insErr2 } = await supabase.from('agent_memory').insert({ phone: 'DEBUG_AUDIO', role: 'user', content: rawText });
+          if (insErr2) console.error("DEBUG INSERT ERROR 2:", insErr2);
+      }
   } catch (err) {
       console.error("[CRITICAL] Falha ao ler stream da Uazapi antes de liberar conexão:", err);
       await supabase.from('agent_memory').insert({ phone: 'DEBUG_AUDIO', role: 'user', content: 'STREAM READ ERROR: ' + String(err) });
-      return new Response("Bad Request Payload", { status: 400 });
+      return new Response("Bad Request Payload", { status: 400, headers: corsHeaders });
+  }
+
+  // === HANDLER DIRETO PARA ENVIO MANUAL VIA PAINEL CRM ===
+  if (payload?.action === 'send_manual_text') {
+      const destRaw = String(payload.telefone_destino || '').trim();
+      const destDigits = destRaw.replace(/\D/g, '');
+      const msgText = payload.mensagem || '';
+      
+      if (!destDigits || !msgText) {
+          console.log('[MANUAL] Faltam dados: telefone ou mensagem vazia.');
+          return new Response(JSON.stringify({ error: 'Telefone ou mensagem vazia' }), { 
+              status: 400, 
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+          });
+      }
+
+      const manualUazapiUrl = (payload?.BaseUrl || Deno.env.get('UAZAPI_URL') || 'https://arnaldotrentin.uazapi.com').replace(/\/$/, '');
+      const manualToken = payload?.token || Deno.env.get('UAZAPI_TOKEN') || 'e7ca3dea-7317-4502-894a-790655f77bb1';
+      
+      try {
+          const sendResp = await fetch(`${manualUazapiUrl}/send/text`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'token': manualToken },
+              body: JSON.stringify({ number: destDigits, text: msgText })
+          });
+          const sendData = await sendResp.json().catch(() => ({}));
+          console.log(`[MANUAL] Mensagem enviada para ${destDigits}. Status: ${sendResp.status}`);
+          return new Response(JSON.stringify({ success: true, status: sendResp.status, data: sendData }), {
+              status: 200,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+      } catch (err) {
+          console.error('[MANUAL] Erro ao disparar mensagem via Uazapi:', err);
+          return new Response(JSON.stringify({ error: String(err) }), {
+              status: 500,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+      }
   }
 
   // 2. Processador de Fundo (Background)
@@ -127,26 +178,6 @@ serve(async (req) => {
       const url = new URL(req.url);
       const botParam = url.searchParams.get("bot") || "maria";
       const botKey = botParam.toLowerCase();
-      
-      // === HANDLER PARA AÇÕES DO PAINEL CRM ===
-      if (payload?.action === 'send_manual_text') {
-          const destPhone = String(payload.telefone_destino || '').replace(/\D/g, '');
-          const msgText = payload.mensagem || '';
-          if (!destPhone || !msgText) {
-              console.log('[MANUAL] Faltam dados: telefone ou mensagem vazia.');
-              return;
-          }
-          const manualUazapiUrl = (payload?.BaseUrl || Deno.env.get('UAZAPI_URL') || 'https://arnaldotrentin.uazapi.com').replace(/\/$/, '');
-          const manualToken = payload?.token || Deno.env.get('UAZAPI_TOKEN') || 'e7ca3dea-7317-4502-894a-790655f77bb1';
-          
-          const sendResp = await fetch(`${manualUazapiUrl}/send/text`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'token': manualToken },
-              body: JSON.stringify({ number: destPhone, text: msgText })
-          });
-          console.log(`[MANUAL] Mensagem enviada para ${destPhone}. Status: ${sendResp.status}`);
-          return;
-      }
 
       const systemPrompt = SYSTEM_PROMPTS[botKey] || SYSTEM_PROMPTS['maria'];
       const botNameRaw = Object.keys(SYSTEM_PROMPTS).includes(botKey) ? botKey.toUpperCase() : "MARIA";
@@ -816,5 +847,5 @@ serve(async (req) => {
   }
 
   // 4. Liberação Imediata da Uazapi (Aniquila a causa raiz da duplicação/timeout)
-  return new Response("OK", { status: 200 });
+  return new Response(JSON.stringify({ status: "OK" }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 });
