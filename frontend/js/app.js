@@ -2073,6 +2073,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     function initRealtime() {
+        let liveReloadTimeout = null;
         const channel = supabase.channel('realtime-overhaul')
             .on('postgres_changes', {
                 event: '*',
@@ -2087,9 +2088,33 @@ document.addEventListener('DOMContentLoaded', () => {
                 schema: 'public',
                 table: 'fluxo_caixa'
             }, () => loadData(false))
+            .on('postgres_changes', {
+                event: 'INSERT',
+                schema: 'public',
+                table: 'agent_memory'
+            }, (payload) => {
+                const newRow = payload.new;
+                // Ignora locks e debug
+                if (newRow?.phone?.startsWith('LOCK_') || newRow?.phone === 'DEBUG_AUDIO' || newRow?.phone === 'GLOBAL_CONFIG') return;
+                
+                console.log('[Realtime] Nova mensagem detectada:', newRow?.phone, newRow?.role);
+                
+                // Debounce de 800ms para não recarregar a cada insert rápido
+                if (liveReloadTimeout) clearTimeout(liveReloadTimeout);
+                liveReloadTimeout = setTimeout(() => {
+                    // Se a Central de Mensagens estiver visível, atualiza
+                    if (typeof window.loadLiveConversations === 'function') {
+                        window.loadLiveConversations();
+                    }
+                    // Se a conversa aberta é do mesmo phone, atualiza o chat
+                    if (typeof currentLivePhone !== 'undefined' && currentLivePhone === newRow?.phone && typeof window.selectLiveConversation === 'function') {
+                        window.selectLiveConversation(currentLivePhone);
+                    }
+                }, 800);
+            })
             .subscribe();
 
-        console.log('[Realtime] Escuta de mudanças ativada.');
+        console.log('[Realtime] Escuta de mudanças ativada (OS + Caixa + Mensagens).');
     }
 
     function renderCards(ordens) {

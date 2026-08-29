@@ -128,6 +128,26 @@ serve(async (req) => {
       const botParam = url.searchParams.get("bot") || "maria";
       const botKey = botParam.toLowerCase();
       
+      // === HANDLER PARA AÇÕES DO PAINEL CRM ===
+      if (payload?.action === 'send_manual_text') {
+          const destPhone = String(payload.telefone_destino || '').replace(/\D/g, '');
+          const msgText = payload.mensagem || '';
+          if (!destPhone || !msgText) {
+              console.log('[MANUAL] Faltam dados: telefone ou mensagem vazia.');
+              return;
+          }
+          const manualUazapiUrl = (payload?.BaseUrl || Deno.env.get('UAZAPI_URL') || 'https://arnaldotrentin.uazapi.com').replace(/\/$/, '');
+          const manualToken = payload?.token || Deno.env.get('UAZAPI_TOKEN') || 'e7ca3dea-7317-4502-894a-790655f77bb1';
+          
+          const sendResp = await fetch(`${manualUazapiUrl}/send/text`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'token': manualToken },
+              body: JSON.stringify({ number: destPhone, text: msgText })
+          });
+          console.log(`[MANUAL] Mensagem enviada para ${destPhone}. Status: ${sendResp.status}`);
+          return;
+      }
+
       const systemPrompt = SYSTEM_PROMPTS[botKey] || SYSTEM_PROMPTS['maria'];
       const botNameRaw = Object.keys(SYSTEM_PROMPTS).includes(botKey) ? botKey.toUpperCase() : "MARIA";
 
