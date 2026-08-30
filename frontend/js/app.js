@@ -7975,7 +7975,6 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
             // Limpa o input e atualiza o chat instantaneamente
             if (input) input.value = '';
             await window.selectLiveConversation(currentLivePhone);
-            triggerSaveSuccess('Mensagem enviada no WhatsApp!');
 
             // 3. Dispara via Edge Function / UazAPI
             const res = await supa.functions.invoke('assistant-router', {
@@ -8018,15 +8017,13 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
         const btn = document.getElementById('btn-exec-ai-cmd');
         if (btn) {
             btn.disabled = true;
-            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Redigindo...';
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Redigindo WhatsApp...';
         }
 
         try {
             const supa = getSupa();
             const conv = liveConversations.find(c => c.phone === currentLivePhone);
             const clientName = conv?.clientName || 'Cliente';
-
-            triggerAutoSave('Maria Cecília redigindo e disparando mensagem no WhatsApp...');
 
             const res = await supa.functions.invoke('assistant-router', {
                 body: {
@@ -8041,14 +8038,12 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
             if (res.data?.error) throw new Error(res.data.error);
 
             if (input) input.value = '';
-            triggerSaveSuccess('Maria Cecília enviou a mensagem para o cliente no WhatsApp!');
 
             // Recarrega o chat imediatamente
             await window.selectLiveConversation(currentLivePhone);
 
         } catch (err) {
             console.error('[ORDEM IA]', err);
-            triggerSaveError('Erro ao executar ordem da Maria.');
             alert('Erro ao processar comando da Maria Cecília: ' + (err.message || JSON.stringify(err)));
         } finally {
             if (btn) {
