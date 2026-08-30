@@ -893,51 +893,317 @@ document.addEventListener('DOMContentLoaded', () => {
         const tbody = document.querySelector('#table-todas-os tbody');
         if (!tbody) return;
 
-        // Usar as ordens passadas ou o cache global, ordenando por ID decrescente
+        // Popula filtro de técnicos se ainda não populado
+        const techFilter = document.getElementById('filtro-os-tecnico');
+        if (techFilter && techFilter.options.length <= 1) {
+            const techs = (window.colabCache || []).filter(c => {
+                const role = (c.cargo || '').toLowerCase();
+                return role.includes('tec') || role.includes('téc') || role.includes('eng') || role.includes('admin') || role.includes('gerente') || role.includes('dono');
+            });
+            techFilter.innerHTML = '<option value="">Todos os Técnicos</option>' +
+                techs.map(t => `<option value="${t.id}">${t.nome_completo}</option>`).join('');
+        }
+
         const data = [...(ordens || window.ordensCache || [])].sort((a, b) => b.id_os - a.id_os);
 
         if (data.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted);">Nenhuma Ordem de Serviço encontrada.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 35px; color: var(--text-muted); font-size: 0.9rem;">Nenhuma Ordem de Serviço encontrada.</td></tr>';
             return;
         }
 
+        const hojeStr = new Date().toISOString().split('T')[0];
+
         let html = '';
         data.forEach(os => {
-            const nmCliente = os.clientes ? os.clientes.nome_cliente : '<span style="color:#666;">Cliente não vinculado</span>';
-            const nmTecnico = os.colaborador || os.tecnicos?.nome_completo || 'Sem atribuição';
+            const cliente = os.clientes || {};
+            const nmCliente = cliente.nome_cliente || '<span style="color:#666;">Cliente não vinculado</span>';
+            const endereco = cliente.endereco_completo || 'Endereço não informado';
+            const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(endereco)}`;
 
-            let stColor = 'var(--text-muted)';
-            const lw = (os.status_ia || '').toLowerCase();
-            if (lw.includes('aberto')) stColor = '#F44336';
-            if (lw.includes('em campo') || lw.includes('deslocamento')) stColor = '#FF9800';
-            if (lw.includes('validado') || lw.includes('finalizado')) stColor = '#4CAF50';
-            if (lw.includes('faturamento') || lw.includes('cancelado')) stColor = '#9E9E9E';
+            // Parse dados extras (plano de pagamento, custos extras, datas extras)
+            let extraData = {};
+            if (typeof os.materiais_lista === 'string' && os.materiais_lista.startsWith('{')) {
+                try { extraData = JSON.parse(os.materiais_lista); } catch(e) {}
+            }
 
-            let dtStr = 'Sem Agendamento';
+            const statusPagamento = os.status_pagamento || extraData.status_pagamento || 'Pendente';
+            const condicaoPagamento = extraData.condicao_pagamento || 'À Vista (PIX)';
+            const custosExtras = extraData.custos_extras || [];
+            const totalExtras = custosExtras.reduce((acc, it) => acc + (parseFloat(it.valor) || 0), 0);
+
+            // 1ª Data Agendamento
+            let dtStr = 'Sem Data';
             if (os.data_hora) {
                 const dt = new Date(os.data_hora);
                 dtStr = dt.toLocaleDateString('pt-BR') + ' ' + dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
             }
 
+            // 4ª Status Operacional e Financeiro
+            let stColor = '#95a5a6';
+            const lw = (os.status_ia || '').toLowerCase();
+            if (lw.includes('aberto')) stColor = '#e74c3c';
+            if (lw.includes('em campo') || lw.includes('andamento') || lw.includes('deslocamento')) stColor = '#e67e22';
+            if (lw.includes('validado') || lw.includes('finalizado') || lw.includes('concluido') || lw.includes('concluído')) stColor = '#2ecc71';
+            if (lw.includes('cancelado')) stColor = '#7f8c8d';
+
+            let pagBadgeColor = '#f39c12';
+            if (statusPagamento === 'Pago') pagBadgeColor = '#27ae60';
+            if (statusPagamento === 'Entrada Paga') pagBadgeColor = '#e67e22';
+
+            // 5ª Dias de Serviço (Cronograma de Diárias)
+            const rawDates = [];
+            if (os.data_hora) rawDates.push(os.data_hora.split('T')[0]);
+            if (os.os_datas && os.os_datas.length > 0) {
+                os.os_datas.forEach(d => rawDates.push(d.data));
+            }
+            if (extraData.datas_cronograma && Array.isArray(extraData.datas_cronograma)) {
+                extraData.datas_cronograma.forEach(d => {
+                    const dtVal = typeof d === 'string' ? d : d.data;
+                    if (dtVal) rawDates.push(dtVal);
+                });
+            }
+            const uniqueDates = [...new Set(rawDates.filter(Boolean))].sort();
+
+            let diáriasHtml = '';
+            if (uniqueDates.length <= 1) {
+                const singleDate = uniqueDates[0] ? new Date(uniqueDates[0] + 'T12:00:00Z').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) : '1 dia';
+                const isToday = uniqueDates[0] === hojeStr;
+                diáriasHtml = `<span style="font-size:0.75rem; color:${isToday ? '#e67e22' : 'var(--text-muted)'}; background:rgba(255,255,255,0.05); padding:3px 8px; border-radius:4px; font-weight:${isToday ? '800' : 'normal'};">${isToday ? '🔥 Hoje em campo' : `1 diária (${singleDate})`}</span>`;
+            } else {
+                diáriasHtml = `<div style="display:flex; flex-wrap:wrap; gap:4px; align-items:center;">`;
+                uniqueDates.forEach(d => {
+                    const dtFmt = new Date(d + 'T12:00:00Z').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+                    if (d < hojeStr) {
+                        diáriasHtml += `<span style="background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); color:var(--text-muted); font-size:0.7rem; padding:2px 6px; border-radius:4px;" title="Concluído / Passado">${dtFmt} ✓</span>`;
+                    } else if (d === hojeStr) {
+                        diáriasHtml += `<span style="background:rgba(230,126,34,0.25); border:1px solid #e67e22; color:#e67e22; font-weight:800; font-size:0.73rem; padding:2px 7px; border-radius:4px; box-shadow:0 0 8px rgba(230,126,34,0.4);" title="Hoje em execução"><i class="fa-solid fa-fire"></i> ${dtFmt} (Hoje)</span>`;
+                    } else {
+                        diáriasHtml += `<span style="background:rgba(52,152,219,0.12); border:1px solid rgba(52,152,219,0.3); color:#3498db; font-size:0.7rem; padding:2px 6px; border-radius:4px;" title="Próxima diária agendada">${dtFmt}</span>`;
+                    }
+                });
+                diáriasHtml += `<span style="font-size:0.68rem; color:var(--text-muted); margin-left:2px;">(${uniqueDates.length} dias)</span></div>`;
+            }
+
+            // 6ª Técnico Executor (Dropdown interativo)
+            const sysTechs = (window.colabCache || []).filter(c => {
+                const role = (c.cargo || '').toLowerCase();
+                return role.includes('tec') || role.includes('téc') || role.includes('eng') || role.includes('admin') || role.includes('gerente') || role.includes('dono');
+            });
+            let techSelectHtml = `<select class="modal-input os-tech-select" style="padding:4px 6px; font-size:0.78rem; height:32px; border-radius:6px; background:rgba(0,0,0,0.6); color:#fff; border:1px solid rgba(255,255,255,0.2); width:100%; max-width:145px; cursor:pointer;" onclick="event.stopPropagation();" onchange="window.updateOSTechnician(${os.id_os}, this.value)">`;
+            techSelectHtml += `<option value="" ${!os.tecnico_id && !os.colaborador ? 'selected' : ''}>Sem atribuição</option>`;
+            sysTechs.forEach(t => {
+                const isSelected = (os.tecnico_id && os.tecnico_id === t.id) || (os.colaborador && os.colaborador.toLowerCase() === t.nome_completo.toLowerCase());
+                techSelectHtml += `<option value="${t.id}" ${isSelected ? 'selected' : ''}>${t.nome_completo}</option>`;
+            });
+            techSelectHtml += `</select>`;
+
             html += `
             <tr style="cursor: pointer;" onclick="event.stopPropagation(); window.openSuperOS('${os.id_os}')">
-                <td onclick="event.stopPropagation();" style="text-align: center;"><input type="checkbox" class="mass-action-os-cb" value="${os.id_os}" onclick="event.stopPropagation(); updateMassActionOSCount()" style="cursor: pointer; transform: scale(1.2);"></td>
-                <td><strong style="color:var(--text-primary);">OS-${String(os.id_os).padStart(4, '0')}</strong></td>
-                <td><span style="font-size: 0.85rem; background:rgba(255,255,255,0.05); padding: 4px 8px; border-radius:4px;"><i class="fa-solid fa-clock"></i> ${dtStr}</span></td>
-                <td>
-                    <div style="font-weight: 800; color: var(--accent-orange); margin-bottom: 2px;">${nmCliente}</div>
-                    <div style="font-size: 0.8rem; color: var(--text-muted);">${os.servico_tipo || 'Nenhum serviço mapeado'}</div>
+                <td onclick="event.stopPropagation();" style="text-align: center;">
+                    <input type="checkbox" class="mass-action-os-cb" value="${os.id_os}" onclick="event.stopPropagation(); updateMassActionOSCount()" style="cursor: pointer; transform: scale(1.2);">
                 </td>
-                <td><div class="tech-tag" style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); padding: 4px 8px; border-radius: 6px;"><i class="fa-solid fa-user-helmet-safety"></i> ${nmTecnico}</div></td>
-                <td><span class="status-badge" style="background: ${stColor}20; color: ${stColor}; border: 1px solid ${stColor}; padding: 3px 8px; border-radius: 12px; font-size: 0.75rem; font-weight:800; text-transform: uppercase;">${os.status_ia || 'ABERTO'}</span></td>
-                <td style="text-align: right;">
-                    <button class="action-btn" title="Inspecionar OS"><i class="fa-solid fa-eye"></i></button>
+                <td>
+                    <strong style="color:var(--text-primary); font-size:0.85rem;">OS-${String(os.id_os).padStart(4, '0')}</strong>
+                </td>
+                <td>
+                    <div style="font-size:0.82rem; font-weight:700; color:var(--text-primary);">
+                        <i class="fa-solid fa-clock" style="color:var(--accent-orange); margin-right:4px;"></i>${dtStr}
+                    </div>
+                </td>
+                <td>
+                    <div style="font-weight: 800; color: var(--accent-orange); font-size: 0.92rem; margin-bottom: 2px;">${nmCliente}</div>
+                    <div style="font-size: 0.8rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px;" title="${os.servico_tipo || ''}">
+                        ${os.servico_tipo || 'Serviço Geral'}
+                    </div>
+                </td>
+                <td>
+                    <div style="max-width: 210px; font-size: 0.8rem; line-height: 1.3;">
+                        <a href="${mapsUrl}" target="_blank" onclick="event.stopPropagation();" style="color: #3498db; text-decoration: none; display: flex; align-items: flex-start; gap: 5px;" title="Abrir no Google Maps / Waze">
+                            <i class="fa-solid fa-location-dot" style="color: #e74c3c; margin-top: 2px; flex-shrink: 0;"></i>
+                            <span style="overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">${endereco}</span>
+                        </a>
+                    </div>
+                </td>
+                <td>
+                    <div style="display:flex; flex-direction:column; gap:4px; align-items:flex-start;">
+                        <span class="status-badge" style="background: ${stColor}20; color: ${stColor}; border: 1px solid ${stColor}; padding: 2px 8px; border-radius: 10px; font-size: 0.72rem; font-weight:800; text-transform: uppercase;">
+                            ${os.status_ia || 'ABERTO'}
+                        </span>
+                        <span style="font-size:0.7rem; color:${pagBadgeColor}; background:${pagBadgeColor}15; border:1px solid ${pagBadgeColor}40; padding:1px 6px; border-radius:4px; font-weight:700;">
+                            ${statusPagamento} (${condicaoPagamento})
+                        </span>
+                        ${totalExtras > 0 ? `<span style="font-size:0.68rem; color:#e67e22; font-weight:700;"><i class="fa-solid fa-receipt"></i> +R$ ${totalExtras.toFixed(2)} extras</span>` : ''}
+                    </div>
+                </td>
+                <td>
+                    ${diáriasHtml}
+                </td>
+                <td>
+                    ${techSelectHtml}
+                </td>
+                <td style="text-align: right; white-space: nowrap;" onclick="event.stopPropagation();">
+                    <button class="action-btn" style="background: #25D366; color: #fff; padding: 6px 10px; border-radius: 6px; font-size: 0.85rem; margin-right: 4px;" title="Disparar OS formatada no WhatsApp do Técnico" onclick="window.enviarOsWhatsAppTecnico('${os.id_os}')">
+                        <i class="fa-brands fa-whatsapp"></i>
+                    </button>
+                    <button class="action-btn" style="background: var(--surface-light); padding: 6px 9px; border-radius: 6px; font-size: 0.85rem; margin-right: 4px;" title="Editar Prancheta da OS" onclick="window.openSuperOS('${os.id_os}')">
+                        <i class="fa-solid fa-pen-to-square"></i>
+                    </button>
+                    <button class="action-btn" style="background: var(--surface-light); padding: 6px 9px; border-radius: 6px; font-size: 0.85rem;" title="Gerar PDF" onclick="window.generateOSPDF('${os.id_os}')">
+                        <i class="fa-solid fa-file-pdf"></i>
+                    </button>
                 </td>
             </tr>`;
         });
 
         tbody.innerHTML = html;
         updateMassActionOSCount(); // Refresh count on render
+    };
+
+    // Filtros rápidos da Central de OS
+    window.filterTodasOS = function () {
+        const busca = (document.getElementById('filtro-os-busca')?.value || '').toLowerCase().trim();
+        const techId = document.getElementById('filtro-os-tecnico')?.value || '';
+        const status = document.getElementById('filtro-os-status')?.value || '';
+
+        const filtered = (window.ordensCache || []).filter(os => {
+            const clienteName = (os.clientes?.nome_cliente || '').toLowerCase();
+            const servico = (os.servico_tipo || '').toLowerCase();
+            const endereco = (os.clientes?.endereco_completo || '').toLowerCase();
+            const idStr = String(os.id_os);
+
+            const matchBusca = !busca || clienteName.includes(busca) || servico.includes(busca) || endereco.includes(busca) || idStr.includes(busca);
+            const matchTech = !techId || os.tecnico_id === techId;
+            const matchStatus = !status || (os.status_ia || '').toLowerCase() === status.toLowerCase();
+
+            return matchBusca && matchTech && matchStatus;
+        });
+
+        window.renderTodasOS(filtered);
+    };
+
+    // Atribuição de técnico instantânea na tabela
+    window.updateOSTechnician = async function(osId, techId) {
+        try {
+            const supa = getSupa();
+            const tech = (window.colabCache || []).find(c => c.id === techId);
+            const techName = tech ? tech.nome_completo : (techId || 'Não Definido');
+
+            triggerAutoSave(`Atribuindo OS #${osId} para ${techName}...`);
+
+            const { error } = await supa.from('ordens_servico').update({
+                tecnico_id: techId || null,
+                colaborador: techName
+            }).eq('id_os', osId);
+
+            if (error) throw error;
+
+            // Atualiza cache local
+            const os = (window.ordensCache || []).find(o => String(o.id_os) === String(osId));
+            if (os) {
+                os.tecnico_id = techId || null;
+                os.colaborador = techName;
+            }
+
+            triggerSaveSuccess(`Técnico ${techName} atribuído com sucesso à OS #${osId}!`);
+        } catch(err) {
+            console.error('Erro ao atualizar técnico:', err);
+            triggerSaveError('Erro ao atualizar técnico: ' + err.message);
+        }
+    };
+
+    // Disparo da OS formatada no WhatsApp do Técnico
+    window.enviarOsWhatsAppTecnico = function(osId) {
+        const os = (window.ordensCache || []).find(o => String(o.id_os) === String(osId));
+        if (!os) return alert('Ordem de Serviço não encontrada.');
+
+        const cliente = os.clientes || {};
+        const nmCliente = cliente.nome_cliente || 'Cliente';
+        const phoneCliente = cliente.whatsapp || 'Não informado';
+        const endereco = cliente.endereco_completo || 'A combinar / Verificar no local';
+        const mapsUrl = `https://maps.google.com/?q=${encodeURIComponent(endereco)}`;
+
+        let extraData = {};
+        if (typeof os.materiais_lista === 'string' && os.materiais_lista.startsWith('{')) {
+            try { extraData = JSON.parse(os.materiais_lista); } catch(e) {}
+        }
+
+        // Cronograma de diárias
+        const rawDates = [];
+        if (os.data_hora) rawDates.push(os.data_hora.split('T')[0]);
+        if (os.os_datas && os.os_datas.length > 0) {
+            os.os_datas.forEach(d => rawDates.push(d.data));
+        }
+        if (extraData.datas_cronograma && Array.isArray(extraData.datas_cronograma)) {
+            extraData.datas_cronograma.forEach(d => {
+                const dtVal = typeof d === 'string' ? d : d.data;
+                if (dtVal) rawDates.push(dtVal);
+            });
+        }
+        const uniqueDates = [...new Set(rawDates.filter(Boolean))].sort();
+
+        let cronogramaTxt = '';
+        if (uniqueDates.length > 0) {
+            cronogramaTxt = uniqueDates.map((d, i) => {
+                const dtFmt = new Date(d + 'T12:00:00Z').toLocaleDateString('pt-BR');
+                return `  • Diária ${i + 1}: ${dtFmt}`;
+            }).join('\n');
+        } else {
+            cronogramaTxt = `  • A definir`;
+        }
+
+        // Serviços
+        let servicosTxt = os.servico_tipo || 'Execução de serviços elétricos / climatização';
+        if (os.os_servicos_executados && os.os_servicos_executados.length > 0) {
+            servicosTxt = os.os_servicos_executados.map(s => `  - ${s.servicos?.nome_servico || 'Serviço'} (Qtd: ${s.quantidade})`).join('\n');
+        }
+
+        // Materiais
+        let materiaisTxt = 'Nenhum material de estoque listado.';
+        if (os.os_materiais_utilizados && os.os_materiais_utilizados.length > 0) {
+            materiaisTxt = os.os_materiais_utilizados.map(m => `  - ${m.materiais?.nome_material || 'Material'} (Qtd: ${m.quantidade_usada})`).join('\n');
+        }
+
+        // Custos Extras / Repasses
+        let extrasTxt = '';
+        const custosExtras = extraData.custos_extras || [];
+        if (custosExtras.length > 0) {
+            extrasTxt = '\n\n💵 *CUSTOS EXTRAS / REPASSES:*\n' + custosExtras.map(e => `  - ${e.descricao} (R$ ${parseFloat(e.valor || 0).toFixed(2)})`).join('\n');
+        }
+
+        const msg = 
+`👨‍🔧 *ORDEM DE SERVIÇO #OS-${String(os.id_os).padStart(4, '0')} — ARNALDO TRENTIN SERVIÇOS*
+
+👤 *Cliente:* ${nmCliente}
+📞 *Contato Cliente:* ${phoneCliente}
+📍 *Endereço da Obra:* ${endereco}
+🗺️ *Rota / GPS:* ${mapsUrl}
+
+📅 *CRONOGRAMA DE DIÁRIAS:*
+${cronogramaTxt}
+
+🛠️ *SERVIÇOS A EXECUTAR:*
+${servicosTxt}
+
+📦 *MATERIAIS / FERRAMENTAL A LEVAR:*
+${materiaisTxt}${extrasTxt}
+
+📝 *Orientações:* Realizar o checklist fotográfico e avisar qualquer imprevisto na obra.`;
+
+        // Descobre o WhatsApp do técnico
+        let techPhone = '';
+        if (os.tecnico_id) {
+            const tech = (window.colabCache || []).find(c => c.id === os.tecnico_id);
+            if (tech && tech.telefone) {
+                techPhone = tech.telefone.replace(/\D/g, '');
+            }
+        }
+
+        if (techPhone) {
+            if (!techPhone.startsWith('55')) techPhone = '55' + techPhone;
+            window.open(`https://wa.me/${techPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+        } else {
+            window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
+        }
     };
 
     // ==========================================
@@ -1035,8 +1301,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const { data: ordensData, error: errOrdens } = await supabase
                     .from('ordens_servico')
                     .select(`
-                        id_os, servico_tipo, status_ia, status_pagamento, cliente_id, obra_id, data_hora, tecnico_id, colaborador,
-                        clientes(nome_cliente), 
+                        id_os, servico_tipo, status_ia, status_pagamento, cliente_id, obra_id, data_hora, tecnico_id, colaborador, materiais_lista,
+                        clientes(id, nome_cliente, endereco_completo, whatsapp), 
                         obras(nome_obra),
                         os_servicos_executados(servico_id, quantidade, subtotal_cobrado, servicos(nome_servico, valor_base, categoria)),
                         os_materiais_utilizados(material_id, quantidade_usada, valor_unitario_cobrado, subtotal_material, materiais(nome_material, unidade_medida)),
@@ -3577,13 +3843,49 @@ document.addEventListener('DOMContentLoaded', () => {
                 const dateVal = os.data_hora ? os.data_hora.split('T')[0] : '';
                 document.getElementById('super-data').value = dateVal;
 
-                // --- CARREGA CRONOGRAMA (Múltiplas Datas) ---
+                // Parse dados extras (plano de pagamento, custos extras, datas extras)
+                let extraData = {};
+                if (typeof os.materiais_lista === 'string' && os.materiais_lista.startsWith('{')) {
+                    try { extraData = JSON.parse(os.materiais_lista); } catch(e) {}
+                }
+
+                // Plano de Pagamento
+                const condPagElem = document.getElementById('super-condicao-pagamento');
+                if (condPagElem) condPagElem.value = extraData.condicao_pagamento || 'À Vista (PIX)';
+                const stPagElem = document.getElementById('super-status-pagamento');
+                if (stPagElem) stPagElem.value = os.status_pagamento || extraData.status_pagamento || 'Pendente';
+                const vencPagElem = document.getElementById('super-vencimento-pagamento');
+                if (vencPagElem) vencPagElem.value = extraData.vencimento_pagamento || '';
+
+                // --- CARREGA CRONOGRAMA DE DIÁRIAS (Múltiplas Datas) ---
                 const dateContainer = document.getElementById('os-datas-container');
                 if (dateContainer) {
                     dateContainer.innerHTML = '';
                     if (os.os_datas && os.os_datas.length > 0) {
                         os.os_datas.forEach(d => window.addOSDateRow(d.data, d.descricao));
+                    } else if (extraData.datas_cronograma && Array.isArray(extraData.datas_cronograma)) {
+                        extraData.datas_cronograma.forEach(d => {
+                            const dtVal = typeof d === 'string' ? d : d.data;
+                            const descVal = typeof d === 'string' ? 'Dia de Execução' : (d.descricao || 'Dia de Execução');
+                            window.addOSDateRow(dtVal, descVal);
+                        });
                     }
+                }
+
+                // --- CARREGA CUSTOS EXTRAS & REPASSES ---
+                const tExtras = document.getElementById('extras-body');
+                if (tExtras) {
+                    tExtras.innerHTML = '';
+                    const custosExtras = extraData.custos_extras || [];
+                    custosExtras.forEach(e => window.addOSExtraRow(e.descricao, e.tipo, e.qtd || 1, e.valor || 0));
+                    window.calcExtrasTotal();
+                }
+
+                // Botão Enviar WhatsApp no topo do modal
+                const btnModalWa = document.getElementById('btn-modal-send-wa');
+                if (btnModalWa) {
+                    btnModalWa.style.display = 'inline-flex';
+                    window.enviarOsWhatsAppTecnicoCurrent = () => window.enviarOsWhatsAppTecnico(os.id_os);
                 }
 
                 // Carrega os servicos vinculados na tabela
@@ -3650,6 +3952,9 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('btn-reativar-os').style.display = 'none';
             document.getElementById('btn-delete-os').style.display = 'none';
             document.getElementById('btn-faturar-os').style.display = 'none';
+            const btnModalWa = document.getElementById('btn-modal-send-wa');
+            if (btnModalWa) btnModalWa.style.display = 'none';
+
             if (modalTitle) modalTitle.innerHTML = `<i class="fa-solid fa-file-circle-plus"></i> Abrir Nova OS`;
             document.getElementById('super-cliente').value = '';
             document.getElementById('super-obra').value = '';
@@ -3657,12 +3962,25 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('super-responsavel').value = 'Não Definido';
             document.getElementById('super-status').value = 'Aberto';
             document.getElementById('super-data').value = new Date().toISOString().split('T')[0];
+            
+            const condPagElem = document.getElementById('super-condicao-pagamento');
+            if (condPagElem) condPagElem.value = 'À Vista (PIX)';
+            const stPagElem = document.getElementById('super-status-pagamento');
+            if (stPagElem) stPagElem.value = 'Pendente';
+            const vencPagElem = document.getElementById('super-vencimento-pagamento');
+            if (vencPagElem) vencPagElem.value = '';
+
             document.getElementById('cronograma-body').innerHTML = '';
             document.getElementById('materiais-body').innerHTML = '';
+            const tExtras = document.getElementById('extras-body');
+            if (tExtras) tExtras.innerHTML = '';
+
             const dateContainer = document.getElementById('os-datas-container');
             if (dateContainer) dateContainer.innerHTML = '';
+            
             window.calcServicosTotal && window.calcServicosTotal();
-            calcMateriais();
+            window.calcMateriais && window.calcMateriais();
+            window.calcExtrasTotal && window.calcExtrasTotal();
         }
 
         window.openModal('modal-super-os', !!osId);
@@ -3755,7 +4073,50 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         document.getElementById('total-materiais-os').textContent = 'R$ ' + sum.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
         calcSuperOSTotal();
-    }
+    };
+
+    // ==========================================
+    // 9.B.1 CUSTOS EXTRAS & REPASSES NA OBRA
+    // ==========================================
+    window.addOSExtraRow = function (descricao = '', tipo = 'Material Comprado na Obra', qtd = 1, valor = 0) {
+        const tbody = document.getElementById('extras-body');
+        if (!tbody) return;
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td><input type="text" class="e-desc modal-input" placeholder="Ex: 3x Interruptores Bipolares Leroy" value="${descricao}" style="width:100%;"></td>
+            <td>
+                <select class="e-tipo auth-select">
+                    <option value="Material Comprado na Obra" ${tipo === 'Material Comprado na Obra' ? 'selected' : ''}>Material Comprado</option>
+                    <option value="Serviço Adicional" ${tipo === 'Serviço Adicional' ? 'selected' : ''}>Serviço Adicional</option>
+                    <option value="Deslocamento / Outro" ${tipo === 'Deslocamento / Outro' ? 'selected' : ''}>Deslocamento / Outro</option>
+                </select>
+            </td>
+            <td><input type="number" class="e-qt modal-input" value="${qtd}" min="0.1" step="0.1" style="width:70px;" oninput="window.calcExtrasTotal()"></td>
+            <td><input type="number" class="e-sub modal-input" value="${valor}" step="0.01" style="width:100px; font-weight:bold; color:#e67e22;" oninput="window.calcExtrasTotal()"></td>
+            <td style="text-align:right;">
+                <button type="button" style="color:var(--danger-color); background:none; border:none; cursor:pointer;" onclick="this.closest('tr').remove(); window.calcExtrasTotal();">
+                    <i class="fa-solid fa-trash"></i>
+                </button>
+            </td>
+        `;
+        tbody.appendChild(tr);
+        window.calcExtrasTotal();
+    };
+
+    window.calcExtrasTotal = function () {
+        let total = 0;
+        document.querySelectorAll('#extras-body tr').forEach(tr => {
+            const sub = parseFloat(tr.querySelector('.e-sub')?.value || 0);
+            total += isNaN(sub) ? 0 : sub;
+        });
+
+        const label = document.getElementById('total-extras-os');
+        if (label) label.textContent = 'R$ ' + total.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+
+        window.calcSuperOSTotal();
+        return total;
+    };
 
     window.calcSuperOSTotal = function () {
         let sumSvcs = 0;
@@ -3766,12 +4127,17 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('#materiais-body tr').forEach(tr => {
             sumMats += parseFloat(tr.querySelector('.m-sub').value) || 0;
         });
-        const total = sumSvcs + sumMats;
+        let sumExtras = 0;
+        document.querySelectorAll('#extras-body tr').forEach(tr => {
+            sumExtras += parseFloat(tr.querySelector('.e-sub')?.value || 0);
+        });
+
+        const total = sumSvcs + sumMats + sumExtras;
         const disp = document.getElementById('super-os-total-label');
         if (disp) disp.textContent = 'R$ ' + total.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
         // Guarda na janela o valor pra caso usemos no Faturar (Fluxo Caixa)
         window.currentSuperOSTotal = total;
-    }
+    };
 
     window.onChangeMaterial = function (sel) {
         const matId = sel.value;
@@ -4400,6 +4766,41 @@ document.addEventListener('DOMContentLoaded', () => {
         const techId = selResp.value === 'Não Definido' ? null : selResp.value;
         const techName = selResp.value === 'Não Definido' ? 'Não Definido' : selResp.options[selResp.selectedIndex].text;
 
+        // Coleta Custos Extras
+        const custosExtras = [];
+        document.querySelectorAll('#extras-body tr').forEach(tr => {
+            const desc = tr.querySelector('.e-desc')?.value?.trim();
+            const tipo = tr.querySelector('.e-tipo')?.value || 'Material Comprado na Obra';
+            const qtd = parseFloat(tr.querySelector('.e-qt')?.value || 1);
+            const val = parseFloat(tr.querySelector('.e-sub')?.value || 0);
+            if (desc && val > 0) {
+                custosExtras.push({ descricao: desc, tipo: tipo, qtd: qtd, valor: val });
+            }
+        });
+
+        // Coleta Cronograma de Diárias
+        const datasCronograma = [];
+        document.querySelectorAll('.os-date-row').forEach(row => {
+            const dateVal = row.querySelector('.c-os-date')?.value;
+            const descVal = row.querySelector('.c-os-desc')?.value || 'Dia de Execução';
+            if (dateVal) {
+                datasCronograma.push({ data: dateVal, descricao: descVal });
+            }
+        });
+
+        // Coleta Plano de Pagamento
+        const condicaoPag = document.getElementById('super-condicao-pagamento')?.value || 'À Vista (PIX)';
+        const statusPag = document.getElementById('super-status-pagamento')?.value || 'Pendente';
+        const vencPag = document.getElementById('super-vencimento-pagamento')?.value || '';
+
+        const extraDataPack = {
+            condicao_pagamento: condicaoPag,
+            status_pagamento: statusPag,
+            vencimento_pagamento: vencPag,
+            custos_extras: custosExtras,
+            datas_cronograma: datasCronograma
+        };
+
         const payload = {
             cliente_id: clienteId,
             obra_id: obraId,
@@ -4409,7 +4810,9 @@ document.addEventListener('DOMContentLoaded', () => {
             tecnico_id: techId,
             vendedor: document.getElementById('super-vendedor').value || null,
             data_hora: document.getElementById('super-data').value ? new Date(document.getElementById('super-data').value + 'T12:00:00Z').toISOString() : new Date().toISOString(),
-            status_ia: document.getElementById('super-status').value || 'Aberto'
+            status_ia: document.getElementById('super-status').value || 'Aberto',
+            status_pagamento: statusPag,
+            materiais_lista: JSON.stringify(extraDataPack)
         };
 
         let OS_ID = osId;
@@ -4438,21 +4841,18 @@ document.addEventListener('DOMContentLoaded', () => {
             await supabase.from('os_datas').delete().eq('os_id', OS_ID);
         }
 
-        // --- SALVAMENTO CRONOGRAMA (Múltiplas Datas) ---
+        // --- SALVAMENTO CRONOGRAMA (Múltiplas Datas na tabela os_datas se existir) ---
         const osDates = [];
-        document.querySelectorAll('.os-date-row').forEach(row => {
-            const dateVal = row.querySelector('.c-os-date')?.value;
-            if (dateVal) {
-                osDates.push({
-                    os_id: OS_ID,
-                    data: dateVal,
-                    descricao: row.querySelector('.c-os-desc')?.value || 'Dia de Execução'
-                });
-            }
+        datasCronograma.forEach(d => {
+            osDates.push({
+                os_id: OS_ID,
+                data: d.data,
+                descricao: d.descricao
+            });
         });
         if (osDates.length > 0) {
             const { error: errDates } = await supabase.from('os_datas').insert(osDates);
-            if (errDates) console.error("ERRO SUPABASE: os_datas.insert()", errDates);
+            if (errDates) console.warn("Aviso os_datas:", errDates.message);
         }
 
         const svcs = [];

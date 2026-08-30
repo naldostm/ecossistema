@@ -304,10 +304,8 @@
                 <div class="menu-section">
                     <h3 class="menu-toggle"><i class="fa-solid fa-gears"></i> 2. Operações</h3>
                     <ul class="submenu">
-                        <li class="active-menu"><a href="#" class="nav-link" data-target="view-ordens"><i class="fa-solid fa-calendar-day"></i> Painel da Agenda</a></li>
-                        <li><a href="#" class="nav-link" data-target="view-agenda-tecnica"><i class="fa-solid fa-users-gear"></i> Agenda Técnica</a></li>
-                        <li><a href="#" class="nav-link" data-target="view-todas-os"><i class="fa-solid fa-table-list"></i> Controle Geral de O.S</a></li>
-                        <li><a href="#" class="nav-link" data-target="view-obras"><i class="fa-solid fa-map-location-dot"></i> Obras em Campo</a></li>
+                        <li class="active-menu"><a href="#" class="nav-link" data-target="view-todas-os"><i class="fa-solid fa-clipboard-check" style="color: var(--accent-orange);"></i> Central Geral de O.S</a></li>
+                        <li><a href="#" class="nav-link" data-target="view-ordens"><i class="fa-solid fa-calendar-days"></i> Calendário Operacional</a></li>
                     </ul>
                 </div>
                 <div class="menu-section">
@@ -393,9 +391,9 @@
                 </div>
 
                 <!-- VIEW: ORDENS / AGENDA -->
-                <div id="view-ordens" class="view-page active-view admin-only">
+                <div id="view-ordens" class="view-page admin-only" style="display:none;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;">
-                        <h2 style="font-size: 1.5rem; font-weight: 800; color: var(--text-primary);"><i class="fa-solid fa-calendar-check"></i> Agenda de Serviços</h2>
+                        <h2 style="font-size: 1.5rem; font-weight: 800; color: var(--text-primary);"><i class="fa-solid fa-calendar-check"></i> Calendário Operacional</h2>
                         <button class="action-btn" id="btn-nova-os" style="background: var(--accent-orange); height: 44px; padding: 0 25px; font-weight: 800; font-size: 0.95rem;"><i class="fa-solid fa-plus"></i> NOVA ORDEM DE SERVIÇO</button>
                     </div>
 
@@ -424,28 +422,16 @@
                     </div>
                 </div>
 
-                <!-- VIEW: AGENDA TÉCNICA (NOVO) -->
-                <div id="view-agenda-tecnica" class="view-page admin-only" style="display:none;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;">
-                        <h2 style="font-size: 1.5rem; font-weight: 800; color: var(--accent-orange);"><i class="fa-solid fa-users-gear"></i> Visão de Técnicos e Atribuições</h2>
-                    </div>
-
-                    <div class="glass-panel agenda-container">
-                        <div class="widget-header">
-                            <h2><i class="fa-solid fa-clipboard-user"></i> Carga Horária Organizacional</h2>
-                            <span class="agent-tag">Master Dashboard</span>
+                <!-- VIEW: CENTRAL GERAL DE O.S (UNIFICADA) -->
+                <div id="view-todas-os" class="view-page active-view admin-only">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px;">
+                        <div>
+                            <h2 style="font-size: 1.6rem; font-weight: 800; color: var(--accent-orange); margin: 0;">
+                                <i class="fa-solid fa-clipboard-check"></i> Central Geral de O.S & Operações
+                            </h2>
+                            <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 4px;">Gerenciamento completo de ordens, cronograma de diárias, técnicos e repasses.</p>
                         </div>
-                        <div id="tech-agenda-container" style="display:flex; flex-direction: column; gap: 15px; margin-top:20px;">
-                           <!-- Injetado via JS -->
-                        </div>
-                    </div>
-                </div>
-
-                <!-- VIEW: TODAS AS O.S -->
-                <div id="view-todas-os" class="view-page admin-only" style="display:none;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;">
-                        <h2 style="font-size: 1.5rem; font-weight: 800; color: var(--accent-orange);"><i class="fa-solid fa-table-list"></i> Controle Geral de O.S (Relatório)</h2>
-                        <div style="display: flex; gap: 10px; align-items: center;">
+                        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
                             <div id="mass-action-os-bar" style="display:none; align-items: center; gap: 10px; background: rgba(255,255,255,0.05); padding: 5px 15px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
                                 <span id="mass-action-os-count" style="font-size: 0.85rem; font-weight: bold; color: white;">0 sel.</span>
                                 <select id="mass-action-os-select" style="background: rgba(0,0,0,0.5); color: white; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; padding: 4px 8px; font-size: 0.8rem; outline: none;">
@@ -455,20 +441,47 @@
                                 </select>
                                 <button class="action-btn" onclick="if(typeof window.executeMassActionOS === 'function') window.executeMassActionOS()" style="background: var(--accent-orange); height: 32px; padding: 0 15px; font-weight: 800; font-size: 0.8rem; border-radius: 4px;">APLICAR</button>
                             </div>
-                            <button class="action-btn" onclick="document.getElementById('btn-nova-os').click();" style="background: var(--accent-orange); height: 44px; padding: 0 25px; font-weight: 800; font-size: 0.95rem;"><i class="fa-solid fa-plus"></i> NOVA ORDEM DE SERVIÇO</button>
+                            <button class="action-btn" onclick="document.getElementById('btn-nova-os').click();" style="background: var(--accent-orange); height: 44px; padding: 0 25px; font-weight: 800; font-size: 0.95rem; box-shadow: 0 4px 15px rgba(230,126,34,0.3);"><i class="fa-solid fa-plus"></i> NOVA ORDEM DE SERVIÇO</button>
                         </div>
                     </div>
-                    <div class="glass-panel table-container">
-                        <table class="data-table" id="table-todas-os">
+
+                    <!-- BARRA DE FILTROS RÁPIDOS DA CENTRAL DE OS -->
+                    <div class="glass-panel" style="padding: 14px 18px; border-radius: 12px; margin-bottom: 20px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; background: rgba(0,0,0,0.25);">
+                        <div style="flex: 1; min-width: 220px;">
+                            <input type="text" id="filtro-os-busca" class="modal-input" placeholder="Buscar por Cliente, Serviço ou Endereço..." style="width: 100%; color: #000; background: #fff; border: 1px solid var(--border-color); padding: 8px 12px; border-radius: 8px; font-size: 0.85rem;" onkeyup="window.filterTodasOS()">
+                        </div>
+                        <div style="min-width: 160px;">
+                            <select id="filtro-os-tecnico" class="modal-input" style="width: 100%; color: #000; background: #fff; border: 1px solid var(--border-color); padding: 8px 12px; border-radius: 8px; font-size: 0.85rem;" onchange="window.filterTodasOS()">
+                                <option value="">Todos os Técnicos</option>
+                            </select>
+                        </div>
+                        <div style="min-width: 150px;">
+                            <select id="filtro-os-status" class="modal-input" style="width: 100%; color: #000; background: #fff; border: 1px solid var(--border-color); padding: 8px 12px; border-radius: 8px; font-size: 0.85rem;" onchange="window.filterTodasOS()">
+                                <option value="">Todos os Status</option>
+                                <option value="Aberto">Aberto</option>
+                                <option value="Em Campo">Em Campo / Andamento</option>
+                                <option value="Finalizado">Finalizado / Concluído</option>
+                                <option value="Cancelado">Cancelado</option>
+                            </select>
+                        </div>
+                        <button class="action-btn" onclick="window.loadData()" title="Atualizar tabela" style="background: var(--surface-light); padding: 8px 14px; border-radius: 8px; font-size: 0.85rem;">
+                            <i class="fa-solid fa-rotate"></i>
+                        </button>
+                    </div>
+
+                    <div class="glass-panel table-container" style="overflow-x: auto;">
+                        <table class="data-table" id="table-todas-os" style="width: 100%; min-width: 1050px;">
                             <thead>
                                 <tr>
-                                    <th style="width: 40px; text-align: center;"><input type="checkbox" id="mass-action-os-checkall" onclick="if(typeof window.toggleAllOSChecks === 'function') window.toggleAllOSChecks(this)" style="cursor: pointer; transform: scale(1.2);"></th>
-                                    <th>Ref.</th>
-                                    <th>Data Agend.</th>
-                                    <th>Cliente / Serviço</th>
-                                    <th>Técnico</th>
-                                    <th>Status (AIA)</th>
-                                    <th style="width: 140px;">Ações</th>
+                                    <th style="width: 35px; text-align: center;"><input type="checkbox" id="mass-action-os-checkall" onclick="if(typeof window.toggleAllOSChecks === 'function') window.toggleAllOSChecks(this)" style="cursor: pointer; transform: scale(1.2);"></th>
+                                    <th style="width: 80px;">Ref.</th>
+                                    <th style="width: 130px;"><i class="fa-solid fa-calendar-day"></i> 1ª Data Agend.</th>
+                                    <th style="width: 220px;"><i class="fa-solid fa-user"></i> 2ª Cliente / Serviço</th>
+                                    <th style="width: 200px;"><i class="fa-solid fa-map-location-dot"></i> 3ª Endereço (GPS)</th>
+                                    <th style="width: 140px;"><i class="fa-solid fa-tag"></i> 4ª Status</th>
+                                    <th style="width: 230px;"><i class="fa-solid fa-calendar-days"></i> 5ª Dias de Serviço (Diárias)</th>
+                                    <th style="width: 160px;"><i class="fa-solid fa-helmet-safety"></i> 6ª Técnico Executor</th>
+                                    <th style="width: 120px; text-align: right;">Ações</th>
                                 </tr>
                             </thead>
                             <tbody><!-- Dinamico --></tbody>
@@ -1775,8 +1788,11 @@
     <!-- SUPER MODAL: PRANCHETA DE ORDEM DE SERVIÇO (FASE 4) -->
     <div class="modal-overlay" id="modal-super-os">
         <div class="modal-content glass-panel-dark" style="width: 95%; max-width: 1000px; max-height: 90vh; overflow-y: auto;">
-            <div class="modal-header">
-                <h2><i class="fa-solid fa-clipboard-list"></i> Prancheta de Operações Mestre (Nova OS)</h2>
+            <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <h2><i class="fa-solid fa-clipboard-list"></i> Prancheta de Operações Mestre (Nova OS)</h2>
+                    <button type="button" id="btn-modal-send-wa" class="action-btn" style="background:#25D366; color:#fff; font-weight:700; padding:6px 14px; font-size:0.85rem; border-radius:6px; display:none;" onclick="window.enviarOsWhatsAppTecnicoCurrent()"><i class="fa-brands fa-whatsapp"></i> Enviar no WhatsApp do Técnico</button>
+                </div>
                 <button id="fechar-modal-super-os" class="modal-close" onclick="closeModal('modal-super-os')"><i class="fa-solid fa-xmark"></i></button>
             </div>
             
@@ -1807,7 +1823,7 @@
                         <select id="super-cliente" class="auth-select" required></select>
                     </div>
                     <div class="input-group">
-                        <label>Responsável / Técnico</label>
+                        <label>Responsável / Técnico Executor</label>
                         <select id="super-responsavel" class="auth-select" required>
                             <option value="Não Definido">Não Definido</option>
                         </select>
@@ -1819,16 +1835,23 @@
                         </select>
                     </div>
                     <div class="input-group">
-                        <label>Data de Início</label>
+                        <label>Data de Início (Agendamento)</label>
                         <input type="date" id="super-data" class="modal-input c-date" required>
                     </div>
 
-                    <!-- CRONOGRAMA DE MÚLTIPLAS DATAS -->
-                    <div class="input-group" style="grid-column: span 2; margin-top: 10px; border: 1px dashed rgba(255,255,255,0.1); padding: 15px; border-radius: 8px; background: rgba(0,0,0,0.2);">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                            <label style="margin: 0; font-weight: bold; color: var(--accent-orange);"><i class="fa-solid fa-calendar-days"></i> Cronograma de Execução (Múltiplos Dias)</label>
-                            <button type="button" class="action-btn-sm" onclick="window.addOSDateRow()" style="background: var(--accent-blue); color: white; padding: 4px 10px; border-radius: 4px; font-size: 0.75rem;">
-                                <i class="fa-solid fa-plus"></i> Adicionar Dia
+                    <!-- CRONOGRAMA DE MÚLTIPLAS DIÁRIAS / RETORNOS -->
+                    <div class="input-group" style="grid-column: span 2; margin-top: 10px; border: 1px dashed rgba(230,126,34,0.4); padding: 15px; border-radius: 8px; background: rgba(0,0,0,0.25);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
+                            <div>
+                                <label style="margin: 0; font-weight: bold; color: var(--accent-orange); font-size: 0.95rem;">
+                                    <i class="fa-solid fa-calendar-days"></i> Cronograma de Diárias na Obra (Dias de Visita / Retorno)
+                                </label>
+                                <small style="display: block; color: var(--text-muted); font-size: 0.75rem; margin-top: 2px;">
+                                    Ex: Começou dia 20, volta dias 23, 24, 25 e entrega dia 30.
+                                </small>
+                            </div>
+                            <button type="button" class="action-btn-sm" onclick="window.addOSDateRow()" style="background: var(--accent-orange); color: white; padding: 5px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700;">
+                                <i class="fa-solid fa-plus"></i> Adicionar Diária
                             </button>
                         </div>
                         <div id="os-datas-container" style="display: flex; flex-direction: column; gap: 8px;">
@@ -1861,7 +1884,41 @@
                             <option value="Em Campo">Em Andamento (Em Campo)</option>
                             <option value="Validado">Validado (Faturar)</option>
                             <option value="Finalizado">Concluído (Finalizado)</option>
+                            <option value="Cancelado">Cancelado</option>
                         </select>
+                    </div>
+                </div>
+
+                <!-- PLANO DE PAGAMENTO & STATUS FINANCEIRO -->
+                <div class="glass-panel" style="padding: 15px; border-radius: 8px; margin: 15px 0; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08);">
+                    <h3 style="color: var(--accent-green); font-size: 1rem; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                        <i class="fa-solid fa-money-check-dollar"></i> Plano de Pagamento & Recebimento
+                    </h3>
+                    <div class="form-grid-os" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
+                        <div class="input-group">
+                            <label>Condição / Forma de Pagamento</label>
+                            <select id="super-condicao-pagamento" class="auth-select">
+                                <option value="À Vista (PIX)">À Vista (PIX)</option>
+                                <option value="Cartão de Crédito (1x)">Cartão de Crédito (1x)</option>
+                                <option value="Cartão de Crédito (2x a 6x)">Cartão de Crédito (2x a 6x)</option>
+                                <option value="Cartão de Crédito (7x a 12x)">Cartão de Crédito (7x a 12x)</option>
+                                <option value="Faturado B2B (Boleto 15/30D)">Faturado B2B (Boleto 15/30D)</option>
+                                <option value="50% Entrada + 50% Conclusão">50% Entrada + 50% Conclusão</option>
+                                <option value="Outro Combinado">Outro Combinado</option>
+                            </select>
+                        </div>
+                        <div class="input-group">
+                            <label>Status do Pagamento</label>
+                            <select id="super-status-pagamento" class="auth-select">
+                                <option value="Pendente">🟡 Pendente (A Receber)</option>
+                                <option value="Entrada Paga">🟠 Entrada Paga (50%)</option>
+                                <option value="Pago">🟢 Pago / Quitado</option>
+                            </select>
+                        </div>
+                        <div class="input-group">
+                            <label>Previsão de Quitação / Vencimento</label>
+                            <input type="date" id="super-vencimento-pagamento" class="modal-input c-date">
+                        </div>
                     </div>
                 </div>
 
@@ -1945,6 +2002,42 @@
                 </div>
 
                 <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 20px 0;">
+
+                <!-- TABELA DE CUSTOS EXTRAS & REPASSES NA OBRA -->
+                <div class="section-header" style="display:flex; justify-content: space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:10px;">
+                    <div>
+                        <h3 style="color: #e67e22;"><i class="fa-solid fa-receipt"></i> Custos Extras & Repasses na Obra</h3>
+                        <p style="font-size: 0.8rem; color: var(--text-muted); margin-top:2px;">Materiais comprados na hora (ex: Leroy, interruptores, cabos extras) e serviços adicionais para repasse ao cliente.</p>
+                    </div>
+                    <button type="button" id="btn-add-extra" onclick="window.addOSExtraRow()" style="background: transparent; border: 1px solid #e67e22; color: #e67e22; padding: 5px 15px; border-radius: 5px; cursor:pointer; font-weight: 700;">
+                        <i class="fa-solid fa-plus"></i> Inserir Custo Extra
+                    </button>
+                </div>
+                
+                <div class="table-responsive">
+                    <table class="data-table" id="table-os-extras">
+                        <thead>
+                            <tr style="border-bottom: 2px solid #e67e22;">
+                                <th style="width:45%;">Descrição do Item / Repasse</th>
+                                <th style="width:20%;">Tipo</th>
+                                <th style="width:12%;">Qtd</th>
+                                <th style="width:15%;">Valor Total (R$)</th>
+                                <th style="width:8%; text-align:right;">Ação</th>
+                            </tr>
+                        </thead>
+                        <tbody id="extras-body">
+                            <!-- JS injeta Linhas -->
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <td colspan="3" style="text-align: right; border:none; padding-top:10px; font-weight: bold;">Total Custos Extras / Repasses:</td>
+                                <td colspan="2" style="font-weight: bold; color: #e67e22; border:none; padding-top:10px;" id="total-extras-os">R$ 0,00</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+
+                <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 20px 0;">
                 
                 <!-- Anexos e Upload em Background -->
                 <div class="section-header" style="margin-bottom:10px;">
@@ -1962,13 +2055,13 @@
                 <div style="background: linear-gradient(135deg, rgba(39, 174, 96, 0.1), rgba(0, 0, 0, 0.2)); padding: 20px; border-radius: 8px; border: 1px solid rgba(39, 174, 96, 0.3); border-left: 5px solid var(--accent-green); margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
                     <div>
                         <span style="font-size: 1.1rem; color: #fff; font-weight: bold; display: block;">Valor Total Projetado da OS</span>
-                        <span style="font-size: 0.8rem; color: var(--text-muted);">Soma de Serviços + Materiais Faturáveis</span>
+                        <span style="font-size: 0.8rem; color: var(--text-muted);">Soma de Serviços + Materiais Faturáveis + Custos Extras</span>
                     </div>
                     <span id="super-os-total-label" style="font-size: 2rem; font-weight: 900; color: var(--accent-green); transition: transform 0.2s;">R$ 0,00</span>
                 </div>
 
-                <div style="margin-top: 40px; display: flex; justify-content: flex-end; gap: 15px; background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px;">
-                    <span style="align-self: center; font-size: 0.8rem; color: var(--text-muted); margin-right: auto;">Valores finais sujeitos à conferência da Márcia Ribeiro. (Status IA entra como: Aberto).</span>
+                <div style="margin-top: 40px; display: flex; justify-content: flex-end; gap: 15px; background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px; flex-wrap: wrap;">
+                    <span style="align-self: center; font-size: 0.8rem; color: var(--text-muted); margin-right: auto;">Valores finais sujeitos à conferência da Márcia Ribeiro.</span>
                     <button type="button" class="action-btn" onclick="closeModal('modal-super-os')" style="background: transparent; border: 1px solid #718093;">Cancelar e Sair</button>
                     <button type="button" id="btn-reativar-os" class="action-btn" style="background: var(--accent-blue); display:none;" onclick="window.reativarOS()"> <i class="fa-solid fa-rotate-left"></i> Reativar OS</button>
                     <button type="button" id="btn-delete-os" class="action-btn" style="background: var(--accent-red); display:none;" onclick="window.deleteOS()"> <i class="fa-solid fa-trash-can"></i> Excluir</button>
