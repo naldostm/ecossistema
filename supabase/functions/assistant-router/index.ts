@@ -268,22 +268,18 @@ serve(async (req) => {
           return;
       }
 
-      remoteJid = remoteJid.split('@')[0];
+      remoteJid = remoteJid.split('@')[0].replace(/\D/g, '');
+      if (!remoteJid.startsWith('55') && remoteJid.length >= 10 && remoteJid.length <= 11) {
+          remoteJid = '55' + remoteJid;
+      }
       
       // Sanitização Limpa antes de usar na Triagem de Arquivos
       if (typeof userMessage !== 'string') {
           userMessage = "";
       }
 
-      // CONTROLE DE PAUSA GLOBAL MESTRE
-      const { data: globalCfg } = await supabase.from('agent_memory').select('content').eq('phone', 'GLOBAL_CONFIG').order('created_at', {ascending: false}).limit(1);
-      if (globalCfg && globalCfg.length > 0 && globalCfg[0].content === 'GLOBAL_PAUSE') {
-          console.log(`[PAUSA GLOBAL] O webhook ignorou a mensagem pois o Botão Mestre está OFF.`);
-          return;
-      }
-
       // CONTROLE DE PAUSA E COMANDOS DO GESTOR (Atendimento Humano Individual)
-      const isMessageFromMe = payload?.message?.fromMe === true || payload?.fromMe === true || payload?.data?.key?.fromMe === true;
+      const isMessageFromMe = payload?.message?.fromMe === true || payload?.fromMe === true || payload?.data?.key?.fromMe === true || payload?.data?.fromMe === true || msgNode?.fromMe === true;
       const sentByApi = payload?.message?.wasSentByApi === true || payload?.data?.message?.wasSentByApi === true || payload?.wasSentByApi === true;
       
       if (isMessageFromMe || sentByApi) {
@@ -324,28 +320,6 @@ serve(async (req) => {
               }
           }
           return;
-      }
-
-      // VERIFICAÇÃO DE LISTA NEGRA E PAUSA TÉCNICA
-      const { data: pauseState } = await supabase
-          .from('agent_memory')
-          .select('content')
-          .eq('phone', remoteJid)
-          .eq('role', 'user')
-          .in('content', ['BOT_PAUSADO', 'BOT_ATIVO', 'BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA'])
-          .order('created_at', { ascending: false })
-          .limit(1);
-          
-      if (pauseState && pauseState.length > 0) {
-          const state = pauseState[0].content;
-          if (state === 'BOT_IGNORAR' || state === 'AMIGO_IGNORAR' || state === 'LISTA_NEGRA') {
-              console.log(`[LISTA NEGRA] O robô está permanentemente ignorado para ${remoteJid} (Amigo/Família).`);
-              return;
-          }
-          if (state === 'BOT_PAUSADO') {
-              console.log(`[PAUSADO] O robô está pausado manualmente para ${remoteJid}. Ignorando fluxo.`);
-              return;
-          }
       }
 
       const uazapiUrl = (payload?.BaseUrl || payload?.baseUrl || Deno.env.get('UAZAPI_URL') || '').replace(/\/$/, '');
@@ -625,7 +599,7 @@ serve(async (req) => {
           }
       }
 
-      // 1. O Isolate insere imediatamente a mensagem do usuário no banco
+      // 1. O Isolate insere imediatamente a mensagem do usuário no banco (garantindo histórico em tempo real no CRM)
       const { data: insertedData, error: insertError } = await supabase.from('agent_memory').insert({
           phone: remoteJid,
           role: 'user',
@@ -638,7 +612,36 @@ serve(async (req) => {
       }
       const myId = insertedData.id;
 
-      // 2. Buffer de Debounce (500ms para mídia, 1500ms para texto)
+      // 2. VERIFICAÇÃO DE PAUSA GLOBAL MESTRE (Mensagem gravada no CRM, mas IA em silêncio)
+      const { data: globalCfg } = await supabase.from('agent_memory').select('content').eq('phone', 'GLOBAL_CONFIG').order('created_at', {ascending: false}).limit(1);
+      if (globalCfg && globalCfg.length > 0 && globalCfg[0].content === 'GLOBAL_PAUSE') {
+          console.log(`[PAUSA GLOBAL] Mensagem registrada no chat, mas o Botão Mestre está OFF. Robô em silêncio.`);
+          return;
+      }
+
+      // 3. VERIFICAÇÃO DE LISTA NEGRA E PAUSA TÉCNICA (Mensagem gravada no CRM para atendimento humano)
+      const { data: pauseState } = await supabase
+          .from('agent_memory')
+          .select('content')
+          .eq('phone', remoteJid)
+          .eq('role', 'user')
+          .in('content', ['BOT_PAUSADO', 'BOT_ATIVO', 'BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA'])
+          .order('created_at', { ascending: false })
+          .limit(1);
+          
+      if (pauseState && pauseState.length > 0) {
+          const state = pauseState[0].content;
+          if (state === 'BOT_IGNORAR' || state === 'AMIGO_IGNORAR' || state === 'LISTA_NEGRA') {
+              console.log(`[LISTA NEGRA] Mensagem registrada no chat, robô está permanentemente ignorado para ${remoteJid}.`);
+              return;
+          }
+          if (state === 'BOT_PAUSADO') {
+              console.log(`[PAUSADO] Mensagem registrada no chat, atendimento humano em andamento para ${remoteJid}.`);
+              return;
+          }
+      }
+
+      // 4. Buffer de Debounce (500ms para mídia, 1500ms para texto)
       if (hasMedia) {
           console.log(`[DEBOUNCE CURTO] Mídia detectada, aguardando 500ms para deduplicar webhooks...`);
           await new Promise(r => setTimeout(r, 500));
@@ -647,7 +650,7 @@ serve(async (req) => {
           await new Promise(r => setTimeout(r, 1500));
       }
 
-      // 3. Eleição de Liderança por Telefone:
+      // 5. Eleição de Liderança por Telefone:
       // Verifica se houve alguma mensagem de usuário mais recente para este MESMO telefone
       const { data: latestUserMsg } = await supabase.from('agent_memory')
           .select('id, created_at')

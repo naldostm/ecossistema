@@ -2401,7 +2401,11 @@ ${materiaisTxt}${extrasTxt}
                         window.loadLiveConversations();
                     }
                     // Se a conversa aberta é do mesmo phone, atualiza o chat
-                    if (typeof currentLivePhone !== 'undefined' && currentLivePhone === newRow?.phone && typeof window.selectLiveConversation === 'function') {
+                    const curClean = (typeof currentLivePhone !== 'undefined' && currentLivePhone) ? currentLivePhone.replace(/\D/g, '') : '';
+                    const rowClean = (newRow?.phone) ? newRow.phone.replace(/\D/g, '') : '';
+                    const isSamePhone = curClean && rowClean && (curClean === rowClean || curClean.endsWith(rowClean) || rowClean.endsWith(curClean));
+                    
+                    if (isSamePhone && typeof window.selectLiveConversation === 'function') {
                         window.selectLiveConversation(currentLivePhone);
                     }
                 }, 800);
@@ -7524,9 +7528,12 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
             // Agrupar por telefone
             const grouped = {};
             memories.forEach(m => {
-                if (!m.phone || m.phone === 'GLOBAL_CONFIG' || m.phone.includes('@g.us')) return;
-                const cleanPhone = m.phone.replace(/\D/g, '');
+                if (!m.phone || m.phone.startsWith('LOCK_') || m.phone === 'GLOBAL_CONFIG' || m.phone === 'DEBUG_AUDIO' || m.phone.includes('@g.us')) return;
+                let cleanPhone = m.phone.replace(/\D/g, '');
                 if (!cleanPhone || cleanPhone.length < 8) return;
+                if (!cleanPhone.startsWith('55') && cleanPhone.length >= 10 && cleanPhone.length <= 11) {
+                    cleanPhone = '55' + cleanPhone;
+                }
 
                 if (!grouped[cleanPhone]) {
                     grouped[cleanPhone] = {
