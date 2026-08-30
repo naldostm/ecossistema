@@ -7447,6 +7447,7 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
             }
             window.loadLiveConversations();
             window.loadBlacklistTable();
+            window.loadMariaTasks();
             loadCampaignClients();
             loadCampaignHistory();
         }
@@ -7480,6 +7481,9 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
         } else if (tabName === 'campanhas') {
             loadCampaignClients();
             loadCampaignHistory();
+        } else if (tabName === 'agenda') {
+            window.loadMariaTasks();
+            window.populateAgendaClientsSelect();
         } else if (tabName === 'blacklist') {
             window.loadBlacklistTable();
         }
@@ -8555,7 +8559,472 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
         }
     };
 
-    console.log('[CentralAtendimento v2.0] Live CRM, Outbound e Lista Negra carregados.');
+    // ==========================================================================
+    // 📅 AGENDA DE MISSÕES DA MARIA CECÍLIA (PORTAL DE TAREFAS / SECRETÁRIA)
+    // ==========================================================================
+    let _agendaTasks = [];
+    let _currentAgendaFile = null;
+    let _agendaFilter = 'all';
+
+    const EVENT_LABELS = {
+        'confirmar_agendamento': { label: '📅 Confirmar Visita Técnica', color: '#3498db', bg: 'rgba(52,152,219,0.15)', border: 'rgba(52,152,219,0.3)' },
+        'enviar_orcamento': { label: '📑 Encaminhar Orçamento / Proposta', color: '#25D366', bg: 'rgba(37,211,102,0.15)', border: 'rgba(37,211,102,0.3)' },
+        'lembrete_pagamento': { label: '💳 Lembrete Financeiro / PIX', color: '#f39c12', bg: 'rgba(243,156,18,0.15)', border: 'rgba(243,156,18,0.3)' },
+        'cotacao_fornecedor': { label: '📦 Cotação com Fornecedor', color: '#9b59b6', bg: 'rgba(155,89,182,0.15)', border: 'rgba(155,89,182,0.3)' },
+        'pos_venda': { label: '🛠️ Pós-Venda / Manutenção PMOC', color: '#1abc9c', bg: 'rgba(26,188,156,0.15)', border: 'rgba(26,188,156,0.3)' },
+        'secretaria_personalizada': { label: '⚡ Missão Personalizada', color: '#e67e22', bg: 'rgba(230,126,34,0.15)', border: 'rgba(230,126,34,0.3)' }
+    };
+
+    window.populateAgendaClientsSelect = async function() {
+        const select = document.getElementById('agenda-input-client-select');
+        if (!select) return;
+        try {
+            const supa = getSupa();
+            const { data: clients } = await supa.from('clientes')
+                .select('id, nome_cliente, whatsapp, endereco_completo')
+                .order('nome_cliente', { ascending: true })
+                .limit(100);
+
+            if (!clients) return;
+            select.innerHTML = '<option value="">-- Selecionar Cliente Cadastrado (Ou preencha livremente abaixo) --</option>' +
+                clients.map(c => `<option value="${c.id}" data-name="${encodeURIComponent(c.nome_cliente || '')}" data-phone="${c.whatsapp || ''}">${c.nome_cliente} (${c.whatsapp || 'sem fone'})</option>`).join('');
+        } catch (err) {
+            console.error('[AGENDA] Erro ao carregar lista de clientes para select:', err);
+        }
+    };
+
+    window.onAgendaClientSelected = function(clientId) {
+        const select = document.getElementById('agenda-input-client-select');
+        const inputName = document.getElementById('agenda-input-name');
+        const inputPhone = document.getElementById('agenda-input-phone');
+        if (!select || !inputName || !inputPhone) return;
+
+        const opt = select.options[select.selectedIndex];
+        if (opt && opt.value) {
+            inputName.value = decodeURIComponent(opt.getAttribute('data-name') || '');
+            let ph = (opt.getAttribute('data-phone') || '').replace(/\D/g, '');
+            if (ph.startsWith('55') && ph.length > 11) ph = ph.replace(/^55/, '');
+            inputPhone.value = ph;
+        }
+    };
+
+    window.onAgendaEventTypeChange = function(eventType) {
+        const txt = document.getElementById('agenda-input-instructions');
+        if (!txt) return;
+        const placeholders = {
+            'confirmar_agendamento': 'Ex: Confirmar a visita técnica de amanhã às 14h com o técnico Francisco para manutenção do ar condicionado.',
+            'enviar_orcamento': 'Ex: Enviar o orçamento em anexo referente à instalação de 2 Splits 12000 BTU e avisar que cobrimos qualquer proposta à vista.',
+            'lembrete_pagamento': 'Ex: Enviar lembrete amigável do vencimento da parcela nº 2 de R$ 450,00 e mandar nossa chave PIX CNPJ.',
+            'cotacao_fornecedor': 'Ex: Perguntar o preço de 10 barras de tubo de cobre 1/4 e 3/8 e prazo de entrega para nosso endereço.',
+            'pos_venda': 'Ex: Perguntar se o aparelho instalado na semana passada está funcionando perfeitamente e oferecer a limpeza preventiva semestral.',
+            'secretaria_personalizada': 'Ex: Digite qualquer ordem que você deseja que a Maria execute no WhatsApp como sua secretária executiva.'
+        };
+        txt.placeholder = placeholders[eventType] || 'Digite as instruções detalhadas da ordem...';
+    };
+
+    window.handleAgendaFileUpload = function(e) {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+
+        if (file.size > 10 * 1024 * 1024) {
+            alert('O arquivo não pode ultrapassar 10MB.');
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = function(evt) {
+            _currentAgendaFile = {
+                name: file.name,
+                type: file.type || (file.name.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg'),
+                base64: evt.target.result
+            };
+
+            const badge = document.getElementById('agenda-file-badge');
+            const nameText = document.getElementById('agenda-file-name-text');
+            if (badge && nameText) {
+                nameText.innerText = file.name;
+                badge.style.display = 'inline-flex';
+            }
+        };
+        reader.readAsDataURL(file);
+    };
+
+    window.removeAgendaFile = function() {
+        _currentAgendaFile = null;
+        const fileInput = document.getElementById('agenda-input-file');
+        if (fileInput) fileInput.value = '';
+        const badge = document.getElementById('agenda-file-badge');
+        if (badge) badge.style.display = 'none';
+    };
+
+    window.saveMariaAgendaTask = async function() {
+        const inputName = document.getElementById('agenda-input-name');
+        const inputPhone = document.getElementById('agenda-input-phone');
+        const inputDateTime = document.getElementById('agenda-input-datetime');
+        const selectEventType = document.getElementById('agenda-input-event-type');
+        const inputInstructions = document.getElementById('agenda-input-instructions');
+        const btnSave = document.getElementById('btn-save-maria-task');
+
+        const targetName = (inputName?.value || '').trim();
+        let targetPhone = (inputPhone?.value || '').replace(/\D/g, '');
+        const scheduledFor = inputDateTime?.value;
+        const eventType = selectEventType?.value || 'secretaria_personalizada';
+        const instructions = (inputInstructions?.value || '').trim();
+
+        if (!targetName) {
+            alert('Por favor, preencha o Nome do Destinatário.');
+            inputName?.focus();
+            return;
+        }
+        if (!targetPhone || targetPhone.length < 8) {
+            alert('Por favor, informe um número de WhatsApp válido.');
+            inputPhone?.focus();
+            return;
+        }
+        if (!scheduledFor) {
+            alert('Por favor, selecione a Data e o Horário de execução da tarefa.');
+            inputDateTime?.focus();
+            return;
+        }
+        if (!instructions) {
+            alert('Por favor, digite as Instruções da Ordem para a Maria.');
+            inputInstructions?.focus();
+            return;
+        }
+
+        if (!targetPhone.startsWith('55') && targetPhone.length <= 11) {
+            targetPhone = '55' + targetPhone;
+        }
+
+        const eventMeta = EVENT_LABELS[eventType] || { label: 'Missão Personalizada' };
+
+        const newTask = {
+            id: 'task_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+            created_at: new Date().toISOString(),
+            scheduled_for: new Date(scheduledFor).toISOString(),
+            target_name: targetName,
+            target_phone: targetPhone,
+            event_type: eventType,
+            event_label: eventMeta.label,
+            instructions: instructions,
+            file_name: _currentAgendaFile?.name || null,
+            file_type: _currentAgendaFile?.type || null,
+            file_base64: _currentAgendaFile?.base64 || null,
+            file_url: null,
+            status: 'pendente',
+            executed_at: null,
+            ai_generated_message: null,
+            activity_report: null
+        };
+
+        if (btnSave) {
+            btnSave.disabled = true;
+            btnSave.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Agendando...';
+        }
+
+        try {
+            const supa = getSupa();
+            const { error } = await supa.from('agent_memory').insert({
+                phone: 'MARIA_TASK',
+                role: 'task_pending',
+                content: JSON.stringify(newTask)
+            });
+
+            if (error) throw error;
+
+            // Limpa o formulário
+            if (inputName) inputName.value = '';
+            if (inputPhone) inputPhone.value = '';
+            if (inputInstructions) inputInstructions.value = '';
+            window.removeAgendaFile();
+
+            alert(`✅ Missão agendada com sucesso para ${targetName}!\n\nA Maria Cecília executará no horário marcado (${new Date(scheduledFor).toLocaleString('pt-BR')}) e você poderá acompanhar o relatório.`);
+
+            await window.loadMariaTasks();
+
+        } catch (err) {
+            console.error('[AGENDA] Erro ao salvar tarefa:', err);
+            alert('Erro ao agendar missão: ' + (err?.message || err));
+        } finally {
+            if (btnSave) {
+                btnSave.disabled = false;
+                btnSave.innerHTML = '<i class="fa-solid fa-calendar-plus"></i> Agendar Missão da Maria';
+            }
+        }
+    };
+
+    window.loadMariaTasks = async function() {
+        const tbody = document.getElementById('tbody-maria-agenda');
+        if (!tbody) return;
+
+        try {
+            const supa = getSupa();
+            const { data: records, error } = await supa.from('agent_memory')
+                .select('id, content, created_at')
+                .eq('phone', 'MARIA_TASK')
+                .order('created_at', { ascending: false })
+                .limit(100);
+
+            if (error) {
+                tbody.innerHTML = `<tr><td colspan="6" style="color:var(--accent-red); padding:20px;">Erro ao carregar tarefas: ${error.message}</td></tr>`;
+                return;
+            }
+
+            _agendaTasks = [];
+            (records || []).forEach(r => {
+                try {
+                    const task = JSON.parse(r.content);
+                    task._recordId = r.id;
+                    _agendaTasks.push(task);
+                } catch (e) {}
+            });
+
+            // Atualiza estatísticas e badges
+            const total = _agendaTasks.length;
+            const pending = _agendaTasks.filter(t => t.status === 'pendente').length;
+            const done = _agendaTasks.filter(t => t.status === 'concluida').length;
+
+            const badgeTab = document.getElementById('count-agenda');
+            const statPending = document.getElementById('agenda-stat-pending');
+            const statDone = document.getElementById('agenda-stat-done');
+            const statTotal = document.getElementById('agenda-stat-total');
+
+            if (badgeTab) badgeTab.innerText = pending;
+            if (statPending) statPending.innerText = pending;
+            if (statDone) statDone.innerText = done;
+            if (statTotal) statTotal.innerText = total;
+
+            window.renderMariaTasks();
+
+        } catch (err) {
+            console.error('[AGENDA] Erro ao buscar tarefas:', err);
+        }
+    };
+
+    window.filterAgendaTasks = function(filterType, btn) {
+        _agendaFilter = filterType;
+        document.querySelectorAll('.agenda-filter-btn').forEach(b => {
+            b.style.background = 'transparent';
+            b.style.color = 'var(--text-muted)';
+        });
+        if (btn) {
+            btn.style.background = 'rgba(243,156,18,0.2)';
+            btn.style.color = '#f39c12';
+        }
+        window.renderMariaTasks();
+    };
+
+    window.renderMariaTasks = function() {
+        const tbody = document.getElementById('tbody-maria-agenda');
+        if (!tbody) return;
+
+        let filtered = _agendaTasks;
+        if (_agendaFilter === 'pendente') {
+            filtered = _agendaTasks.filter(t => t.status === 'pendente');
+        } else if (_agendaFilter === 'concluida') {
+            filtered = _agendaTasks.filter(t => t.status === 'concluida');
+        }
+
+        if (filtered.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:30px; color:var(--text-muted);">Nenhuma missão encontrada para este filtro.</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = filtered.map(t => {
+            const schedDate = t.scheduled_for ? new Date(t.scheduled_for).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '-';
+            const meta = EVENT_LABELS[t.event_type] || { label: t.event_label || 'Missão Comercial', color: '#f39c12', bg: 'rgba(243,156,18,0.15)', border: 'rgba(243,156,18,0.3)' };
+
+            let statusBadge = '';
+            if (t.status === 'concluida') {
+                statusBadge = '<span style="background:rgba(37,211,102,0.15); color:#25D366; border:1px solid rgba(37,211,102,0.3); font-size:0.75rem; padding:3px 8px; border-radius:12px; font-weight:700;"><i class="fa-solid fa-check"></i> Concluída</span>';
+            } else if (t.status === 'executando') {
+                statusBadge = '<span style="background:rgba(52,152,219,0.15); color:#3498db; border:1px solid rgba(52,152,219,0.3); font-size:0.75rem; padding:3px 8px; border-radius:12px; font-weight:700;"><i class="fa-solid fa-spinner fa-spin"></i> Executando...</span>';
+            } else if (t.status === 'falha') {
+                statusBadge = '<span style="background:rgba(231,76,60,0.15); color:#e74c3c; border:1px solid rgba(231,76,60,0.3); font-size:0.75rem; padding:3px 8px; border-radius:12px; font-weight:700;"><i class="fa-solid fa-triangle-exclamation"></i> Falha</span>';
+            } else {
+                statusBadge = '<span style="background:rgba(243,156,18,0.15); color:#f39c12; border:1px solid rgba(243,156,18,0.3); font-size:0.75rem; padding:3px 8px; border-radius:12px; font-weight:700;"><i class="fa-solid fa-clock"></i> Agendada</span>';
+            }
+
+            const attachBadge = t.file_name 
+                ? `<span style="display:inline-flex; align-items:center; gap:4px; font-size:0.75rem; color:#3498db; background:rgba(52,152,219,0.12); padding:2px 8px; border-radius:6px; border:1px solid rgba(52,152,219,0.25);" title="${t.file_name}"><i class="fa-solid fa-paperclip"></i> ${t.file_name.length > 15 ? t.file_name.substring(0,12) + '...' : t.file_name}</span>`
+                : '<span style="color:var(--text-muted); font-size:0.75rem;">-</span>';
+
+            let actionsHtml = '';
+            if (t.status === 'concluida') {
+                actionsHtml = `
+                    <button class="action-btn" onclick="window.viewMariaTaskReport('${t.id}')" style="background:rgba(37,211,102,0.15); color:#25D366; border:1px solid rgba(37,211,102,0.3); font-size:0.78rem; padding:4px 10px; border-radius:6px; font-weight:700;">
+                        <i class="fa-solid fa-file-lines"></i> Relatório
+                    </button>
+                    <button class="action-btn" onclick="window.deleteMariaTask('${t.id}')" style="background:rgba(231,76,60,0.12); color:#e74c3c; border:1px solid rgba(231,76,60,0.3); font-size:0.78rem; padding:4px 8px; border-radius:6px;" title="Excluir">
+                        <i class="fa-solid fa-trash"></i>
+                    </button>
+                `;
+            } else {
+                actionsHtml = `
+                    <button class="action-btn" onclick="window.runMariaTaskNow('${t.id}')" style="background:rgba(243,156,18,0.2); color:#f39c12; border:1px solid rgba(243,156,18,0.4); font-size:0.78rem; padding:4px 10px; border-radius:6px; font-weight:700;">
+                        <i class="fa-solid fa-bolt"></i> Disparar Agora
+                    </button>
+                    <button class="action-btn" onclick="window.deleteMariaTask('${t.id}')" style="background:rgba(231,76,60,0.12); color:#e74c3c; border:1px solid rgba(231,76,60,0.3); font-size:0.78rem; padding:4px 8px; border-radius:6px;" title="Excluir">
+                        <i class="fa-solid fa-trash"></i>
+                    </button>
+                `;
+            }
+
+            return `
+                <tr>
+                    <td style="font-size:0.85rem; font-weight:600;">${schedDate}</td>
+                    <td>
+                        <div style="font-weight:700; font-size:0.88rem; color:var(--text-primary);">${t.target_name}</div>
+                        <div style="font-size:0.75rem; color:var(--text-muted);">${t.target_phone}</div>
+                    </td>
+                    <td>
+                        <span style="background:${meta.bg}; color:${meta.color}; border:1px solid ${meta.border}; font-size:0.75rem; padding:3px 10px; border-radius:12px; font-weight:700;">
+                            ${meta.label}
+                        </span>
+                    </td>
+                    <td>${attachBadge}</td>
+                    <td>${statusBadge}</td>
+                    <td style="text-align: right;">
+                        <div style="display:flex; gap:6px; justify-content:flex-end;">
+                            ${actionsHtml}
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    };
+
+    window.runMariaTaskNow = async function(taskId) {
+        const task = _agendaTasks.find(t => t.id === taskId);
+        if (!task) return;
+
+        if (!confirm(`Deseja disparar a missão para ${task.target_name} (${task.target_phone}) imediatamente?`)) return;
+
+        const SUPABASE_URL = ((typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_URL) ? import.meta.env.VITE_SUPABASE_URL : 'https://tmpwmtpdxcvulglkahcg.supabase.co').trim();
+        const SUPABASE_ANON_KEY = ((typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_ANON_KEY) ? import.meta.env.VITE_SUPABASE_ANON_KEY : 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRtcHdtdHBkeGN2dWxnbGthaGNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwNTg0MDMsImV4cCI6MjA4OTYzNDQwM30.GRcj8PoXCMcWPEN5maZYD3kxndqpWfcegryLYANgggE').trim();
+
+        try {
+            task.status = 'executando';
+            window.renderMariaTasks();
+
+            const resp = await fetch(`${SUPABASE_URL}/functions/v1/assistant-router`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                },
+                body: JSON.stringify({
+                    action: 'execute_maria_task',
+                    task: task,
+                    record_id: task._recordId
+                })
+            });
+
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Falha ao executar missão.');
+
+            alert(`✅ Missão executada com sucesso!\n\nA Maria Cecília redigiu e enviou a mensagem para ${task.target_name} no WhatsApp.`);
+
+            await window.loadMariaTasks();
+
+            if (data.activity_report) {
+                window.viewMariaTaskReport(taskId);
+            }
+
+        } catch (err) {
+            console.error('[AGENDA] Erro ao disparar missão:', err);
+            alert('Erro ao disparar missão: ' + err.message);
+            await window.loadMariaTasks();
+        }
+    };
+
+    window.deleteMariaTask = async function(taskId) {
+        const task = _agendaTasks.find(t => t.id === taskId);
+        if (!task) return;
+
+        if (!confirm(`Deseja excluir a missão agendada para ${task.target_name}?`)) return;
+
+        try {
+            const supa = getSupa();
+            if (task._recordId) {
+                await supa.from('agent_memory').delete().eq('id', task._recordId);
+            }
+            _agendaTasks = _agendaTasks.filter(t => t.id !== taskId);
+            window.renderMariaTasks();
+            await window.loadMariaTasks();
+        } catch (err) {
+            alert('Erro ao excluir missão: ' + err.message);
+        }
+    };
+
+    window.viewMariaTaskReport = function(taskId) {
+        const task = _agendaTasks.find(t => t.id === taskId);
+        if (!task) return;
+
+        const modal = document.getElementById('modal-maria-task-report');
+        const body = document.getElementById('modal-maria-task-report-body');
+        if (!modal || !body) return;
+
+        let contentHtml = '';
+        if (task.activity_report) {
+            contentHtml = `
+                <div style="background:rgba(37,211,102,0.08); border:1px solid rgba(37,211,102,0.25); border-radius:8px; padding:16px; margin-bottom:14px;">
+                    <div style="font-size:0.95rem; font-weight:700; color:#25D366; margin-bottom:8px;">
+                        <i class="fa-solid fa-circle-check"></i> Relatório de Entrega Concluída
+                    </div>
+                    <div style="white-space:pre-wrap; line-height:1.6; font-size:0.88rem;">${task.activity_report.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}</div>
+                </div>
+            `;
+        } else {
+            contentHtml = `
+                <div style="padding:14px; background:rgba(0,0,0,0.2); border-radius:8px;">
+                    <p><strong>Destinatário:</strong> ${task.target_name} (${task.target_phone})</p>
+                    <p><strong>Evento:</strong> ${task.event_label}</p>
+                    <p><strong>Instruções do Gestor:</strong> ${task.instructions}</p>
+                    <p><strong>Status:</strong> ${task.status}</p>
+                    ${task.ai_generated_message ? `<p><strong>Mensagem Enviada:</strong> "${task.ai_generated_message}"</p>` : ''}
+                </div>
+            `;
+        }
+
+        body.innerHTML = contentHtml;
+        modal.style.display = 'flex';
+    };
+
+    window.closeMariaTaskReportModal = function() {
+        const modal = document.getElementById('modal-maria-task-report');
+        if (modal) modal.style.display = 'none';
+    };
+
+    window.checkAndRunPendingTasks = async function() {
+        const SUPABASE_URL = ((typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_URL) ? import.meta.env.VITE_SUPABASE_URL : 'https://tmpwmtpdxcvulglkahcg.supabase.co').trim();
+        const SUPABASE_ANON_KEY = ((typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_ANON_KEY) ? import.meta.env.VITE_SUPABASE_ANON_KEY : 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRtcHdtdHBkeGN2dWxnbGthaGNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwNTg0MDMsImV4cCI6MjA4OTYzNDQwM30.GRcj8PoXCMcWPEN5maZYD3kxndqpWfcegryLYANgggE').trim();
+
+        try {
+            const resp = await fetch(`${SUPABASE_URL}/functions/v1/assistant-router`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                },
+                body: JSON.stringify({ action: 'process_maria_agenda' })
+            });
+            const data = await resp.json();
+            if (data && data.processed_count > 0) {
+                console.log(`[AGENDA AUTO] ${data.processed_count} missões executadas com sucesso.`);
+                await window.loadMariaTasks();
+            }
+        } catch (e) {
+            console.error('[AGENDA AUTO ERROR]:', e);
+        }
+    };
+
+    // Auto-verificador a cada 45 segundos quando o CRM está aberto
+    setInterval(() => {
+        window.checkAndRunPendingTasks();
+    }, 45000);
+
+    console.log('[CentralAtendimento v2.1] Live CRM, Agenda da Maria, Outbound e Lista Negra carregados.');
 })();
 
 

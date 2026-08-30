@@ -285,6 +285,243 @@ DIRETRIZES DE RESPOSTA:
       }
   }
 
+  // 1.1 EXECUÇÃO DE TAREFAS DA AGENDA DA MARIA (PORTAL DE TAREFAS / SECRETÁRIA)
+  if (payload?.action === 'execute_maria_task' || payload?.action === 'process_maria_agenda') {
+      const manualUazapiUrl = (payload?.BaseUrl || Deno.env.get('UAZAPI_URL') || 'https://arnaldotrentin.uazapi.com').replace(/\/$/, '');
+      const manualToken = payload?.token || Deno.env.get('UAZAPI_TOKEN') || 'e7ca3dea-7317-4502-894a-790655f77bb1';
+
+      try {
+          const executeSingleTask = async (task: any, recordId?: any) => {
+              let targetPhone = String(task.target_phone || '').replace(/\D/g, '');
+              if (!targetPhone.startsWith('55') && targetPhone.length <= 11) targetPhone = '55' + targetPhone;
+              const targetName = task.target_name || 'Cliente';
+              const eventType = task.event_type || 'secretaria_personalizada';
+              const eventLabel = task.event_label || 'Missão Comercial / Atendimento';
+              const instructions = task.instructions || '';
+              const fileName = task.file_name || '';
+              const fileUrl = task.file_url || '';
+              const fileBase64 = task.file_base64 || '';
+              const fileType = task.file_type || (fileName.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
+
+              // Busca histórico recente para dar contexto à Maria
+              const { data: hist } = await supabase.from('agent_memory')
+                  .select('role, content')
+                  .eq('phone', targetPhone)
+                  .order('created_at', { ascending: false })
+                  .limit(6);
+
+              let histContext = "";
+              if (hist && hist.length > 0) {
+                  histContext = "\nHistórico recente da conversa com este contato:\n" + hist.reverse().map((h: any) => `${h.role === 'model' ? 'Maria' : targetName}: ${h.content}`).join('\n') + "\n";
+              }
+
+              let eventGuidance = "";
+              if (eventType === 'confirmar_agendamento') {
+                  eventGuidance = "Objetivo da Mensagem: Confirmar visita técnica / agendamento de serviço. Seja acolhedora, cite a data/horário e pergunte se está tudo confirmado para a realização do serviço.";
+              } else if (eventType === 'enviar_orcamento') {
+                  eventGuidance = "Objetivo da Mensagem: Apresentar a proposta/orçamento comercial. Destaque a qualidade e garantia da Arnaldo Trentin Serviços. Mencione que o documento segue em anexo para avaliação e coloque-se à total disposição para tirar dúvidas e fechar.";
+              } else if (eventType === 'lembrete_pagamento') {
+                  eventGuidance = "Objetivo da Mensagem: Lembrete cordial e respeitoso de pagamento ou envio de dados de faturamento/PIX. Seja extremamente educada, grata pela parceria e discreta.";
+              } else if (eventType === 'cotacao_fornecedor') {
+                  eventGuidance = "Objetivo da Mensagem: Contatar fornecedor de materiais, peças ou equipamentos. Apresente-se como Maria Cecília da Arnaldo Trentin Serviços e solicite cotação de preços, prazos de entrega e condições de pagamento com agilidade.";
+              } else if (eventType === 'pos_venda') {
+                  eventGuidance = "Objetivo da Mensagem: Pós-venda e satisfação do cliente. Pergunte como está o funcionamento do equipamento após a visita técnica e ofereça nosso plano de manutenção preventiva periódica.";
+              } else {
+                  eventGuidance = "Objetivo da Mensagem: Atuação como Secretária Executiva e Assistente Comercial da Arnaldo Trentin Serviços. Execute fielmente as instruções fornecidas pelo Arnaldo.";
+              }
+
+              const prompt = `Você é Maria Cecília, secretária executiva e assistente de operações da Arnaldo Trentin Serviços (Engenharia, Climatização e Refrigeração).
+O gestor da empresa, Arnaldo Trentin, agendou a seguinte missão para você executar agora com o contato ${targetName} (${targetPhone}):
+
+TIPO DE EVENTO: ${eventLabel}
+${eventGuidance}
+
+INSTRUÇÕES ESPECÍFICAS DO GESTOR (ARNALDO):
+"${instructions}"
+
+${fileName ? `DOCUMENTO / ARQUIVO ANEXADO NA MENSAGEM: ${fileName}` : ''}
+${histContext}
+DIRETRIZES OBRIGATÓRIAS:
+1. Escreva uma mensagem de WhatsApp COMPLETA, elegante, educada e altamente profissional.
+2. NUNCA corte frases. Finalize a mensagem do começo ao fim.
+3. Se houver arquivo anexado (${fileName}), mencione educadamente que o documento segue em anexo para análise.
+4. Finalize com uma pergunta comercial acolhedora para facilitar a resposta do destinatário.
+5. Fale em primeira pessoa como Maria Cecília da Arnaldo Trentin Serviços.
+6. Retorne APENAS o texto exato que será enviado no WhatsApp, sem aspas e sem explicações.`;
+
+              let model = genAI.getGenerativeModel({
+                  model: "gemini-2.5-flash",
+                  generationConfig: { temperature: 0.7, maxOutputTokens: 2048 }
+              });
+
+              let res;
+              try {
+                  res = await model.generateContent(prompt);
+              } catch (modelErr) {
+                  console.warn('[MODEL FALLBACK] Tentando gemini-1.5-flash...', modelErr);
+                  model = genAI.getGenerativeModel({
+                      model: "gemini-1.5-flash",
+                      generationConfig: { temperature: 0.7, maxOutputTokens: 2048 }
+                  });
+                  res = await model.generateContent(prompt);
+              }
+
+              const generatedMsg = res.response.text().trim();
+
+              // 1. Reativa a Maria para este contato
+              await supabase.from('agent_memory').insert({
+                  phone: targetPhone,
+                  role: 'user',
+                  content: 'BOT_ATIVO'
+              });
+
+              // 2. Grava a mensagem no histórico do contato
+              const storedMsg = fileName ? `${generatedMsg}\n📎 _[Arquivo enviado: ${fileName}]_` : generatedMsg;
+              await supabase.from('agent_memory').insert({
+                  phone: targetPhone,
+                  role: 'model',
+                  content: storedMsg
+              });
+
+              // 3. Disparo no WhatsApp via UazAPI
+              let sendStatus = 200;
+              if (fileBase64 || fileUrl) {
+                  try {
+                      const mediaEndpoint = `${manualUazapiUrl}/send/media`;
+                      const mediaPayload = {
+                          number: targetPhone,
+                          media: fileBase64 || fileUrl,
+                          caption: generatedMsg,
+                          fileName: fileName || 'documento.pdf',
+                          type: fileType.includes('pdf') ? 'document' : 'image'
+                      };
+                      const mediaResp = await fetch(mediaEndpoint, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json', 'token': manualToken },
+                          body: JSON.stringify(mediaPayload)
+                      });
+                      sendStatus = mediaResp.status;
+                      if (!mediaResp.ok) {
+                          const txtResp = await fetch(`${manualUazapiUrl}/send/text`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json', 'token': manualToken },
+                              body: JSON.stringify({ number: targetPhone, text: generatedMsg })
+                          });
+                          sendStatus = txtResp.status;
+                      }
+                  } catch (mediaErr) {
+                      console.error('[MEDIA SEND ERROR] Tentando texto puro:', mediaErr);
+                      const txtResp = await fetch(`${manualUazapiUrl}/send/text`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json', 'token': manualToken },
+                          body: JSON.stringify({ number: targetPhone, text: generatedMsg })
+                      });
+                      sendStatus = txtResp.status;
+                  }
+              } else {
+                  const sendResp = await fetch(`${manualUazapiUrl}/send/text`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', 'token': manualToken },
+                      body: JSON.stringify({ number: targetPhone, text: generatedMsg })
+                  });
+                  sendStatus = sendResp.status;
+              }
+
+              const executedAt = new Date().toISOString();
+              const formattedDate = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+              
+              const report = `✅ **Missão Concluída com Sucesso!**\n\n` +
+                  `📅 **Data e Hora:** ${formattedDate}\n` +
+                  `👤 **Destinatário:** ${targetName} (${targetPhone})\n` +
+                  `🎯 **Evento:** ${eventLabel}\n` +
+                  `📎 **Anexo Entregue:** ${fileName || 'Nenhum'}\n\n` +
+                  `💬 **Mensagem Entregue via WhatsApp:**\n"${generatedMsg}"\n\n` +
+                  `📡 **Status de Envio (UazAPI):** HTTP ${sendStatus} (Entregue)`;
+
+              const updatedTask = {
+                  ...task,
+                  status: 'concluida',
+                  executed_at: executedAt,
+                  ai_generated_message: generatedMsg,
+                  activity_report: report
+              };
+
+              // Atualiza o registro da tarefa no banco
+              if (recordId) {
+                  await supabase.from('agent_memory').update({
+                      content: JSON.stringify(updatedTask)
+                  }).eq('id', recordId);
+              } else if (task.id) {
+                  const { data: rec } = await supabase.from('agent_memory')
+                      .select('id, content')
+                      .eq('phone', 'MARIA_TASK')
+                      .like('content', `%"id":"${task.id}"%`)
+                      .limit(1);
+                  if (rec && rec.length > 0) {
+                      await supabase.from('agent_memory').update({
+                          content: JSON.stringify(updatedTask)
+                      }).eq('id', rec[0].id);
+                  }
+              }
+
+              return { success: true, ai_generated_message: generatedMsg, activity_report: report, task: updatedTask };
+          };
+
+          if (payload?.action === 'execute_maria_task') {
+              const result = await executeSingleTask(payload.task, payload.record_id);
+              return new Response(JSON.stringify(result), {
+                  status: 200,
+                  headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+              });
+          }
+
+          if (payload?.action === 'process_maria_agenda') {
+              const { data: records } = await supabase.from('agent_memory')
+                  .select('id, content')
+                  .eq('phone', 'MARIA_TASK')
+                  .order('created_at', { ascending: true })
+                  .limit(20);
+
+              const now = new Date();
+              const executedResults: any[] = [];
+
+              if (records && records.length > 0) {
+                  for (const r of records) {
+                      try {
+                          const task = JSON.parse(r.content);
+                          if (task.status === 'pendente' && task.scheduled_for) {
+                              const schedDate = new Date(task.scheduled_for);
+                              if (schedDate <= now) {
+                                  console.log(`[AGENDA AUTO] Executando tarefa agendada: ${task.id} (${task.target_name})`);
+                                  const res = await executeSingleTask(task, r.id);
+                                  executedResults.push(res);
+                              }
+                          }
+                      } catch (parseErr) {
+                          console.error('[AGENDA PARSE ERROR]:', parseErr);
+                      }
+                  }
+              }
+
+              return new Response(JSON.stringify({ 
+                  success: true, 
+                  processed_count: executedResults.length, 
+                  results: executedResults 
+              }), {
+                  status: 200,
+                  headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+              });
+          }
+
+      } catch (err: any) {
+          console.error('[AGENDA ERRO]:', err);
+          return new Response(JSON.stringify({ error: String(err?.message || err) }), {
+              status: 500,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+      }
+  }
+
   // 2. Processador de Fundo (Background)
   const processRequest = async () => {
     try {

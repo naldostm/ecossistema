@@ -523,6 +523,9 @@
                         <button class="action-btn tab-btn-msg" id="btn-tab-campanhas" onclick="window.switchMensagensTab('campanhas')" style="background: var(--surface-light); color: var(--text-primary); border: 1px solid var(--border-color); padding: 10px 18px; font-weight: 700; border-radius: 8px; font-size: 0.85rem;">
                             <i class="fa-solid fa-bullhorn"></i> Campanhas & Prospecção
                         </button>
+                        <button class="action-btn tab-btn-msg" id="btn-tab-agenda" onclick="window.switchMensagensTab('agenda')" style="background: var(--surface-light); color: var(--text-primary); border: 1px solid var(--border-color); padding: 10px 18px; font-weight: 700; border-radius: 8px; font-size: 0.85rem;">
+                            <i class="fa-solid fa-calendar-check"></i> Agenda da Maria (<span id="count-agenda">0</span>)
+                        </button>
                         <button class="action-btn tab-btn-msg" id="btn-tab-blacklist" onclick="window.switchMensagensTab('blacklist')" style="background: var(--surface-light); color: var(--text-primary); border: 1px solid var(--border-color); padding: 10px 18px; font-weight: 700; border-radius: 8px; font-size: 0.85rem;">
                             <i class="fa-solid fa-user-shield"></i> Lista Negra / Amigos (<span id="count-blacklist">0</span>)
                         </button>
@@ -701,6 +704,212 @@
                                 <thead><tr><th>Data</th><th>Tipo</th><th>Cliente</th><th>Mensagem</th><th>Status</th></tr></thead>
                                 <tbody><!-- Dinâmico --></tbody>
                             </table>
+                        </div>
+                    </div>
+
+                    <!-- PANE 2.5: AGENDA DE MISSÕES DA MARIA CECÍLIA (PORTAL DE SECRETÁRIA EXECUTIVA) -->
+                    <div id="pane-mensagens-agenda" class="msg-subpane" style="display: none;">
+                        
+                        <!-- BANNER DA AGENDA -->
+                        <div class="glass-panel" style="padding: 20px; margin-bottom: 20px; border-left: 4px solid #f39c12; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px;">
+                            <div>
+                                <h3 style="color: #f39c12; font-size: 1.15rem; margin-bottom: 6px; font-weight: 800;">
+                                    <i class="fa-solid fa-calendar-check"></i> Agenda de Missões da Maria Cecília
+                                </h3>
+                                <p style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.5; margin: 0;">
+                                    Programe tarefas ativas para sua secretária executiva de IA: confirmar visitas técnicas, enviar orçamentos com PDFs, cobranças educadas ou cotações com fornecedores. A Maria executa 100% no piloto automático no horário marcado e gera relatórios executivos.
+                                </p>
+                            </div>
+                            <button class="action-btn" onclick="window.checkAndRunPendingTasks()" style="background: rgba(243, 156, 18, 0.2); color: #f39c12; border: 1px solid rgba(243, 156, 18, 0.4); padding: 8px 16px; font-weight: 700; border-radius: 8px; font-size: 0.85rem;">
+                                <i class="fa-solid fa-bolt"></i> Processar Fila Agora
+                            </button>
+                        </div>
+
+                        <!-- STATS RÁPIDOS DA AGENDA -->
+                        <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-bottom: 20px;">
+                            <div class="glass-panel stat-card" style="padding: 16px;">
+                                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">
+                                    <i class="fa-solid fa-clock" style="color: #f39c12; font-size: 1.2rem;"></i>
+                                    <span style="font-size: 0.82rem; color: var(--text-muted);">Missões Agendadas</span>
+                                </div>
+                                <div id="agenda-stat-pending" style="font-size: 1.5rem; font-weight: 800; color: #f39c12;">0</div>
+                            </div>
+                            <div class="glass-panel stat-card" style="padding: 16px;">
+                                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">
+                                    <i class="fa-solid fa-circle-check" style="color: #25D366; font-size: 1.2rem;"></i>
+                                    <span style="font-size: 0.82rem; color: var(--text-muted);">Concluídas com Sucesso</span>
+                                </div>
+                                <div id="agenda-stat-done" style="font-size: 1.5rem; font-weight: 800; color: #25D366;">0</div>
+                            </div>
+                            <div class="glass-panel stat-card" style="padding: 16px;">
+                                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">
+                                    <i class="fa-solid fa-list-check" style="color: #3498db; font-size: 1.2rem;"></i>
+                                    <span style="font-size: 0.82rem; color: var(--text-muted);">Total de Missões</span>
+                                </div>
+                                <div id="agenda-stat-total" style="font-size: 1.5rem; font-weight: 800; color: #3498db;">0</div>
+                            </div>
+                        </div>
+
+                        <!-- FORMULÁRIO DE NOVA MISSÃO -->
+                        <div class="glass-panel" style="padding: 22px; margin-bottom: 24px; border: 1px solid rgba(243, 156, 18, 0.3);">
+                            <h4 style="font-size: 1rem; font-weight: 800; color: #f39c12; margin-bottom: 16px; display: flex; align-items: center; gap: 8px;">
+                                <i class="fa-solid fa-plus-circle"></i> Agendar Nova Missão para a Maria Cecília
+                            </h4>
+
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-bottom: 16px;">
+                                
+                                <!-- CAMPO 1: SELEÇÃO DE CLIENTE / DESTINATÁRIO -->
+                                <div>
+                                    <label style="display: block; font-size: 0.8rem; font-weight: 700; color: var(--text-secondary); margin-bottom: 6px;">
+                                        <i class="fa-solid fa-user"></i> Destinatário (Cliente ou Fornecedor)
+                                    </label>
+                                    <select id="agenda-input-client-select" class="modal-input" onchange="window.onAgendaClientSelected(this.value)" style="width: 100%; color: #000; background: #fff; border: 1px solid var(--border-color); padding: 10px 12px; border-radius: 8px; font-size: 0.85rem;">
+                                        <option value="">-- Selecionar Cliente Cadastrado --</option>
+                                    </select>
+                                </div>
+
+                                <!-- CAMPO 2: NOME LIVRE -->
+                                <div>
+                                    <label style="display: block; font-size: 0.8rem; font-weight: 700; color: var(--text-secondary); margin-bottom: 6px;">
+                                        <i class="fa-solid fa-id-card"></i> Nome da Pessoa / Empresa
+                                    </label>
+                                    <input type="text" id="agenda-input-name" class="modal-input" placeholder="Ex: Isabel Cassemiro ou Fornecedor Dufrio" style="width: 100%; color: #000; background: #fff; border: 1px solid var(--border-color); padding: 10px 12px; border-radius: 8px; font-size: 0.85rem;">
+                                </div>
+
+                                <!-- CAMPO 3: WHATSAPP -->
+                                <div>
+                                    <label style="display: block; font-size: 0.8rem; font-weight: 700; color: var(--text-secondary); margin-bottom: 6px;">
+                                        <i class="fa-brands fa-whatsapp"></i> Telefone WhatsApp (com DDD)
+                                    </label>
+                                    <input type="text" id="agenda-input-phone" class="modal-input" placeholder="Ex: 11979911325" style="width: 100%; color: #000; background: #fff; border: 1px solid var(--border-color); padding: 10px 12px; border-radius: 8px; font-size: 0.85rem;">
+                                </div>
+
+                                <!-- CAMPO 4: DATA E HORA DE DISPARO -->
+                                <div>
+                                    <label style="display: block; font-size: 0.8rem; font-weight: 700; color: var(--text-secondary); margin-bottom: 6px;">
+                                        <i class="fa-solid fa-calendar-day"></i> Data e Horário de Execução
+                                    </label>
+                                    <input type="datetime-local" id="agenda-input-datetime" class="modal-input" style="width: 100%; color: #000; background: #fff; border: 1px solid var(--border-color); padding: 9px 12px; border-radius: 8px; font-size: 0.85rem;">
+                                </div>
+
+                            </div>
+
+                            <!-- ROW 2: TIPO DE MISSÃO -->
+                            <div style="margin-bottom: 16px;">
+                                <label style="display: block; font-size: 0.8rem; font-weight: 700; color: var(--text-secondary); margin-bottom: 6px;">
+                                    <i class="fa-solid fa-bullseye"></i> Tipo de Ação / Missão
+                                </label>
+                                <select id="agenda-input-event-type" class="modal-input" onchange="window.onAgendaEventTypeChange(this.value)" style="width: 100%; color: #000; background: #fff; border: 1px solid var(--border-color); padding: 10px 12px; border-radius: 8px; font-size: 0.85rem;">
+                                    <option value="confirmar_agendamento">📅 Confirmar Agendamento / Visita Técnica de Serviço</option>
+                                    <option value="enviar_orcamento">📑 Encaminhar Orçamento / Proposta Comercial com Anexo</option>
+                                    <option value="lembrete_pagamento">💳 Lembrete de Pagamento / Envio de Chave PIX</option>
+                                    <option value="cotacao_fornecedor">📦 Cotação de Preços / Falar com Fornecedor de Peças e Materiais</option>
+                                    <option value="pos_venda">🛠️ Pós-Venda e Manutenção Preventiva Periódica</option>
+                                    <option value="secretaria_personalizada">⚡ Missão Personalizada (Secretária Executiva Livre)</option>
+                                </select>
+                            </div>
+
+                            <!-- ROW 3: UPLOAD DE ARQUIVO / ORÇAMENTO / ANEXO -->
+                            <div style="margin-bottom: 16px; background: rgba(255,255,255,0.03); border: 1px dashed rgba(243, 156, 18, 0.4); border-radius: 8px; padding: 14px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                                    <div>
+                                        <div style="font-size: 0.85rem; font-weight: 700; color: var(--text-primary); margin-bottom: 2px;">
+                                            <i class="fa-solid fa-paperclip" style="color: #f39c12;"></i> Anexar Arquivo / Orçamento / PDF / Imagem (Opcional)
+                                        </div>
+                                        <div style="font-size: 0.75rem; color: var(--text-muted);">
+                                            A Maria Cecília enviará este documento diretamente no WhatsApp junto com a mensagem persuasiva.
+                                        </div>
+                                    </div>
+                                    <div style="display: flex; align-items: center; gap: 10px;">
+                                        <input type="file" id="agenda-input-file" style="display: none;" onchange="window.handleAgendaFileUpload(event)">
+                                        <button type="button" class="action-btn" onclick="document.getElementById('agenda-input-file').click()" style="background: rgba(243,156,18,0.15); color: #f39c12; border: 1px solid rgba(243,156,18,0.4); padding: 6px 14px; font-size: 0.82rem; border-radius: 6px; font-weight: 700;">
+                                            <i class="fa-solid fa-upload"></i> Escolher Arquivo
+                                        </button>
+                                        <div id="agenda-file-badge" style="display: none; align-items: center; gap: 6px; background: rgba(37,211,102,0.15); color: #25D366; border: 1px solid rgba(37,211,102,0.3); padding: 4px 10px; border-radius: 6px; font-size: 0.78rem; font-weight: 700;">
+                                            <i class="fa-solid fa-file-lines"></i> <span id="agenda-file-name-text">arquivo.pdf</span>
+                                            <i class="fa-solid fa-xmark" style="cursor: pointer; margin-left: 4px;" onclick="window.removeAgendaFile()" title="Remover anexo"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- ROW 4: INSTRUÇÕES / BRIEFING DA ORDEM -->
+                            <div style="margin-bottom: 18px;">
+                                <label style="display: block; font-size: 0.8rem; font-weight: 700; color: var(--text-secondary); margin-bottom: 6px;">
+                                    <i class="fa-solid fa-pen-nib"></i> Instruções da Ordem (O que você quer que a Maria fale e ofereça)
+                                </label>
+                                <textarea id="agenda-input-instructions" class="modal-input" rows="3" placeholder="Ex: Peça para confirmar se amanhã às 14h está tudo certo para a visita técnica com o técnico Francisco..." style="width: 100%; color: #000; background: #fff; border: 1px solid var(--border-color); padding: 10px 12px; border-radius: 8px; font-size: 0.88rem; line-height: 1.4; resize: vertical;"></textarea>
+                            </div>
+
+                            <!-- BOTÃO DE AGENDAMENTO -->
+                            <div style="display: flex; justify-content: flex-end;">
+                                <button type="button" id="btn-save-maria-task" class="action-btn" onclick="window.saveMariaAgendaTask()" style="background: #f39c12; color: #000; font-weight: 800; padding: 12px 28px; border-radius: 8px; font-size: 0.95rem;">
+                                    <i class="fa-solid fa-calendar-plus"></i> Agendar Missão da Maria
+                                </button>
+                            </div>
+
+                        </div>
+
+                        <!-- LISTAGEM E HISTÓRICO DE TAREFAS -->
+                        <div class="glass-panel table-container">
+                            <div class="widget-header" style="flex-wrap: wrap; gap: 10px;">
+                                <div>
+                                    <h2 style="font-size: 1.05rem; font-weight: 800; color: var(--text-primary);">
+                                        <i class="fa-solid fa-list-check"></i> Tarefas Agendadas & Histórico de Relatórios
+                                    </h2>
+                                    <span style="font-size: 0.78rem; color: var(--text-muted);">
+                                        Acompanhe as ordens em andamento e os relatórios das mensagens enviadas
+                                    </span>
+                                </div>
+                                <div style="display: flex; gap: 8px; align-items: center;">
+                                    <div style="display: flex; gap: 4px; background: rgba(0,0,0,0.2); padding: 3px; border-radius: 6px;">
+                                        <button class="action-btn agenda-filter-btn active" onclick="window.filterAgendaTasks('all', this)" style="padding: 4px 10px; font-size: 0.75rem; border-radius: 4px; background: rgba(243,156,18,0.2); color: #f39c12;">Todas</button>
+                                        <button class="action-btn agenda-filter-btn" onclick="window.filterAgendaTasks('pendente', this)" style="padding: 4px 10px; font-size: 0.75rem; border-radius: 4px; background: transparent; color: var(--text-muted);">Agendadas</button>
+                                        <button class="action-btn agenda-filter-btn" onclick="window.filterAgendaTasks('concluida', this)" style="padding: 4px 10px; font-size: 0.75rem; border-radius: 4px; background: transparent; color: var(--text-muted);">Concluídas</button>
+                                    </div>
+                                    <button class="action-btn" onclick="window.loadMariaTasks()" style="background: var(--surface-light); font-size: 0.8rem; padding: 6px 12px;" title="Atualizar tarefas">
+                                        <i class="fa-solid fa-rotate"></i>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <table class="data-table" id="table-maria-agenda">
+                                <thead>
+                                    <tr>
+                                        <th>Data/Horário</th>
+                                        <th>Destinatário</th>
+                                        <th>Tipo de Missão</th>
+                                        <th>Anexo</th>
+                                        <th>Status</th>
+                                        <th style="text-align: right;">Ações</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbody-maria-agenda">
+                                    <!-- Injetado dinamicamente via JS -->
+                                    <tr><td colspan="6" style="text-align:center; padding:30px; color:var(--text-muted);"><i class="fa-solid fa-spinner fa-spin"></i> Carregando agenda...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                    </div>
+
+                    <!-- MODAL: RELATÓRIO EXECUTIVO DA MISSÃO -->
+                    <div id="modal-maria-task-report" class="modal-overlay" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 9999; justify-content: center; align-items: center; padding: 20px;">
+                        <div class="glass-panel modal-content" style="max-width: 650px; width: 100%; border-radius: 12px; border: 1px solid rgba(243,156,18,0.4); padding: 24px; max-height: 90vh; overflow-y: auto;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;">
+                                <h3 style="font-size: 1.1rem; font-weight: 800; color: #f39c12; margin: 0;">
+                                    <i class="fa-solid fa-file-lines"></i> Relatório de Atividade — Maria Cecília
+                                </h3>
+                                <i class="fa-solid fa-xmark" style="cursor: pointer; font-size: 1.2rem; color: var(--text-muted);" onclick="window.closeMariaTaskReportModal()"></i>
+                            </div>
+                            <div id="modal-maria-task-report-body" style="font-size: 0.9rem; line-height: 1.6; color: var(--text-primary);">
+                                <!-- Conteúdo do relatório injetado dinamicamente -->
+                            </div>
+                            <div style="display: flex; justify-content: flex-end; margin-top: 20px; border-top: 1px solid var(--border-color); padding-top: 14px;">
+                                <button class="action-btn" onclick="window.closeMariaTaskReportModal()" style="background: var(--surface-light); padding: 8px 20px; border-radius: 6px; font-weight: 700;">
+                                    Fechar Relatório
+                                </button>
+                            </div>
                         </div>
                     </div>
 
