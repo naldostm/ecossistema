@@ -91,6 +91,7 @@ declare const EdgeRuntime: any;
 // === ESCUDO DE PARALELISMO GLOBAL (MEMÓRIA V8 ISOLATE) ===
 // Edge Functions mantêm estado global se o mesmo servidor receber a requisição simultânea.
 const processingLocks = new Set<string>();
+const runningAgendaTaskLocks = new Set<string>();
 
 serve(async (req) => {
   // CORS headers para chamadas do frontend (painel web)
@@ -292,6 +293,31 @@ DIRETRIZES DE RESPOSTA:
 
       try {
           const executeSingleTask = async (task: any, recordId?: any) => {
+              if (!task || !task.id) return { success: false, error: "Task inválida" };
+
+              const taskLockKey = `TASK_RUN_${task.id}`;
+              if (runningAgendaTaskLocks.has(taskLockKey)) {
+                  console.log(`[BLOQUEIO DUPLICIDADE] Tarefa ${task.id} já está em execução. Abortando segunda chamada.`);
+                  return { success: true, skipped: true };
+              }
+              runningAgendaTaskLocks.add(taskLockKey);
+              setTimeout(() => runningAgendaTaskLocks.delete(taskLockKey), 60000);
+
+              // 1. Atualiza imediatamente o status para 'executando' no banco para travar outros workers
+              task.status = 'executando';
+              if (recordId) {
+                  await supabase.from('agent_memory').update({ content: JSON.stringify(task) }).eq('id', recordId);
+              } else if (task.id) {
+                  const { data: rec } = await supabase.from('agent_memory')
+                      .select('id, content')
+                      .eq('phone', 'MARIA_TASK')
+                      .like('content', `%"id":"${task.id}"%`)
+                      .limit(1);
+                  if (rec && rec.length > 0) {
+                      await supabase.from('agent_memory').update({ content: JSON.stringify(task) }).eq('id', rec[0].id);
+                  }
+              }
+
               let targetPhone = String(task.target_phone || '').replace(/\D/g, '');
               if (!targetPhone.startsWith('55') && targetPhone.length <= 11) targetPhone = '55' + targetPhone;
               const targetName = task.target_name || 'Cliente';
@@ -368,14 +394,14 @@ DIRETRIZES OBRIGATÓRIAS:
 
               const generatedMsg = res.response.text().trim();
 
-              // 1. Reativa a Maria para este contato
+              // 2. Reativa a Maria para este contato
               await supabase.from('agent_memory').insert({
                   phone: targetPhone,
                   role: 'user',
                   content: 'BOT_ATIVO'
               });
 
-              // 2. Grava a mensagem no histórico do contato
+              // 3. Grava a mensagem no histórico do contato
               const storedMsg = fileName ? `${generatedMsg}\n📎 _[Arquivo enviado: ${fileName}]_` : generatedMsg;
               await supabase.from('agent_memory').insert({
                   phone: targetPhone,
@@ -383,7 +409,7 @@ DIRETRIZES OBRIGATÓRIAS:
                   content: storedMsg
               });
 
-              // 3. Disparo no WhatsApp via UazAPI
+              // 4. Disparo no WhatsApp via UazAPI
               let sendStatus = 200;
               if (fileBase64 || fileUrl) {
                   try {
@@ -446,7 +472,7 @@ DIRETRIZES OBRIGATÓRIAS:
                   activity_report: report
               };
 
-              // Atualiza o registro da tarefa no banco
+              // 5. Atualiza o registro final da tarefa no banco
               if (recordId) {
                   await supabase.from('agent_memory').update({
                       content: JSON.stringify(updatedTask)
@@ -494,7 +520,9 @@ DIRETRIZES OBRIGATÓRIAS:
                               if (schedDate <= now) {
                                   console.log(`[AGENDA AUTO] Executando tarefa agendada: ${task.id} (${task.target_name})`);
                                   const res = await executeSingleTask(task, r.id);
-                                  executedResults.push(res);
+                                  if (!res.skipped) {
+                                      executedResults.push(res);
+                                  }
                               }
                           }
                       } catch (parseErr) {
