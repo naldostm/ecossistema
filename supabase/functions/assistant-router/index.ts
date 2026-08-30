@@ -207,20 +207,21 @@ serve(async (req) => {
               histContext = "\nHistórico recente da conversa com o cliente:\n" + hist.reverse().map(h => `${h.role === 'model' ? 'Maria' : 'Cliente'}: ${h.content}`).join('\n') + "\n";
           }
 
-          const prompt = `Você é Maria Cecília, atendente comercial sênior da Arnaldo Trentin Serviços (Engenharia, Climatização e Refrigeração).
-O gestor da empresa, Arnaldo, te deu a seguinte ordem direta para enviar para o cliente ${clientName}:
+          const prompt = `Você é Maria Cecília, secretária executiva e atendente comercial da Arnaldo Trentin Serviços (Engenharia, Climatização e Refrigeração).
+O gestor da empresa, Arnaldo Trentin, te deu a seguinte ordem direta para enviar para o(a) cliente ${clientName}:
 "${cmdText}"
 
 ${histContext}
-INSTRUÇÕES OBRIGATÓRIAS:
-- Redija a mensagem de WhatsApp pronta para enviar diretamente para o cliente ${clientName}.
-- Seja calorosa, natural, educada e persuasiva.
-- Fale em primeira pessoa como Maria Cecília da Arnaldo Trentin.
-- Não use jargões de robô, nem introduções como "Olá Arnaldo" ou "Aqui está a mensagem". Retorne APENAS o texto exato que será enviado para o WhatsApp do cliente.`;
+DIRETRIZES DE RESPOSTA:
+1. Escreva uma mensagem de WhatsApp COMPLETA, calorosa, educada e persuasiva para o(a) cliente ${clientName}.
+2. NUNCA pare no meio da frase. Escreva o texto do começo ao fim com pontuação e conclusão completas.
+3. Finalize a mensagem com uma saudação calorosa e uma pergunta aberta para facilitar a resposta do cliente (ex: "Podemos agendar uma visita essa semana?", "Ficaria bom para você na quarta-feira?").
+4. Fale em primeira pessoa como Maria Cecília da Arnaldo Trentin.
+5. Retorne APENAS o texto exato que será enviado no WhatsApp, sem aspas, sem prefixos como "Maria:" e sem explicações.`;
 
           let model = genAI.getGenerativeModel({
               model: "gemini-2.5-flash",
-              generationConfig: { temperature: 0.7, maxOutputTokens: 1024 }
+              generationConfig: { temperature: 0.7, maxOutputTokens: 2048 }
           });
 
           let res;
@@ -230,7 +231,7 @@ INSTRUÇÕES OBRIGATÓRIAS:
               console.warn('[MODEL FALLBACK] Tentando gemini-1.5-flash...', modelErr);
               model = genAI.getGenerativeModel({
                   model: "gemini-1.5-flash",
-                  generationConfig: { temperature: 0.7, maxOutputTokens: 1024 }
+                  generationConfig: { temperature: 0.7, maxOutputTokens: 2048 }
               });
               res = await model.generateContent(prompt);
           }
