@@ -747,14 +747,42 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.getElementById('prop-fornecimento').value = item.fornecimento_materiais;
             }
             document.getElementById('prop-valor-ajuste').value = (item.valor_ajuste !== null && item.valor_ajuste !== undefined && item.valor_ajuste !== 0) ? item.valor_ajuste : '';
+            
+            let parsedItems = [];
+            let enderecoObraSaved = null;
+            let mesmoEnderecoSaved = true;
+
             if (item.itens_json) {
                 try {
                     let parsed = typeof item.itens_json === 'string' ? JSON.parse(item.itens_json) : item.itens_json;
-                    window.currentPropItems = parsed.filter(i => i && i.type !== 'payment_condition');
-                } catch (e) { window.currentPropItems = []; }
-            } else {
-                window.currentPropItems = [];
+                    if (Array.isArray(parsed)) {
+                        const endObj = parsed.find(i => i && i.type === 'endereco_obra');
+                        if (endObj) {
+                            enderecoObraSaved = endObj.endereco;
+                            mesmoEnderecoSaved = endObj.mesmo_endereco !== false;
+                        }
+                        parsedItems = parsed.filter(i => i && i.type !== 'payment_condition' && i.type !== 'endereco_obra');
+                    }
+                } catch (e) { parsedItems = []; }
             }
+            window.currentPropItems = parsedItems;
+
+            const chkEnd = document.getElementById('prop-mesmo-endereco');
+            const inptEnd = document.getElementById('prop-endereco-obra');
+            const cliObj = (window.clientesCache || []).find(c => String(c.id) === String(item.cliente_id));
+
+            if (chkEnd && inptEnd) {
+                if (enderecoObraSaved !== null && enderecoObraSaved !== undefined) {
+                    chkEnd.checked = mesmoEnderecoSaved;
+                    inptEnd.value = enderecoObraSaved;
+                    inptEnd.readOnly = mesmoEnderecoSaved;
+                } else {
+                    chkEnd.checked = true;
+                    inptEnd.value = cliObj ? (cliObj.endereco_completo || '') : '';
+                    inptEnd.readOnly = true;
+                }
+            }
+
             if (typeof window.renderPropItemsTable === 'function') window.renderPropItemsTable();
             if (typeof window.calcPropTotal === 'function') window.calcPropTotal();
 
@@ -915,16 +943,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let html = '';
         data.forEach(os => {
-            const cliente = os.clientes || {};
-            const nmCliente = cliente.nome_cliente || '<span style="color:#666;">Cliente não vinculado</span>';
-            const endereco = cliente.endereco_completo || 'Endereço não informado';
-            const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(endereco)}`;
-
-            // Parse dados extras (plano de pagamento, custos extras, datas extras)
+            // Parse dados extras (plano de pagamento, custos extras, datas extras, endereco obra)
             let extraData = {};
             if (typeof os.materiais_lista === 'string' && os.materiais_lista.startsWith('{')) {
                 try { extraData = JSON.parse(os.materiais_lista); } catch(e) {}
             }
+
+            const cliente = os.clientes || {};
+            const nmCliente = cliente.nome_cliente || '<span style="color:#666;">Cliente não vinculado</span>';
+            const endereco = extraData.endereco_obra || cliente.endereco_completo || 'Endereço não informado';
+            const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(endereco)}`;
 
             const statusPagamento = os.status_pagamento || extraData.status_pagamento || 'Pendente';
             const condicaoPagamento = extraData.condicao_pagamento || 'À Vista (PIX)';
@@ -1116,16 +1144,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const os = (window.ordensCache || []).find(o => String(o.id_os) === String(osId));
         if (!os) return alert('Ordem de Serviço não encontrada.');
 
-        const cliente = os.clientes || {};
-        const nmCliente = cliente.nome_cliente || 'Cliente';
-        const phoneCliente = cliente.whatsapp || 'Não informado';
-        const endereco = cliente.endereco_completo || 'A combinar / Verificar no local';
-        const mapsUrl = `https://maps.google.com/?q=${encodeURIComponent(endereco)}`;
-
         let extraData = {};
         if (typeof os.materiais_lista === 'string' && os.materiais_lista.startsWith('{')) {
             try { extraData = JSON.parse(os.materiais_lista); } catch(e) {}
         }
+
+        const cliente = os.clientes || {};
+        const nmCliente = cliente.nome_cliente || 'Cliente';
+        const phoneCliente = cliente.whatsapp || 'Não informado';
+        const endereco = extraData.endereco_obra || cliente.endereco_completo || 'A combinar / Verificar no local';
+        const mapsUrl = `https://maps.google.com/?q=${encodeURIComponent(endereco)}`;
 
         // Cronograma de diárias
         const rawDates = [];
@@ -3748,6 +3776,71 @@ ${materiaisTxt}${extrasTxt}
     if (btnCaixa) btnCaixa.addEventListener('click', () => openModal('modal-caixa'));
 
     const btnProposta = document.getElementById('btn-nova-proposta') || document.getElementById('btn-novo-orcamento');
+    
+    window.onPropClienteChange = function () {
+        const sCli = document.getElementById('prop-cliente');
+        const chk = document.getElementById('prop-mesmo-endereco');
+        const inptEnd = document.getElementById('prop-endereco-obra');
+        if (!sCli || !inptEnd) return;
+
+        const cliId = sCli.value;
+        const cliObj = (window.clientesCache || []).find(c => String(c.id) === String(cliId));
+
+        if (chk && chk.checked) {
+            inptEnd.value = cliObj?.endereco_completo || '';
+            inptEnd.readOnly = true;
+        }
+    };
+
+    window.togglePropEndereco = function (isMesmo) {
+        const inptEnd = document.getElementById('prop-endereco-obra');
+        const sCli = document.getElementById('prop-cliente');
+        if (!inptEnd) return;
+
+        if (isMesmo) {
+            const cliId = sCli?.value;
+            const cliObj = (window.clientesCache || []).find(c => String(c.id) === String(cliId));
+            inptEnd.value = cliObj?.endereco_completo || '';
+            inptEnd.readOnly = true;
+        } else {
+            inptEnd.readOnly = false;
+            inptEnd.placeholder = 'Digite o endereço específico da obra (ex: Alameda dos Anapurus, 450 - Moema)...';
+            inptEnd.focus();
+        }
+    };
+
+    window.onSuperClienteChange = function () {
+        const sCli = document.getElementById('super-cliente');
+        const chk = document.getElementById('super-mesmo-endereco');
+        const inptEnd = document.getElementById('super-endereco-obra');
+        if (!sCli || !inptEnd) return;
+
+        const cliId = sCli.value;
+        const cliObj = (window.clientesCache || []).find(c => String(c.id) === String(cliId));
+
+        if (chk && chk.checked) {
+            inptEnd.value = cliObj?.endereco_completo || '';
+            inptEnd.readOnly = true;
+        }
+    };
+
+    window.toggleSuperOSEndereco = function (isMesmo) {
+        const inptEnd = document.getElementById('super-endereco-obra');
+        const sCli = document.getElementById('super-cliente');
+        if (!inptEnd) return;
+
+        if (isMesmo) {
+            const cliId = sCli?.value;
+            const cliObj = (window.clientesCache || []).find(c => String(c.id) === String(cliId));
+            inptEnd.value = cliObj?.endereco_completo || '';
+            inptEnd.readOnly = true;
+        } else {
+            inptEnd.readOnly = false;
+            inptEnd.placeholder = 'Digite o endereço específico da obra (ex: Alameda dos Anapurus, 450 - Moema)...';
+            inptEnd.focus();
+        }
+    };
+
     window.populateProposalSelects = function() {
         // Popular Selects de Proposta com Optgroups Categorizados
         const sSvc = document.getElementById('prop-service-picker');
@@ -3792,6 +3885,13 @@ ${materiaisTxt}${extrasTxt}
         document.getElementById('prop-valor-ajuste').value = '';
         window.currentPropItems = [];
         window.renderPropItemsTable();
+        const chk = document.getElementById('prop-mesmo-endereco');
+        if (chk) chk.checked = true;
+        const inptEnd = document.getElementById('prop-endereco-obra');
+        if (inptEnd) {
+            inptEnd.value = '';
+            inptEnd.readOnly = true;
+        }
         openModal('modal-proposta');
     });
 
@@ -3856,6 +3956,17 @@ ${materiaisTxt}${extrasTxt}
                 if (stPagElem) stPagElem.value = os.status_pagamento || extraData.status_pagamento || 'Pendente';
                 const vencPagElem = document.getElementById('super-vencimento-pagamento');
                 if (vencPagElem) vencPagElem.value = extraData.vencimento_pagamento || '';
+
+                // Endereço da Obra na Super OS
+                const chkSuperEnd = document.getElementById('super-mesmo-endereco');
+                const inptSuperEnd = document.getElementById('super-endereco-obra');
+                if (chkSuperEnd && inptSuperEnd) {
+                    const mesmoEndSaved = extraData.mesmo_endereco !== false;
+                    const endSaved = extraData.endereco_obra || os.clientes?.endereco_completo || '';
+                    chkSuperEnd.checked = mesmoEndSaved;
+                    inptSuperEnd.value = endSaved;
+                    inptSuperEnd.readOnly = mesmoEndSaved;
+                }
 
                 // --- CARREGA CRONOGRAMA DE DIÁRIAS (Múltiplas Datas) ---
                 const dateContainer = document.getElementById('os-datas-container');
@@ -3969,6 +4080,14 @@ ${materiaisTxt}${extrasTxt}
             if (stPagElem) stPagElem.value = 'Pendente';
             const vencPagElem = document.getElementById('super-vencimento-pagamento');
             if (vencPagElem) vencPagElem.value = '';
+
+            const chkSuperEnd = document.getElementById('super-mesmo-endereco');
+            const inptSuperEnd = document.getElementById('super-endereco-obra');
+            if (chkSuperEnd) chkSuperEnd.checked = true;
+            if (inptSuperEnd) {
+                inptSuperEnd.value = '';
+                inptSuperEnd.readOnly = true;
+            }
 
             document.getElementById('cronograma-body').innerHTML = '';
             document.getElementById('materiais-body').innerHTML = '';
@@ -4793,12 +4912,18 @@ ${materiaisTxt}${extrasTxt}
         const statusPag = document.getElementById('super-status-pagamento')?.value || 'Pendente';
         const vencPag = document.getElementById('super-vencimento-pagamento')?.value || '';
 
+        // Coleta Endereço da Obra
+        const endObraSuper = document.getElementById('super-endereco-obra')?.value || '';
+        const mesmoEndSuper = document.getElementById('super-mesmo-endereco')?.checked ?? true;
+
         const extraDataPack = {
             condicao_pagamento: condicaoPag,
             status_pagamento: statusPag,
             vencimento_pagamento: vencPag,
             custos_extras: custosExtras,
-            datas_cronograma: datasCronograma
+            datas_cronograma: datasCronograma,
+            endereco_obra: endObraSuper,
+            mesmo_endereco: mesmoEndSuper
         };
 
         const payload = {
@@ -5486,12 +5611,38 @@ ${materiaisTxt}${extrasTxt}
                 txtCondicao += ' | Etapas: ' + pagamentoObj.milestones.map(m => `${m.percentual}% em ${m.data_pagamento ? new Date(m.data_pagamento).toLocaleDateString('pt-BR', { timeZone: 'UTC' }) : 'A Definir'}`).join(', ');
             }
 
+            // Obtém endereço da obra da proposta
+            let enderecoObraProposta = null;
+            let mesmoEndProposta = true;
+            if (item && item.itens_json) {
+                try {
+                    let parsed = typeof item.itens_json === 'string' ? JSON.parse(item.itens_json) : item.itens_json;
+                    if (Array.isArray(parsed)) {
+                        const endObj = parsed.find(i => i && i.type === 'endereco_obra');
+                        if (endObj) {
+                            enderecoObraProposta = endObj.endereco;
+                            mesmoEndProposta = endObj.mesmo_endereco !== false;
+                        }
+                    }
+                } catch(e){}
+            }
+
+            const initialExtraData = {
+                datas_cronograma: [dataAgendamento || new Date().toISOString().split('T')[0]],
+                custos_extras: [],
+                condicao_pagamento: `${mode} no ${method}`,
+                status_pagamento: 'Pendente',
+                endereco_obra: enderecoObraProposta || (clienteId && (window.clientesCache || []).find(c => String(c.id) === String(clienteId))?.endereco_completo) || '',
+                mesmo_endereco: mesmoEndProposta
+            };
+
             const payloadOS = {
                 cliente_id: clienteId,
                 servico_tipo: (servicoTipo + ' - ' + mode + ' ' + method + ' | Ref Proposta ' + editId.split('-')[0]).substring(0, 145), // LIMIT 150 CHARS!
                 status_ia: 'Aberto',
                 data_hora: finalDateISO,
-                tecnico_id: techId || null
+                tecnico_id: techId || null,
+                materiais_lista: JSON.stringify(initialExtraData)
             };
 
             // Vamos embutir nas "propostas" o json para que seja indexado!
@@ -5682,18 +5833,26 @@ ${materiaisTxt}${extrasTxt}
         let prazo = '7';
         let totalVal = '0,00';
         let forn = 'Arnaldo Trentin Fornece';
-        let endereco = '-';
+        let enderecoCadastro = '-';
+        let enderecoObra = '-';
+        let isMesmoEndereco = true;
         let telefone = '-';
 
         const cliBaseId = item ? item.cliente_id : document.getElementById('prop-cliente').value;
         const cliObj = (window.clientesCache || []).find(c => String(c.id) === String(cliBaseId));
 
+        if (cliObj) {
+            enderecoCadastro = cliObj.endereco_completo || 'Endereço não cadastrado';
+            telefone = cliObj.telefone || cliObj.telefone_whatsapp || cliObj.whatsapp || 'Telefone não cadastrado';
+        }
+
         if (item) {
             nomeCliente = cliObj?.nome_cliente || item.clientes?.nome_cliente || 'Cliente';
             servico = item.servico_tipo || '-';
             totalVal = parseFloat(item.valor_estimado || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
-            endereco = cliObj?.endereco_completo || item.clientes?.endereco_completo || 'Endereço não cadastrado';
-            telefone = cliObj?.telefone || cliObj?.telefone_whatsapp || cliObj?.whatsapp || item.clientes?.telefone || item.clientes?.telefone_whatsapp || 'Telefone não cadastrado';
+            if (item.clientes?.telefone || item.clientes?.whatsapp) {
+                telefone = item.clientes.telefone || item.clientes.whatsapp;
+            }
             forn = item.fornecimento_materiais || (document.getElementById('prop-fornecimento')?.value) || 'Arnaldo Trentin Fornece';
 
             let p = item.prazo_inicio;
@@ -5701,11 +5860,22 @@ ${materiaisTxt}${extrasTxt}
             else if (!isNaN(p)) prazo = `${p} dias após aprovação`;
             else prazo = String(p);
 
+            // Extrai endereço da obra salvo nos itens_json
+            if (item.itens_json) {
+                try {
+                    let parsed = typeof item.itens_json === 'string' ? JSON.parse(item.itens_json) : item.itens_json;
+                    if (Array.isArray(parsed)) {
+                        const endObj = parsed.find(i => i && i.type === 'endereco_obra');
+                        if (endObj) {
+                            enderecoObra = endObj.endereco;
+                            isMesmoEndereco = endObj.mesmo_endereco !== false;
+                        }
+                    }
+                } catch (e) {}
+            }
         } else {
             const comboCli = document.getElementById('prop-cliente');
             nomeCliente = cliObj?.nome_cliente || comboCli.options[comboCli.selectedIndex]?.text || 'Cliente';
-            endereco = cliObj?.endereco_completo || 'Endereço não cadastrado';
-            telefone = cliObj?.telefone || cliObj?.telefone_whatsapp || cliObj?.whatsapp || 'Telefone não cadastrado';
             servico = document.getElementById('prop-servico').value || '-';
             totalVal = parseFloat(document.getElementById('prop-valor').value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
             forn = document.getElementById('prop-fornecimento').value;
@@ -5716,10 +5886,24 @@ ${materiaisTxt}${extrasTxt}
             else prazo = String(p);
         }
 
+        if (!enderecoObra || enderecoObra === '-') {
+            const inptEnd = document.getElementById('prop-endereco-obra');
+            if (inptEnd && inptEnd.value) {
+                enderecoObra = inptEnd.value;
+                isMesmoEndereco = document.getElementById('prop-mesmo-endereco')?.checked ?? true;
+            } else {
+                enderecoObra = enderecoCadastro;
+            }
+        }
+
         const safeName = nomeCliente.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/gi, '_').substring(0, 15);
 
         // --- LÓGICA DE ITENS E CÁLCULOS TÉCNICOS ---
-        const itens = item?.itens_json || window.currentPropItems || [];
+        let rawItens = item?.itens_json || window.currentPropItems || [];
+        if (typeof rawItens === 'string') {
+            try { rawItens = JSON.parse(rawItens); } catch(e) { rawItens = []; }
+        }
+        const itens = (Array.isArray(rawItens) ? rawItens : []).filter(i => i && i.type !== 'payment_condition' && i.type !== 'endereco_obra');
         let htmlItens = '';
         let totalMO = 0;
         let totalMat = 0;
@@ -5756,8 +5940,18 @@ ${materiaisTxt}${extrasTxt}
             printTituloEl.innerText = (servico && servico !== '-') ? servico : (item?.servico_tipo || 'Orçamento / Proposta Técnica');
         }
         document.getElementById('print-cliente').innerText = nomeCliente;
-        document.getElementById('print-local').innerText = endereco;
+        document.getElementById('print-local').innerText = enderecoObra || enderecoCadastro;
         document.getElementById('print-telefone').innerText = telefone;
+
+        const rowCobranca = document.getElementById('print-row-cobranca');
+        if (rowCobranca) {
+            if (!isMesmoEndereco && enderecoObra && enderecoCadastro && enderecoObra.trim() !== enderecoCadastro.trim()) {
+                rowCobranca.style.display = 'block';
+                document.getElementById('print-endereco-cobranca').innerText = enderecoCadastro;
+            } else {
+                rowCobranca.style.display = 'none';
+            }
+        }
         document.getElementById('print-data').innerText = new Date().toLocaleDateString('pt-BR');
         document.getElementById('print-prazo').innerText = prazo;
         document.getElementById('print-total').innerText = totalVal;
@@ -5893,12 +6087,32 @@ ${materiaisTxt}${extrasTxt}
     document.getElementById('form-proposta')?.addEventListener('submit', async (e) => {
         e.preventDefault();
         const editId = e.target.dataset.editId;
+
+        const cliId = document.getElementById('prop-cliente').value || null;
+        const isMesmoEnd = document.getElementById('prop-mesmo-endereco')?.checked ?? true;
+        let endObra = document.getElementById('prop-endereco-obra')?.value || '';
+
+        if (isMesmoEnd && !endObra && cliId) {
+            const cli = (window.clientesCache || []).find(c => String(c.id) === String(cliId));
+            if (cli) endObra = cli.endereco_completo || '';
+        }
+
+        // Itens normais limpos
+        const cleanItems = JSON.parse(JSON.stringify(window.currentPropItems.filter(i => i && i.type !== 'payment_condition' && i.type !== 'endereco_obra')));
+        
+        // Insere o metadado de endereco_obra
+        cleanItems.push({
+            type: 'endereco_obra',
+            endereco: endObra,
+            mesmo_endereco: isMesmoEnd
+        });
+
         const payload = {
-            cliente_id: document.getElementById('prop-cliente').value || null,
+            cliente_id: cliId,
             servico_tipo: document.getElementById('prop-servico').value || 'Orçamento Customizado',
             valor_estimado: parseFloat(document.getElementById('prop-valor').value) || 0,
             valor_ajuste: parseFloat(document.getElementById('prop-valor-ajuste').value) || 0,
-            itens_json: JSON.parse(JSON.stringify(window.currentPropItems.filter(i => i && i.type !== 'payment_condition'))),
+            itens_json: cleanItems,
             observacoes: document.getElementById('prop-obs').value || '',
             fornecimento_materiais: document.getElementById('prop-fornecimento').value || 'Arnaldo Trentin Fornece',
             prazo_inicio: document.getElementById('prop-prazo').value || null,

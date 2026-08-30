@@ -1820,7 +1820,7 @@
                 <div class="form-grid-os">
                     <div class="input-group">
                         <label>Cliente (Obrigatório)</label>
-                        <select id="super-cliente" class="auth-select" required></select>
+                        <select id="super-cliente" class="auth-select" required onchange="window.onSuperClienteChange && window.onSuperClienteChange()"></select>
                     </div>
                     <div class="input-group">
                         <label>Responsável / Técnico Executor</label>
@@ -1837,6 +1837,20 @@
                     <div class="input-group">
                         <label>Data de Início (Agendamento)</label>
                         <input type="date" id="super-data" class="modal-input c-date" required>
+                    </div>
+
+                    <!-- ENDEREÇO DE EXECUÇÃO DA OS -->
+                    <div class="input-group" style="grid-column: span 2; margin-top: 5px; background: rgba(255,255,255,0.03); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 8px;">
+                            <label style="margin: 0; font-size: 0.82rem; font-weight: 700; color: var(--accent-orange);">
+                                <i class="fa-solid fa-location-dot"></i> Endereço do Serviço / Obra (Enviado no GPS do WhatsApp)
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 6px; font-size: 0.78rem; cursor: pointer; color: var(--text-primary); margin: 0; user-select: none;">
+                                <input type="checkbox" id="super-mesmo-endereco" checked onchange="window.toggleSuperOSEndereco && window.toggleSuperOSEndereco(this.checked)" style="width: 15px; height: 15px; cursor: pointer; accent-color: var(--accent-orange);">
+                                <span>Mesmo endereço do cadastro</span>
+                            </label>
+                        </div>
+                        <input type="text" id="super-endereco-obra" class="modal-input" placeholder="Endereço onde a equipe executará o serviço..." style="width: 100%; font-size: 0.85rem;" readonly>
                     </div>
 
                     <!-- CRONOGRAMA DE MÚLTIPLAS DIÁRIAS / RETORNOS -->
@@ -2586,10 +2600,28 @@
             <form id="form-proposta" autocomplete="off">
                 <div class="input-group">
                     <label>Cliente</label>
-                    <select id="prop-cliente" class="auth-select" required>
+                    <select id="prop-cliente" class="auth-select" required onchange="window.onPropClienteChange && window.onPropClienteChange()">
                         <option value="">Selecione o Cliente...</option>
                     </select>
                 </div>
+
+                <!-- ENDEREÇO DO SERVIÇO / LOCAL DA OBRA -->
+                <div class="glass-panel" style="background: rgba(255,255,255,0.04); padding: 12px 15px; border-radius: 8px; margin-bottom: 15px; border: 1px solid rgba(255,255,255,0.08);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 8px;">
+                        <label style="margin: 0; font-size: 0.85rem; font-weight: 700; color: var(--accent-orange);">
+                            <i class="fa-solid fa-location-dot"></i> Local de Execução do Serviço / Obra
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 6px; font-size: 0.8rem; cursor: pointer; color: var(--text-primary); margin: 0; user-select: none;">
+                            <input type="checkbox" id="prop-mesmo-endereco" checked onchange="window.togglePropEndereco && window.togglePropEndereco(this.checked)" style="width: 16px; height: 16px; cursor: pointer; accent-color: var(--accent-orange);">
+                            <span>Mesmo endereço de cadastro</span>
+                        </label>
+                    </div>
+                    <input type="text" id="prop-endereco-obra" class="modal-input" placeholder="Endereço onde o serviço será executado..." style="width: 100%; font-size: 0.88rem;" readonly>
+                    <small id="prop-endereco-hint" style="color: var(--text-muted); font-size: 0.72rem; margin-top: 5px; display: block;">
+                        <i class="fa-solid fa-circle-info"></i> Preenchido automaticamente com o cadastro. Desmarque acima para digitar outro local de execução (ex: filial, condomínio, obra).
+                    </small>
+                </div>
+
                 <div class="input-group">
                     <label>Título / Descrição da Proposta</label>
                     <input type="text" id="prop-servico" class="modal-input" placeholder="Ex: Manutenção Central Ar Condicionado" required>
@@ -2746,9 +2778,12 @@
             <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 40px; margin-bottom: 40px;">
                 <!-- CLIENT INFO -->
                 <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 20px; border-radius: 8px;">
-                    <h3 style="margin: 0 0 12px; font-size: 13px; color: #ff8c00; text-transform: uppercase; letter-spacing: 1px;">01. Dados do Cliente</h3>
+                    <h3 style="margin: 0 0 12px; font-size: 13px; color: #ff8c00; text-transform: uppercase; letter-spacing: 1px;">01. Dados do Cliente e Local</h3>
                     <p style="margin: 0 0 4px; font-size: 16px; font-weight: 700; color: #0f172a;"><span id="print-cliente"></span></p>
-                    <p style="margin: 0 0 2px; font-size: 13px; color: #475569; line-height: 1.5;"><i class="fa-solid fa-location-dot" style="margin-right: 5px; color: #94a3b8;"></i> <span id="print-local"></span></p>
+                    <p style="margin: 0 0 2px; font-size: 13px; color: #1e293b; line-height: 1.5;"><i class="fa-solid fa-location-dot" style="margin-right: 5px; color: #ff8c00;"></i> <strong>Local da Obra:</strong> <span id="print-local"></span></p>
+                    <div id="print-row-cobranca" style="display:none; margin: 0 0 2px; font-size: 12px; color: #64748b; line-height: 1.4;">
+                        <i class="fa-solid fa-house-user" style="margin-right: 5px; color: #94a3b8;"></i> <span>End. Cadastro: <span id="print-endereco-cobranca"></span></span>
+                    </div>
                     <p style="margin: 0; font-size: 13px; color: #475569; line-height: 1.5;"><i class="fa-solid fa-phone" style="margin-right: 5px; color: #94a3b8;"></i> <span id="print-telefone"></span></p>
                 </div>
 
