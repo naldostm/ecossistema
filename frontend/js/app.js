@@ -7935,21 +7935,29 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
 
     // Enviar mensagem manual assinada como Arnaldo
     window.sendManualMessageAsArnaldo = async function() {
-        if (!currentLivePhone) return;
+        if (!currentLivePhone) {
+            alert('⚠️ Selecione uma conversa na lista à esquerda antes de enviar a mensagem.');
+            return;
+        }
         const input = document.getElementById('live-chat-reply-input');
         const text = input?.value?.trim();
-        if (!text) return;
+        if (!text) {
+            alert('⚠️ Digite uma mensagem antes de clicar em Enviar.');
+            return;
+        }
 
         const btn = document.getElementById('btn-send-manual-msg');
-        btn.disabled = true;
-        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Enviando...';
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Enviando...';
+        }
 
         const formattedText = `👨‍🔧 *Arnaldo Trentin:* ${text}`;
 
         try {
             const supa = getSupa();
             
-            // 1. Grava a mensagem na memória
+            // 1. Grava a mensagem na memória imediatamente
             await supa.from('agent_memory').insert({
                 phone: currentLivePhone,
                 role: 'model',
@@ -7966,8 +7974,13 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
                 });
             }
 
+            // Limpa o input e atualiza o chat instantaneamente
+            if (input) input.value = '';
+            await window.selectLiveConversation(currentLivePhone);
+            triggerSaveSuccess('Mensagem enviada no WhatsApp!');
+
             // 3. Dispara via Edge Function / UazAPI
-            await supa.functions.invoke('assistant-router', {
+            const res = await supa.functions.invoke('assistant-router', {
                 body: {
                     action: 'send_manual_text',
                     telefone_destino: currentLivePhone,
@@ -7975,37 +7988,47 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
                 }
             });
 
-            input.value = '';
-            window.selectLiveConversation(currentLivePhone);
+            if (res?.error) {
+                console.warn('[LIVE CRM] Resposta Edge Function:', res.error);
+            }
 
         } catch (err) {
             console.error('[LIVE CRM] Erro ao enviar mensagem manual:', err);
-            // Mesmo se a Edge Function falhar, a mensagem fica gravada no banco
-            input.value = '';
-            window.selectLiveConversation(currentLivePhone);
+            if (input) input.value = '';
+            await window.selectLiveConversation(currentLivePhone);
         } finally {
-            btn.disabled = false;
-            btn.innerHTML = '<i class="fa-solid fa-user-tie"></i> Enviar como Arnaldo';
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-user-tie"></i> Enviar como Arnaldo';
+            }
         }
     };
 
     // Executar Ordem de IA para a Maria Cecília
     window.executeAiActiveCommand = async function() {
-        if (!currentLivePhone) return;
+        if (!currentLivePhone) {
+            alert('⚠️ Selecione uma conversa na lista à esquerda antes de disparar a ordem.');
+            return;
+        }
         const input = document.getElementById('live-chat-ai-cmd-input');
         const cmdText = input?.value?.trim();
-        if (!cmdText) return;
+        if (!cmdText) {
+            alert('⚠️ Digite uma ordem ou instrução para a Maria Cecília antes de disparar.');
+            return;
+        }
 
         const btn = document.getElementById('btn-exec-ai-cmd');
-        btn.disabled = true;
-        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Enviando...';
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Redigindo...';
+        }
 
         try {
             const supa = getSupa();
             const conv = liveConversations.find(c => c.phone === currentLivePhone);
             const clientName = conv?.clientName || 'Cliente';
 
-            triggerAutoSave('Maria Cecília redigindo e disparando mensagem...');
+            triggerAutoSave('Maria Cecília redigindo e disparando mensagem no WhatsApp...');
 
             const res = await supa.functions.invoke('assistant-router', {
                 body: {
@@ -8019,7 +8042,7 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
             if (res.error) throw new Error(res.error.message || JSON.stringify(res.error));
             if (res.data?.error) throw new Error(res.data.error);
 
-            input.value = '';
+            if (input) input.value = '';
             triggerSaveSuccess('Maria Cecília enviou a mensagem para o cliente no WhatsApp!');
 
             // Recarrega o chat imediatamente
@@ -8030,8 +8053,10 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
             triggerSaveError('Erro ao executar ordem da Maria.');
             alert('Erro ao processar comando da Maria Cecília: ' + (err.message || JSON.stringify(err)));
         } finally {
-            btn.disabled = false;
-            btn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Disparar Ordem';
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Disparar Ordem';
+            }
         }
     };
 

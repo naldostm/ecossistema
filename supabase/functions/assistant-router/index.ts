@@ -136,7 +136,10 @@ serve(async (req) => {
   // === HANDLER DIRETO PARA ENVIO MANUAL VIA PAINEL CRM ===
   if (payload?.action === 'send_manual_text') {
       const destRaw = String(payload.telefone_destino || '').trim();
-      const destDigits = destRaw.replace(/\D/g, '');
+      let destDigits = destRaw.replace(/\D/g, '');
+      if (!destDigits.startsWith('55') && destDigits.length >= 10 && destDigits.length <= 11) {
+          destDigits = '55' + destDigits;
+      }
       const msgText = payload.mensagem || '';
       
       if (!destDigits || !msgText) {
@@ -175,7 +178,9 @@ serve(async (req) => {
   if (payload?.action === 'execute_ai_order') {
       const destRaw = String(payload.telefone_destino || '').trim();
       let targetPhone = destRaw.replace(/\D/g, '');
-      if (!targetPhone.startsWith('55') && targetPhone.length <= 11) targetPhone = '55' + targetPhone;
+      if (!targetPhone.startsWith('55') && targetPhone.length >= 10 && targetPhone.length <= 11) {
+          targetPhone = '55' + targetPhone;
+      }
       const clientName = payload.nome_cliente || 'Cliente';
       const cmdText = payload.ordem || '';
 
@@ -213,12 +218,23 @@ INSTRUÇÕES OBRIGATÓRIAS:
 - Fale em primeira pessoa como Maria Cecília da Arnaldo Trentin.
 - Não use jargões de robô, nem introduções como "Olá Arnaldo" ou "Aqui está a mensagem". Retorne APENAS o texto exato que será enviado para o WhatsApp do cliente.`;
 
-          const model = genAI.getGenerativeModel({
+          let model = genAI.getGenerativeModel({
               model: "gemini-2.5-flash",
               generationConfig: { temperature: 0.7, maxOutputTokens: 1024 }
           });
 
-          const res = await model.generateContent(prompt);
+          let res;
+          try {
+              res = await model.generateContent(prompt);
+          } catch (modelErr) {
+              console.warn('[MODEL FALLBACK] Tentando gemini-1.5-flash...', modelErr);
+              model = genAI.getGenerativeModel({
+                  model: "gemini-1.5-flash",
+                  generationConfig: { temperature: 0.7, maxOutputTokens: 1024 }
+              });
+              res = await model.generateContent(prompt);
+          }
+
           const generatedMsg = res.response.text().trim();
 
           // 1. Reativa a Maria para este contato (garante que ela responderá quando o cliente responder)
