@@ -7998,32 +7998,37 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
 
         const btn = document.getElementById('btn-exec-ai-cmd');
         btn.disabled = true;
-        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Enviando...';
 
         try {
             const supa = getSupa();
             const conv = liveConversations.find(c => c.phone === currentLivePhone);
             const clientName = conv?.clientName || 'Cliente';
 
-            const fullPrompt = `Arnaldo (Gestor) ordenou para Maria Cecília: ${cmdText} para o cliente ${clientName} no telefone ${currentLivePhone}`;
+            triggerAutoSave('Maria Cecília redigindo e disparando mensagem...');
 
-            const { data, error } = await supa.functions.invoke('assistant-router', {
+            const res = await supa.functions.invoke('assistant-router', {
                 body: {
-                    message: {
-                        text: fullPrompt,
-                        fromMe: true,
-                        remoteJid: currentLivePhone
-                    }
+                    action: 'execute_ai_order',
+                    telefone_destino: currentLivePhone,
+                    nome_cliente: clientName,
+                    ordem: cmdText
                 }
             });
 
+            if (res.error) throw new Error(res.error.message || JSON.stringify(res.error));
+            if (res.data?.error) throw new Error(res.data.error);
+
             input.value = '';
-            setTimeout(() => {
-                window.selectLiveConversation(currentLivePhone);
-            }, 1800);
+            triggerSaveSuccess('Maria Cecília enviou a mensagem para o cliente no WhatsApp!');
+
+            // Recarrega o chat imediatamente
+            await window.selectLiveConversation(currentLivePhone);
 
         } catch (err) {
-            alert('Erro ao processar comando da IA: ' + err.message);
+            console.error('[ORDEM IA]', err);
+            triggerSaveError('Erro ao executar ordem da Maria.');
+            alert('Erro ao processar comando da Maria Cecília: ' + (err.message || JSON.stringify(err)));
         } finally {
             btn.disabled = false;
             btn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Disparar Ordem';

@@ -171,6 +171,97 @@ serve(async (req) => {
       }
   }
 
+  // === HANDLER DIRETO PARA ORDEM ATIVA DO GESTOR (MARIA CECÍLIA) ===
+  if (payload?.action === 'execute_ai_order') {
+      const destRaw = String(payload.telefone_destino || '').trim();
+      let targetPhone = destRaw.replace(/\D/g, '');
+      if (!targetPhone.startsWith('55') && targetPhone.length <= 11) targetPhone = '55' + targetPhone;
+      const clientName = payload.nome_cliente || 'Cliente';
+      const cmdText = payload.ordem || '';
+
+      if (!targetPhone || !cmdText) {
+          return new Response(JSON.stringify({ error: 'Telefone ou ordem vazia' }), { 
+              status: 400, 
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+          });
+      }
+
+      const manualUazapiUrl = (payload?.BaseUrl || Deno.env.get('UAZAPI_URL') || 'https://arnaldotrentin.uazapi.com').replace(/\/$/, '');
+      const manualToken = payload?.token || Deno.env.get('UAZAPI_TOKEN') || 'e7ca3dea-7317-4502-894a-790655f77bb1';
+
+      try {
+          // Busca histórico recente para dar contexto à Maria
+          const { data: hist } = await supabase.from('agent_memory')
+              .select('role, content')
+              .eq('phone', targetPhone)
+              .order('created_at', { ascending: false })
+              .limit(8);
+
+          let histContext = "";
+          if (hist && hist.length > 0) {
+              histContext = "\nHistórico recente da conversa com o cliente:\n" + hist.reverse().map(h => `${h.role === 'model' ? 'Maria' : 'Cliente'}: ${h.content}`).join('\n') + "\n";
+          }
+
+          const prompt = `Você é Maria Cecília, atendente comercial sênior da Arnaldo Trentin Serviços (Engenharia, Climatização e Refrigeração).
+O gestor da empresa, Arnaldo, te deu a seguinte ordem direta para enviar para o cliente ${clientName}:
+"${cmdText}"
+
+${histContext}
+INSTRUÇÕES OBRIGATÓRIAS:
+- Redija a mensagem de WhatsApp pronta para enviar diretamente para o cliente ${clientName}.
+- Seja calorosa, natural, educada e persuasiva.
+- Fale em primeira pessoa como Maria Cecília da Arnaldo Trentin.
+- Não use jargões de robô, nem introduções como "Olá Arnaldo" ou "Aqui está a mensagem". Retorne APENAS o texto exato que será enviado para o WhatsApp do cliente.`;
+
+          const model = genAI.getGenerativeModel({
+              model: "gemini-2.5-flash",
+              generationConfig: { temperature: 0.7, maxOutputTokens: 1024 }
+          });
+
+          const res = await model.generateContent(prompt);
+          const generatedMsg = res.response.text().trim();
+
+          // 1. Reativa a Maria para este contato (garante que ela responderá quando o cliente responder)
+          await supabase.from('agent_memory').insert({
+              phone: targetPhone,
+              role: 'user',
+              content: 'BOT_ATIVO'
+          });
+
+          // 2. Grava a mensagem gerada pela Maria no histórico
+          await supabase.from('agent_memory').insert({
+              phone: targetPhone,
+              role: 'model',
+              content: generatedMsg
+          });
+
+          // 3. Dispara a mensagem via UazAPI / WhatsApp
+          const sendResp = await fetch(`${manualUazapiUrl}/send/text`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'token': manualToken },
+              body: JSON.stringify({ number: targetPhone, text: generatedMsg })
+          });
+
+          console.log(`[ORDEM IA SUCESSO] Maria disparou para ${targetPhone}: "${generatedMsg}". Status Uazapi: ${sendResp.status}`);
+
+          return new Response(JSON.stringify({ 
+              success: true, 
+              mensagem_gerada: generatedMsg,
+              status_uazapi: sendResp.status 
+          }), {
+              status: 200,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+
+      } catch (err: any) {
+          console.error('[ORDEM IA ERRO] Falha ao processar ordem da Maria:', err);
+          return new Response(JSON.stringify({ error: String(err?.message || err) }), {
+              status: 500,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+      }
+  }
+
   // 2. Processador de Fundo (Background)
   const processRequest = async () => {
     try {
