@@ -8726,7 +8726,7 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
             const supa = getSupa();
             const { error } = await supa.from('agent_memory').insert({
                 phone: 'MARIA_TASK',
-                role: 'task_pending',
+                role: 'user',
                 content: JSON.stringify(newTask)
             });
 
