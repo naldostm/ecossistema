@@ -7110,20 +7110,51 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
 
         try {
             const supa = getSupa();
-            const { data: messages, error } = await supa.from('agent_memory')
+
+            // Normaliza variações de telefone (com 55, sem 55, com @s.whatsapp.net)
+            const cleanDigits = phone.replace(/\D/g, '');
+            const phoneVariants = [
+                phone,
+                cleanDigits,
+                `55${cleanDigits}`,
+                cleanDigits.replace(/^55/, ''),
+                `${cleanDigits}@s.whatsapp.net`,
+                `55${cleanDigits.replace(/^55/, '')}@s.whatsapp.net`
+            ];
+            const uniquePhones = [...new Set(phoneVariants.filter(Boolean))];
+
+            // Busca as últimas 50 mensagens mais recentes
+            const { data: rawMessages, error } = await supa.from('agent_memory')
                 .select('*')
-                .eq('phone', phone)
-                .order('created_at', { ascending: true });
+                .in('phone', uniquePhones)
+                .order('created_at', { ascending: false })
+                .limit(50);
 
             if (error) {
                 stream.innerHTML = `<div style="color:var(--accent-red); padding:15px;">Erro ao carregar mensagens: ${error.message}</div>`;
                 return;
             }
 
-            if (!messages || messages.length === 0) {
+            if (!rawMessages || rawMessages.length === 0) {
                 stream.innerHTML = '<div style="text-align:center; padding:30px; color:var(--text-muted);">Nenhuma mensagem registrada.</div>';
                 return;
             }
+
+            // Inverte para exibir do mais antigo ao mais recente
+            const allMessages = rawMessages.reverse();
+
+            // Filtra comandos de sistema consecutivos repetidos para não poluir o chat
+            let lastStatusPill = null;
+            const messages = allMessages.filter(msg => {
+                const isStatusCmd = ['BOT_PAUSADO', 'BOT_ATIVO', 'BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA'].includes(msg.content);
+                if (isStatusCmd) {
+                    if (lastStatusPill === msg.content) return false;
+                    lastStatusPill = msg.content;
+                    return true;
+                }
+                lastStatusPill = null;
+                return true;
+            });
 
             stream.innerHTML = messages.map(msg => {
                 const time = msg.created_at ? new Date(msg.created_at).toLocaleTimeString('pt-BR', {hour: '2-digit', minute: '2-digit'}) : '';
@@ -7159,7 +7190,10 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
                     cleanUserText = cleanUserText
                         .replace(/\[MSG_ID:[^\]]+\]\s*/g, '')
                         .replace(/\[MEDIA_AUDIO_B64:[^\]]+\]\s*/g, '')
-                        .replace(/\[MEDIA_IMAGE_B64:[^\]]+\]\s*/g, '');
+                        .replace(/\[MEDIA_IMAGE_B64:[^\]]+\]\s*/g, '')
+                        .replace(/\[MEDIA_AUDIO:[^\]]+\]\s*/g, '🎙️ _[Áudio de voz recebido]_')
+                        .replace(/\[MEDIA_IMAGE:[^\]]+\]\s*/g, '📷 _[Foto/Imagem recebida]_')
+                        .replace(/\[LOCK:[^\]]+\]\s*/g, '');
 
                     const isAudioMsg = base64Audio || cleanUserText.includes('Áudio') || cleanUserText.includes('audio') || cleanUserText.includes('🎙️') || cleanUserText.includes('voz');
                     const isPhotoMsg = base64Image || cleanUserText.includes('Foto') || cleanUserText.includes('📷') || cleanUserText.includes('imagem');
@@ -7200,7 +7234,12 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
                 }
 
                 // Mensagem de Arnaldo ou Maria Cecília (Model)
-                let cleanModelText = (msg.content || '').replace(/\[MSG_ID:[^\]]+\]\s*/g, '');
+                let cleanModelText = (msg.content || '')
+                    .replace(/\[MSG_ID:[^\]]+\]\s*/g, '')
+                    .replace(/\[MEDIA_AUDIO_B64:[^\]]+\]\s*/g, '')
+                    .replace(/\[MEDIA_IMAGE_B64:[^\]]+\]\s*/g, '')
+                    .replace(/\[LOCK:[^\]]+\]\s*/g, '');
+
                 const isArnaldo = cleanModelText && (cleanModelText.includes('👨‍🔧') || cleanModelText.toLowerCase().startsWith('arnaldo'));
                 const bubbleBg = isArnaldo ? 'rgba(41, 128, 185, 0.2)' : 'rgba(37, 211, 102, 0.12)';
                 const bubbleBorder = isArnaldo ? '1px solid rgba(41, 128, 185, 0.4)' : '1px solid rgba(37, 211, 102, 0.3)';
@@ -7296,12 +7335,15 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
                 content: formattedText
             });
 
-            // 2. Garante a pausa do robô para este cliente
-            await supa.from('agent_memory').insert({
-                phone: currentLivePhone,
-                role: 'user',
-                content: 'BOT_PAUSADO'
-            });
+            // 2. Garante a pausa do robô apenas se não estiver pausado
+            const conv = liveConversations.find(c => c.phone === currentLivePhone);
+            if (!conv || conv.status !== 'pausado') {
+                await supa.from('agent_memory').insert({
+                    phone: currentLivePhone,
+                    role: 'user',
+                    content: 'BOT_PAUSADO'
+                });
+            }
 
             // 3. Dispara via Edge Function / UazAPI
             await supa.functions.invoke('assistant-router', {

@@ -283,13 +283,13 @@ serve(async (req) => {
       }
 
       // CONTROLE DE PAUSA E COMANDOS DO GESTOR (Atendimento Humano Individual)
-      const isMessageFromMe = payload?.message?.fromMe || payload?.fromMe || payload?.data?.key?.fromMe;
+      const isMessageFromMe = payload?.message?.fromMe === true || payload?.fromMe === true || payload?.data?.key?.fromMe === true;
       const sentByApi = payload?.message?.wasSentByApi === true || payload?.data?.message?.wasSentByApi === true || payload?.wasSentByApi === true;
       
       if (isMessageFromMe || sentByApi) {
           console.log(`[FROM ME] Mensagem detectada. isFromMe: ${isMessageFromMe}, sentByApi: ${sentByApi}. JID: ${remoteJid}.`);
           
-          // Se for uma mensagem digitada manualmente pelo humano (não-API)
+          // Se for uma mensagem digitada manualmente pelo humano diretamente no WhatsApp (não-API)
           if (isMessageFromMe && !sentByApi && userMessage && userMessage.trim().length > 0) {
               const myText = userMessage.trim().toLowerCase();
               if (myText === '/ignorar' || myText === '/amigo' || myText === '/blacklist') {
@@ -307,9 +307,21 @@ serve(async (req) => {
                   console.log(`[ATENDIMENTO HUMANO] Robô PAUSADO para o cliente ${remoteJid}`);
                   return;
               }
-              // Caso o humano apenas mandou qualquer mensagem (ex: "Bom dia, aqui é o Arnaldo"), pausamos automaticamente
-              await supabase.from('agent_memory').insert({ phone: remoteJid, role: 'user', content: 'BOT_PAUSADO' });
-              console.log(`[ATENDIMENTO HUMANO] Pausa Automática ativada no JID: ${remoteJid}`);
+
+              // 1. Grava a mensagem do Arnaldo para aparecer no histórico do chat no ecossistema
+              const formattedArnaldoMsg = `👨‍🔧 *Arnaldo Trentin:* ${userMessage.trim()}`;
+              await supabase.from('agent_memory').insert({
+                  phone: remoteJid,
+                  role: 'model',
+                  content: formattedArnaldoMsg
+              });
+
+              // 2. Pausa a IA para que a Maria não responda por cima do atendimento humano
+              const { data: currentPause } = await supabase.from('agent_memory').select('content').eq('phone', remoteJid).eq('role', 'user').in('content', ['BOT_PAUSADO', 'BOT_ATIVO']).order('created_at', { ascending: false }).limit(1);
+              if (!currentPause || currentPause.length === 0 || currentPause[0].content !== 'BOT_PAUSADO') {
+                  await supabase.from('agent_memory').insert({ phone: remoteJid, role: 'user', content: 'BOT_PAUSADO' });
+                  console.log(`[ATENDIMENTO HUMANO] Pausa Automática ativada no JID: ${remoteJid}`);
+              }
           }
           return;
       }
