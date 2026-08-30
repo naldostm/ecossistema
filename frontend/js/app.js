@@ -7417,14 +7417,10 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
 // 📱 CENTRAL DE ATENDIMENTO — LIVE CRM, OUTBOUND & LISTA NEGRA (v2.0)
 // ==============================================================================
 (function() {
-    const SUPABASE_URL = ((typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_URL) ? import.meta.env.VITE_SUPABASE_URL : 'https://tmpwmtpdxcvulglkahcg.supabase.co').trim();
-    const SUPABASE_ANON_KEY = ((typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_ANON_KEY) ? import.meta.env.VITE_SUPABASE_ANON_KEY : 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRtcHdtdHBkeGN2dWxnbGthaGNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwNTg0MDMsImV4cCI6MjA4OTYzNDQwM30.GRcj8PoXCMcWPEN5maZYD3kxndqpWfcegryLYANgggE').trim();
-    
     let campaignTipo = 'atendimento';
     let campaignClients = [];
     let campaignPreviewData = null;
     let allCampaignChecked = false;
-    let _supaClient = null;
     let _campaignInitialized = false;
 
     // Live CRM State
@@ -7433,10 +7429,7 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
     let liveClientsMap = {};
 
     function getSupa() {
-        if (!_supaClient) {
-            _supaClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-        }
-        return _supaClient;
+        return supabase;
     }
 
     // Hook into showSection router
