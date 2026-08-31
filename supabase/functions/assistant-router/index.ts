@@ -1080,13 +1080,20 @@ DIRETRIZES OBRIGATÓRIAS:
           
       if (pauseState && pauseState.length > 0) {
           const state = pauseState[0].content;
+          const createdAt = new Date(pauseState[0].created_at || 0).getTime();
+          const isRecentlyPaused = (Date.now() - createdAt) < (45 * 60 * 1000); // 45 minutos
+
           if (state === 'BOT_IGNORAR' || state === 'AMIGO_IGNORAR' || state === 'LISTA_NEGRA') {
               console.log(`[LISTA NEGRA] Mensagem registrada no chat, robô está permanentemente ignorado para ${remoteJid}.`);
               return;
           }
           if (state === 'BOT_PAUSADO') {
-              console.log(`[ATENDIMENTO HUMANO / PAUSADO] Mensagem registrada no chat, atendimento humano em andamento para ${remoteJid}. Robô em silêncio.`);
-              return;
+              if (isRecentlyPaused) {
+                  console.log(`[ATENDIMENTO HUMANO / PAUSADO RECENTE] Mensagem registrada no chat, atendimento humano em andamento para ${remoteJid}. Robô em silêncio.`);
+                  return;
+              } else {
+                  console.log(`[PAUSA EXPIRADA] Pausa humana de ${remoteJid} foi há mais de 45m. Maria Cecília assumindo novo chamado.`);
+              }
           }
       }
 
@@ -1121,7 +1128,7 @@ DIRETRIZES OBRIGATÓRIAS:
 
       const { data: recheckPause } = await supabase
           .from('agent_memory')
-          .select('content')
+          .select('content, created_at')
           .in('phone', phoneVariants)
           .in('content', ['BOT_PAUSADO', 'BOT_ATIVO', 'BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA'])
           .order('created_at', { ascending: false })
@@ -1129,8 +1136,15 @@ DIRETRIZES OBRIGATÓRIAS:
 
       if (recheckPause && recheckPause.length > 0) {
           const state = recheckPause[0].content;
-          if (state === 'BOT_PAUSADO' || state === 'BOT_IGNORAR' || state === 'AMIGO_IGNORAR' || state === 'LISTA_NEGRA') {
+          const createdAt = new Date(recheckPause[0].created_at || 0).getTime();
+          const isRecentlyPaused = (Date.now() - createdAt) < (45 * 60 * 1000);
+
+          if (state === 'BOT_IGNORAR' || state === 'AMIGO_IGNORAR' || state === 'LISTA_NEGRA') {
               console.log(`[PAUSA DETECTADA APÓS BUFFER] Status é ${state}. Abortando.`);
+              return;
+          }
+          if (state === 'BOT_PAUSADO' && isRecentlyPaused) {
+              console.log(`[PAUSA DETECTADA APÓS BUFFER] Status é BOT_PAUSADO recente. Abortando.`);
               return;
           }
       }

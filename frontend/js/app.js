@@ -7601,7 +7601,8 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
                         conv.status = 'ignorado';
                         blacklistCount++;
                     } else if (statusCmd.content === 'BOT_PAUSADO') {
-                        conv.status = 'pausado';
+                        const isRecent = (Date.now() - new Date(statusCmd.created_at || 0).getTime()) < (45 * 60 * 1000);
+                        conv.status = isRecent ? 'pausado' : 'ativo';
                     } else {
                         conv.status = 'ativo';
                     }
