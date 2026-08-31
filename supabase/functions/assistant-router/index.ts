@@ -290,117 +290,8 @@ DIRETRIZES DE RESPOSTA:
       }
   }
 
-  // SÍNTESE EXECUTIVA DE CONCLUSÃO / DESFECHO DE MISSÃO
-  const synthesizeTaskOutcome = async (task: any, recordId: string) => {
-      let targetPhone = String(task.target_phone || '').replace(/\D/g, '');
-      if (!targetPhone.startsWith('55') && targetPhone.length <= 11) targetPhone = '55' + targetPhone;
-
-      // Busca histórico completo recente da conversa
-      const { data: hist } = await supabase.from('agent_memory')
-          .select('role, content, created_at')
-          .eq('phone', targetPhone)
-          .order('created_at', { ascending: false })
-          .limit(12);
-
-      if (!hist || hist.length === 0) return task;
-
-      const dialogHistory = hist.reverse().map((h: any) => `${h.role === 'model' ? 'Maria Cecília' : task.target_name}: ${h.content}`).join('\n');
-
-      const prompt = `Você é o auditor e sintetizador executivo da secretária Maria Cecília da Arnaldo Trentin Serviços (Engenharia, Climatização e Refrigeração).
-O gestor da empresa, Arnaldo Trentin, havia criado uma missão/ordem para a Maria executar com o contato ${task.target_name} (${task.target_phone}):
-
-TIPO DE MISSÃO: ${task.event_label}
-INSTRUÇÕES ORIGINAIS DO ARNALDO: "${task.instructions}"
-MENSAGEM INICIAL ENVIADA PELA MARIA: "${task.ai_generated_message || ''}"
-
-DIÁLOGO COMPLETO NO WHATSAPP COM ESTE CONTATO:
-${dialogHistory}
-
-SUA TAREFA OBRIGATÓRIA:
-Gerar a CONCLUSÃO e o RESULTADO REAL da atividade para o relatório executivo do Arnaldo Trentin.
-Você NÃO deve focar apenas no que a Maria enviou, mas sim no RESULTADO DO CONJUNTO (o que o cliente respondeu e qual o desfecho):
-
-Diretrizes específicas de Conclusão:
-1. CONFIRMAR AGENDAMENTO / VISITA TÉCNICA:
-   - O cliente confirmou a visita? (Sim ou Não).
-   - Tem alguma restrição de horário, preferência ou pediu alteração/reagendamento de data?
-2. ENCAMINHAR ORÇAMENTO / PROPOSTA:
-   - O cliente recebeu o orçamento e fechou/aprovou?
-   - O cliente quer negociar valor/desconto? (⚠️ IMPORTANTE: A Maria NÃO altera valores; toda negociação é exclusiva com o Arnaldo. Destaque se o cliente pediu negociação para o Arnaldo assumir).
-   - O cliente pediu visita técnica prévia ou tirou dúvidas?
-3. LEMBRETE DE PAGAMENTO / COBRANÇA:
-   - O cliente efetuou o pagamento / mandou comprovante?
-   - Se não pagou, qual o dia/data exata que ele disse que pretende pagar? (Ex: "O cliente disse que pagará amanhã sem falta").
-4. COTAÇÃO COM FORNECEDOR:
-   - O fornecedor passou os preços das peças/materiais? Qual o valor e o prazo de entrega informado?
-5. OUTRAS MISSÕES:
-   - Resumo direto e conclusivo do desfecho do contato.
-
-Retorne ESTRITAMENTE um objeto JSON válido, sem texto fora dele:
-{
-  "outcome_status": "visita_confirmada" | "negociacao_pendente" | "pagamento_agendado" | "orcamento_aceito" | "reagendamento_solicitado" | "aguardando_resposta" | "em_conversa" | "recusada",
-  "outcome_badge": "🟢 Visita Confirmada" | "🤝 Cliente Quer Negociar" | "💳 Promessa de Pagamento" | "✅ Orçamento Aprovado" | "📅 Reagendamento Solicitado" | "⏳ Aguardando Resposta" | "❌ Recusado",
-  "conclusion_summary": "Resumo executivo de 1 a 2 linhas do desfecho concreto",
-  "client_response": "O que o cliente/fornecedor respondeu em essência",
-  "action_required": "Próxima ação recomendada para o Arnaldo (ex: 'Ligar para o cliente para negociar valores' ou 'Nenhuma ação necessária')",
-  "full_report_markdown": "Relatório executivo estruturado em Markdown com tópicos claros, emojis, resposta do cliente e conclusão"
-}
-`;
-
-      let model = genAI.getGenerativeModel({
-          model: "gemini-2.5-flash",
-          generationConfig: { temperature: 0.2, maxOutputTokens: 2048, responseMimeType: "application/json" }
-      });
-
-      let res;
-      try {
-          res = await model.generateContent(prompt);
-      } catch (e) {
-          model = genAI.getGenerativeModel({
-              model: "gemini-1.5-flash",
-              generationConfig: { temperature: 0.2, maxOutputTokens: 2048, responseMimeType: "application/json" }
-          });
-          res = await model.generateContent(prompt);
-      }
-
-      try {
-          const outcome = JSON.parse(res.response.text().trim());
-          const formattedDate = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-          
-          const customReport = outcome.full_report_markdown || (
-              `📊 **RELATÓRIO EXECUTIVO DA MISSÃO**\n\n` +
-              `🎯 **Status do Desfecho:** ${outcome.outcome_badge}\n` +
-              `👤 **Destinatário:** ${task.target_name} (${task.target_phone})\n` +
-              `📋 **Missão:** ${task.event_label}\n\n` +
-              `📌 **Conclusão & Resultado:**\n${outcome.conclusion_summary}\n\n` +
-              `🗣️ **Resposta do Cliente no WhatsApp:**\n"${outcome.client_response}"\n\n` +
-              `⚠️ **Ação Recomendada para o Arnaldo:**\n${outcome.action_required}\n\n` +
-              `🕒 **Atualizado em:** ${formattedDate}`
-          );
-
-          const updatedTask = {
-              ...task,
-              status: outcome.outcome_status || task.status || 'concluida',
-              outcome_badge: outcome.outcome_badge || '🟢 Concluída',
-              conclusion_summary: outcome.conclusion_summary || '',
-              client_response: outcome.client_response || '',
-              action_required: outcome.action_required || '',
-              activity_report: customReport,
-              last_analyzed_at: new Date().toISOString()
-          };
-
-          if (recordId) {
-              await supabase.from('agent_memory').update({ content: JSON.stringify(updatedTask) }).eq('id', recordId);
-          }
-          return updatedTask;
-      } catch (parseErr) {
-          console.error('[OUTCOME PARSE ERROR]:', parseErr);
-          return task;
-      }
-  };
-
-  // 1.1 EXECUÇÃO E SÍNTESE DE TAREFAS DA AGENDA DA MARIA (SECRETÁRIA EXECUTIVA)
-  if (payload?.action === 'execute_maria_task' || payload?.action === 'process_maria_agenda' || payload?.action === 'sync_maria_task_report') {
+  // 1.1 EXECUÇÃO DE MISSÕES DA AGENDA DA MARIA (PILOTO AUTOMÁTICO)
+  if (payload?.action === 'execute_maria_task' || payload?.action === 'process_maria_agenda') {
       const manualUazapiUrl = (payload?.BaseUrl || Deno.env.get('UAZAPI_URL') || 'https://arnaldotrentin.uazapi.com').replace(/\/$/, '');
       const manualToken = payload?.token || Deno.env.get('UAZAPI_TOKEN') || 'e7ca3dea-7317-4502-894a-790655f77bb1';
 
@@ -507,7 +398,7 @@ DIRETRIZES OBRIGATÓRIAS:
 
               const generatedMsg = res.response.text().trim();
 
-              // 2. Reativa a Maria para este contato
+              // 2. Garante que o BOT está 100% ATIVO para responder qualquer mensagem futura
               await supabase.from('agent_memory').insert({
                   phone: targetPhone,
                   role: 'user',
@@ -567,28 +458,15 @@ DIRETRIZES OBRIGATÓRIAS:
               }
 
               const executedAt = new Date().toISOString();
-              const formattedDate = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-              
-              const report = `⏳ **Mensagem Enviada — Aguardando Resposta do Contato**\n\n` +
-                  `📅 **Data do Disparo:** ${formattedDate}\n` +
-                  `👤 **Destinatário:** ${targetName} (${targetPhone})\n` +
-                  `🎯 **Missão:** ${eventLabel}\n` +
-                  `📎 **Anexo Entregue:** ${fileName || 'Nenhum'}\n\n` +
-                  `💬 **Mensagem Entregue via WhatsApp:**\n"${generatedMsg}"\n\n` +
-                  `📡 **Status:** Mensagem entregue com sucesso (HTTP ${sendStatus}). Assim que o contato responder no WhatsApp, a conclusão do conjunto será gerada automaticamente aqui!`;
 
               const updatedTask = {
                   ...task,
-                  status: 'aguardando_resposta',
-                  outcome_badge: '⏳ Aguardando Resposta',
-                  conclusion_summary: 'Mensagem inicial enviada pela Maria. Aguardando posicionamento do cliente.',
+                  status: 'concluida',
                   executed_at: executedAt,
-                  ai_generated_message: generatedMsg,
-                  activity_report: report
+                  ai_generated_message: generatedMsg
               };
 
-              // 5. Atualiza o registro inicial da tarefa no banco
-              let targetRecId = recordId;
+              // 5. Atualiza o registro da tarefa no banco
               if (recordId) {
                   await supabase.from('agent_memory').update({
                       content: JSON.stringify(updatedTask)
@@ -600,17 +478,13 @@ DIRETRIZES OBRIGATÓRIAS:
                       .like('content', `%"id":"${task.id}"%`)
                       .limit(1);
                   if (rec && rec.length > 0) {
-                      targetRecId = rec[0].id;
                       await supabase.from('agent_memory').update({
                           content: JSON.stringify(updatedTask)
                       }).eq('id', rec[0].id);
                   }
               }
 
-              // Se já houver mensagens posteriores no histórico (ex: teste em conversa já aberta), roda síntese
-              const finalizedTask = await synthesizeTaskOutcome(updatedTask, targetRecId);
-
-              return { success: true, ai_generated_message: generatedMsg, activity_report: finalizedTask?.activity_report || report, task: finalizedTask || updatedTask };
+              return { success: true, ai_generated_message: generatedMsg, task: updatedTask };
           };
 
           if (payload?.action === 'execute_maria_task') {
@@ -1357,25 +1231,6 @@ DIRETRIZES OBRIGATÓRIAS:
               body: JSON.stringify({ number: remoteJid, text: whatsAppText })
           });
           console.log(`[UAZAPI RETORNO] Status: ${uazapiResponse.status}`);
-      }
-
-      // === AUTO-SÍNTESE DE DESFECHO DA AGENDA DA MARIA ===
-      // Se este contato possui uma tarefa recente na agenda, sintetiza o resultado do diálogo
-      try {
-          const { data: agendaRecords } = await supabase.from('agent_memory')
-              .select('id, content')
-              .eq('phone', 'MARIA_TASK')
-              .like('content', `%"target_phone":"${remoteJid}"%`)
-              .order('created_at', { ascending: false })
-              .limit(1);
-
-          if (agendaRecords && agendaRecords.length > 0) {
-              const taskObj = JSON.parse(agendaRecords[0].content);
-              console.log(`[AGENDA AUTO SYNTHESIS] Analisando desfecho da missão ${taskObj.id} para ${remoteJid}...`);
-              await synthesizeTaskOutcome(taskObj, agendaRecords[0].id);
-          }
-      } catch (synthErr) {
-          console.error('[AGENDA AUTO SYNTHESIS ERROR]:', synthErr);
       }
 
     } catch (err) {

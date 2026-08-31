@@ -8835,38 +8835,10 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
             const meta = EVENT_LABELS[t.event_type] || { label: t.event_label || 'Missão Comercial', color: '#f39c12', bg: 'rgba(243,156,18,0.15)', border: 'rgba(243,156,18,0.3)' };
 
             let statusBadge = '';
-            if (t.outcome_badge) {
-                let badgeColor = '#25D366';
-                let badgeBg = 'rgba(37,211,102,0.15)';
-                let badgeBorder = 'rgba(37,211,102,0.35)';
-
-                if (t.status === 'negociacao_pendente') {
-                    badgeColor = '#e67e22';
-                    badgeBg = 'rgba(230,126,34,0.15)';
-                    badgeBorder = 'rgba(230,126,34,0.35)';
-                } else if (t.status === 'pagamento_agendado') {
-                    badgeColor = '#f1c40f';
-                    badgeBg = 'rgba(241,196,15,0.15)';
-                    badgeBorder = 'rgba(241,196,15,0.35)';
-                } else if (t.status === 'aguardando_resposta') {
-                    badgeColor = '#3498db';
-                    badgeBg = 'rgba(52,152,219,0.15)';
-                    badgeBorder = 'rgba(52,152,219,0.35)';
-                } else if (t.status === 'reagendamento_solicitado') {
-                    badgeColor = '#9b59b6';
-                    badgeBg = 'rgba(155,89,182,0.15)';
-                    badgeBorder = 'rgba(155,89,182,0.35)';
-                } else if (t.status === 'recusada' || t.status === 'falha') {
-                    badgeColor = '#e74c3c';
-                    badgeBg = 'rgba(231,76,60,0.15)';
-                    badgeBorder = 'rgba(231,76,60,0.35)';
-                }
-
-                statusBadge = `<span style="background:${badgeBg}; color:${badgeColor}; border:1px solid ${badgeBorder}; font-size:0.75rem; padding:3px 8px; border-radius:12px; font-weight:700;">${t.outcome_badge}</span>`;
-            } else if (t.status === 'concluida') {
-                statusBadge = '<span style="background:rgba(37,211,102,0.15); color:#25D366; border:1px solid rgba(37,211,102,0.3); font-size:0.75rem; padding:3px 8px; border-radius:12px; font-weight:700;"><i class="fa-solid fa-check"></i> Concluída</span>';
+            if (t.status === 'concluida') {
+                statusBadge = '<span style="background:rgba(37,211,102,0.15); color:#25D366; border:1px solid rgba(37,211,102,0.3); font-size:0.75rem; padding:3px 8px; border-radius:12px; font-weight:700;"><i class="fa-solid fa-check"></i> Enviada / Concluída</span>';
             } else if (t.status === 'executando') {
-                statusBadge = '<span style="background:rgba(52,152,219,0.15); color:#3498db; border:1px solid rgba(52,152,219,0.3); font-size:0.75rem; padding:3px 8px; border-radius:12px; font-weight:700;"><i class="fa-solid fa-spinner fa-spin"></i> Executando...</span>';
+                statusBadge = '<span style="background:rgba(52,152,219,0.15); color:#3498db; border:1px solid rgba(52,152,219,0.3); font-size:0.75rem; padding:3px 8px; border-radius:12px; font-weight:700;"><i class="fa-solid fa-spinner fa-spin"></i> Enviando...</span>';
             } else if (t.status === 'falha') {
                 statusBadge = '<span style="background:rgba(231,76,60,0.15); color:#e74c3c; border:1px solid rgba(231,76,60,0.3); font-size:0.75rem; padding:3px 8px; border-radius:12px; font-weight:700;"><i class="fa-solid fa-triangle-exclamation"></i> Falha</span>';
             } else {
@@ -8878,13 +8850,10 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
                 : '<span style="color:var(--text-muted); font-size:0.75rem;">-</span>';
 
             let actionsHtml = '';
-            if (t.status !== 'pendente' && t.status !== 'executando') {
+            if (t.status === 'concluida') {
                 actionsHtml = `
-                    <button class="action-btn" onclick="window.viewMariaTaskReport('${t.id}')" style="background:rgba(37,211,102,0.15); color:#25D366; border:1px solid rgba(37,211,102,0.3); font-size:0.78rem; padding:4px 10px; border-radius:6px; font-weight:700;">
-                        <i class="fa-solid fa-file-lines"></i> Relatório
-                    </button>
-                    <button class="action-btn" onclick="window.syncMariaTaskOutcome('${t.id}')" style="background:rgba(52,152,219,0.15); color:#3498db; border:1px solid rgba(52,152,219,0.3); font-size:0.78rem; padding:4px 8px; border-radius:6px;" title="Sincronizar Resposta">
-                        <i class="fa-solid fa-rotate"></i>
+                    <button class="action-btn" onclick="window.viewMariaSentMessage('${t.id}')" style="background:rgba(37,211,102,0.12); color:#25D366; border:1px solid rgba(37,211,102,0.3); font-size:0.78rem; padding:4px 10px; border-radius:6px; font-weight:700;">
+                        <i class="fa-solid fa-message"></i> Ver Mensagem
                     </button>
                     <button class="action-btn" onclick="window.deleteMariaTask('${t.id}')" style="background:rgba(231,76,60,0.12); color:#e74c3c; border:1px solid rgba(231,76,60,0.3); font-size:0.78rem; padding:4px 8px; border-radius:6px;" title="Excluir">
                         <i class="fa-solid fa-trash"></i>
@@ -8901,17 +8870,12 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
                 `;
             }
 
-            const conclusionSnippet = t.conclusion_summary 
-                ? `<div style="font-size: 0.75rem; color: #25D366; margin-top: 3px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"><i class="fa-solid fa-check-double"></i> ${t.conclusion_summary}</div>` 
-                : '';
-
             return `
                 <tr>
                     <td style="font-size:0.85rem; font-weight:600;">${schedDate}</td>
                     <td>
                         <div style="font-weight:700; font-size:0.88rem; color:var(--text-primary);">${t.target_name}</div>
                         <div style="font-size:0.75rem; color:var(--text-muted);">${t.target_phone}</div>
-                        ${conclusionSnippet}
                     </td>
                     <td>
                         <span style="background:${meta.bg}; color:${meta.color}; border:1px solid ${meta.border}; font-size:0.75rem; padding:3px 10px; border-radius:12px; font-weight:700;">
@@ -8959,13 +8923,9 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
             const data = await resp.json();
             if (!resp.ok) throw new Error(data.error || 'Falha ao executar missão.');
 
-            alert(`✅ Missão executada com sucesso!\n\nA Maria Cecília redigiu e enviou a mensagem para ${task.target_name} no WhatsApp.`);
+            alert(`✅ Mensagem enviada para ${task.target_name}!\n\nA Maria Cecília já está ativa e responderá normalmente caso o cliente entre em contato.`);
 
             await window.loadMariaTasks();
-
-            if (data.activity_report) {
-                window.viewMariaTaskReport(taskId);
-            }
 
         } catch (err) {
             console.error('[AGENDA] Erro ao disparar missão:', err);
@@ -8993,7 +8953,7 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
         }
     };
 
-    window.viewMariaTaskReport = function(taskId) {
+    window.viewMariaSentMessage = function(taskId) {
         const task = _agendaTasks.find(t => t.id === taskId);
         if (!task) return;
 
@@ -9001,97 +8961,29 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
         const body = document.getElementById('modal-maria-task-report-body');
         if (!modal || !body) return;
 
-        let outcomeHeader = '';
-        if (task.outcome_badge) {
-            outcomeHeader = `
-                <div style="background: rgba(37,211,102,0.12); border: 1px solid rgba(37,211,102,0.35); border-radius: 8px; padding: 14px 16px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
-                    <div>
-                        <div style="font-size: 0.75rem; text-transform: uppercase; font-weight: 800; color: var(--text-muted); letter-spacing: 0.5px;">Desfecho da Missão</div>
-                        <div style="font-size: 1.1rem; font-weight: 800; color: #25D366; margin-top: 2px;">${task.outcome_badge}</div>
-                    </div>
-                    <button class="action-btn" onclick="window.syncMariaTaskOutcome('${task.id}')" style="background: rgba(52,152,219,0.2); color: #3498db; border: 1px solid rgba(52,152,219,0.4); padding: 6px 14px; font-size: 0.8rem; border-radius: 6px; font-weight: 700;">
-                        <i class="fa-solid fa-rotate"></i> Reanalisar Diálogo
-                    </button>
+        const sentDate = task.executed_at ? new Date(task.executed_at).toLocaleString('pt-BR') : '-';
+
+        body.innerHTML = `
+            <div style="background: rgba(37,211,102,0.08); border: 1px solid rgba(37,211,102,0.25); border-radius: 8px; padding: 16px; margin-bottom: 14px;">
+                <div style="font-size: 0.95rem; font-weight: 700; color: #25D366; margin-bottom: 8px;">
+                    <i class="fa-solid fa-paper-plane"></i> Mensagem Enviada pela Maria Cecília
                 </div>
-            `;
-        }
-
-        let conclusionSection = '';
-        if (task.conclusion_summary || task.client_response || task.action_required) {
-            conclusionSection = `
-                <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-                    <div style="font-size: 0.88rem; font-weight: 800; color: #f39c12; margin-bottom: 12px; display: flex; align-items: center; gap: 6px;">
-                        <i class="fa-solid fa-bullseye"></i> Conclusão & Resultado do Atendimento
-                    </div>
-                    
-                    ${task.conclusion_summary ? `
-                        <div style="margin-bottom: 12px;">
-                            <div style="font-size: 0.78rem; font-weight: 700; color: var(--text-secondary);">📌 Resumo da Conclusão:</div>
-                            <div style="font-size: 0.92rem; font-weight: 600; color: var(--text-primary); margin-top: 3px;">${task.conclusion_summary}</div>
-                        </div>
-                    ` : ''}
-
-                    ${task.client_response ? `
-                        <div style="margin-bottom: 12px; background: rgba(0,0,0,0.25); border-left: 3px solid #25D366; padding: 10px 14px; border-radius: 4px;">
-                            <div style="font-size: 0.75rem; font-weight: 700; color: #25D366;">🗣️ Resposta do Contato no WhatsApp:</div>
-                            <div style="font-size: 0.88rem; font-style: italic; color: var(--text-primary); margin-top: 3px;">"${task.client_response}"</div>
-                        </div>
-                    ` : ''}
-
-                    ${task.action_required ? `
-                        <div style="background: rgba(230,126,34,0.12); border: 1px solid rgba(230,126,34,0.3); padding: 10px 14px; border-radius: 6px;">
-                            <div style="font-size: 0.75rem; font-weight: 800; color: #e67e22;">⚠️ Próximo Passo Recomendado para o Arnaldo:</div>
-                            <div style="font-size: 0.88rem; font-weight: 600; color: var(--text-primary); margin-top: 3px;">${task.action_required}</div>
-                        </div>
-                    ` : ''}
+                <p style="font-size:0.85rem; margin-bottom:4px;"><strong>Destinatário:</strong> ${task.target_name} (${task.target_phone})</p>
+                <p style="font-size:0.85rem; margin-bottom:4px;"><strong>Missão:</strong> ${task.event_label}</p>
+                <p style="font-size:0.85rem; margin-bottom:12px;"><strong>Enviado em:</strong> ${sentDate}</p>
+                
+                <div style="background: rgba(0,0,0,0.3); border-radius: 6px; padding: 12px; font-size: 0.9rem; line-height: 1.5; color: var(--text-primary);">
+                    "${task.ai_generated_message || 'Mensagem enviada com sucesso no WhatsApp.'}"
                 </div>
-            `;
-        }
 
-        let reportText = '';
-        if (task.activity_report) {
-            reportText = `
-                <div style="background: rgba(0,0,0,0.2); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px;">
-                    <div style="font-size: 0.8rem; font-weight: 700; color: var(--text-muted); margin-bottom: 8px;">Dossiê Completo:</div>
-                    <div style="white-space: pre-wrap; line-height: 1.6; font-size: 0.88rem;">${task.activity_report.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}</div>
-                </div>
-            `;
-        }
-
-        body.innerHTML = outcomeHeader + conclusionSection + reportText;
+                ${task.file_name ? `<div style="margin-top:10px; font-size:0.8rem; color:#3498db;"><i class="fa-solid fa-paperclip"></i> Anexo enviado: ${task.file_name}</div>` : ''}
+            </div>
+            <p style="font-size:0.8rem; color:var(--text-muted); text-align:center;">A Maria Cecília continua atendendo normalmente caso o cliente responda no WhatsApp.</p>
+        `;
         modal.style.display = 'flex';
     };
 
-    window.syncMariaTaskOutcome = async function(taskId) {
-        const task = _agendaTasks.find(t => t.id === taskId);
-        if (!task) return;
-
-        const SUPABASE_URL = ((typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_URL) ? import.meta.env.VITE_SUPABASE_URL : 'https://tmpwmtpdxcvulglkahcg.supabase.co').trim();
-        const SUPABASE_ANON_KEY = ((typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_ANON_KEY) ? import.meta.env.VITE_SUPABASE_ANON_KEY : 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRtcHdtdHBkeGN2dWxnbGthaGNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwNTg0MDMsImV4cCI6MjA4OTYzNDQwM30.GRcj8PoXCMcWPEN5maZYD3kxndqpWfcegryLYANgggE').trim();
-
-        try {
-            const resp = await fetch(`${SUPABASE_URL}/functions/v1/assistant-router`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-                },
-                body: JSON.stringify({
-                    action: 'sync_maria_task_report',
-                    task: task,
-                    record_id: task._recordId
-                })
-            });
-
-            const data = await resp.json();
-            if (data.task) {
-                await window.loadMariaTasks();
-                window.viewMariaTaskReport(taskId);
-            }
-        } catch (e) {
-            console.error('[SYNC OUTCOME ERROR]:', e);
-        }
-    };
+    window.viewMariaTaskReport = window.viewMariaSentMessage;
 
     window.closeMariaTaskReportModal = function() {
         const modal = document.getElementById('modal-maria-task-report');
