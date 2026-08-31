@@ -738,6 +738,13 @@ DIRETRIZES OBRIGATÓRIAS:
           userMessage = "";
       }
 
+      const phoneVariants = [
+          remoteJid,
+          cleanPhone,
+          `55${cleanPhone.replace(/^55/, '')}`,
+          cleanPhone.replace(/^55/, '')
+      ].filter(Boolean);
+
       // CONTROLE DE PAUSA E COMANDOS DO GESTOR (Atendimento Humano Individual)
       const isMessageFromMe = payload?.message?.fromMe === true || payload?.fromMe === true || payload?.data?.key?.fromMe === true || payload?.data?.fromMe === true || msgNode?.fromMe === true;
       const sentByApi = payload?.message?.wasSentByApi === true || payload?.data?.message?.wasSentByApi === true || payload?.wasSentByApi === true;
@@ -773,7 +780,7 @@ DIRETRIZES OBRIGATÓRIAS:
               });
 
               // 2. Pausa a IA para que a Maria não responda por cima do atendimento humano
-              const { data: currentPause } = await supabase.from('agent_memory').select('content').eq('phone', remoteJid).eq('role', 'user').in('content', ['BOT_PAUSADO', 'BOT_ATIVO']).order('created_at', { ascending: false }).limit(1);
+              const { data: currentPause } = await supabase.from('agent_memory').select('content').in('phone', phoneVariants).in('content', ['BOT_PAUSADO', 'BOT_ATIVO']).order('created_at', { ascending: false }).limit(1);
               if (!currentPause || currentPause.length === 0 || currentPause[0].content !== 'BOT_PAUSADO') {
                   await supabase.from('agent_memory').insert({ phone: remoteJid, role: 'user', content: 'BOT_PAUSADO' });
                   console.log(`[ATENDIMENTO HUMANO] Pausa Automática ativada no JID: ${remoteJid}`);
@@ -1049,26 +1056,45 @@ DIRETRIZES OBRIGATÓRIAS:
       }
       const myId = insertedData.id;
 
-      // 2. VERIFICAÇÃO DE PAUSA GLOBAL MESTRE (Mensagem gravada no CRM, mas IA em silêncio)
-      const { data: globalCfg } = await supabase.from('agent_memory').select('content').eq('phone', 'GLOBAL_CONFIG').order('created_at', {ascending: false}).limit(1);
+      // 2. VERIFICAÇÃO DE PAUSA GLOBAL MESTRE (AUTOATENDIMENTO: OFF)
+      const { data: globalCfg } = await supabase
+          .from('agent_memory')
+          .select('content')
+          .eq('phone', 'GLOBAL_CONFIG')
+          .order('created_at', { ascending: false })
+          .limit(1);
+
       if (globalCfg && globalCfg.length > 0 && globalCfg[0].content === 'GLOBAL_PAUSE') {
-          console.log(`[PAUSA GLOBAL] Mensagem registrada no chat, mas o Botão Mestre está OFF. Robô em silêncio.`);
+          console.log(`[PAUSA GLOBAL ATIVA] Autoatendimento está OFF. Mensagem registrada no chat, robô em silêncio.`);
           return;
       }
 
-      // 3. VERIFICAÇÃO DE LISTA NEGRA
+      // 3. VERIFICAÇÃO DE LISTA NEGRA E ATENDIMENTO HUMANO (PAUSA INDIVIDUAL)
+      const phoneVariants = [
+          remoteJid,
+          cleanPhone,
+          `55${cleanPhone.replace(/^55/, '')}`,
+          cleanPhone.replace(/^55/, '')
+      ].filter(Boolean);
+
       const { data: pauseState } = await supabase
           .from('agent_memory')
-          .select('content')
-          .eq('phone', remoteJid)
-          .eq('role', 'user')
-          .in('content', ['BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA'])
+          .select('content, created_at')
+          .in('phone', phoneVariants)
+          .in('content', ['BOT_PAUSADO', 'BOT_ATIVO', 'BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA'])
           .order('created_at', { ascending: false })
           .limit(1);
           
       if (pauseState && pauseState.length > 0) {
-          console.log(`[LISTA NEGRA] Mensagem registrada no chat, robô está permanentemente ignorado para ${remoteJid}.`);
-          return;
+          const state = pauseState[0].content;
+          if (state === 'BOT_IGNORAR' || state === 'AMIGO_IGNORAR' || state === 'LISTA_NEGRA') {
+              console.log(`[LISTA NEGRA] Mensagem registrada no chat, robô está permanentemente ignorado para ${remoteJid}.`);
+              return;
+          }
+          if (state === 'BOT_PAUSADO') {
+              console.log(`[ATENDIMENTO HUMANO / PAUSADO] Mensagem registrada no chat, atendimento humano em andamento para ${remoteJid}. Robô em silêncio.`);
+              return;
+          }
       }
 
       // 4. BUFFER INTELIGENTE DE DEBOUNCE (7 segundos para texto, 2s para mídia)
@@ -1085,6 +1111,35 @@ DIRETRIZES OBRIGATÓRIAS:
       if (latestTimestamp && latestTimestamp > currentCallTime) {
           console.log(`[DEBOUNCE AGREGADOR] Mensagem mais recente detectada para ${remoteJid}. Esta chamada anterior foi agregada com sucesso.`);
           return;
+      }
+
+      // 5. RE-VERIFICAÇÃO DE SEGURANÇA APÓS DEBOUNCE (Garante que se o usuário pausou durante os 7 segundos, aborta)
+      const { data: recheckGlobal } = await supabase
+          .from('agent_memory')
+          .select('content')
+          .eq('phone', 'GLOBAL_CONFIG')
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+      if (recheckGlobal && recheckGlobal.length > 0 && recheckGlobal[0].content === 'GLOBAL_PAUSE') {
+          console.log(`[PAUSA GLOBAL DETECTADA APÓS BUFFER] Autoatendimento desligado. Abortando.`);
+          return;
+      }
+
+      const { data: recheckPause } = await supabase
+          .from('agent_memory')
+          .select('content')
+          .in('phone', phoneVariants)
+          .in('content', ['BOT_PAUSADO', 'BOT_ATIVO', 'BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA'])
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+      if (recheckPause && recheckPause.length > 0) {
+          const state = recheckPause[0].content;
+          if (state === 'BOT_PAUSADO' || state === 'BOT_IGNORAR' || state === 'AMIGO_IGNORAR' || state === 'LISTA_NEGRA') {
+              console.log(`[PAUSA DETECTADA APÓS BUFFER] Status é ${state}. Abortando.`);
+              return;
+          }
       }
 
       console.log(`[LIDERANÇA ASSUMIDA] Gerando resposta consolidada e unificada para ${remoteJid}...`);
