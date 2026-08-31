@@ -7439,6 +7439,36 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
 
     // Hook into showSection router
     const _origShowSection = window.showSection;
+    let _liveChatPollTimer = null;
+    let _liveChatRealtimeChannel = null;
+
+    function startLiveChatAutoSync() {
+        if (!_liveChatPollTimer) {
+            _liveChatPollTimer = setInterval(() => {
+                const view = document.getElementById('view-mensagens');
+                if (view && view.style.display !== 'none' && !document.hidden) {
+                    window.loadLiveConversations(true);
+                }
+            }, 3500);
+        }
+
+        try {
+            const supa = getSupa();
+            if (!_liveChatRealtimeChannel && supa && typeof supa.channel === 'function') {
+                _liveChatRealtimeChannel = supa.channel('realtime_live_crm')
+                    .on('postgres_changes', { event: '*', schema: 'public', table: 'agent_memory' }, () => {
+                        const view = document.getElementById('view-mensagens');
+                        if (view && view.style.display !== 'none') {
+                            window.loadLiveConversations(true);
+                        }
+                    })
+                    .subscribe();
+            }
+        } catch (e) {
+            console.warn('[REALTIME] Fallback para polling automático:', e);
+        }
+    }
+
     window.showSection = function(targetId) {
         _origShowSection(targetId);
         if (targetId === 'view-mensagens') {
@@ -7450,6 +7480,7 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
             window.loadMariaTasks();
             loadCampaignClients();
             loadCampaignHistory();
+            startLiveChatAutoSync();
         }
     };
 
@@ -7492,9 +7523,13 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
     // ==========================================================================
     // 💬 LIVE CRM: CONVERSAS AO VIVO (WHATSAPP INBOX)
     // ==========================================================================
-    window.loadLiveConversations = async function() {
+    window.loadLiveConversations = async function(silent = false) {
         const container = document.getElementById('live-chat-conversations-list');
         if (!container) return;
+
+        if (!silent && (!liveConversations || liveConversations.length === 0)) {
+            container.innerHTML = '<div style="text-align:center; padding:30px 10px; color:var(--text-muted); font-size:0.85rem;"><i class="fa-solid fa-spinner fa-spin" style="font-size:1.5rem; margin-bottom:8px; display:block;"></i> Carregando conversas...</div>';
+        }
 
         try {
             const supa = getSupa();
@@ -7518,7 +7553,7 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
 
             if (error) {
                 console.error('[LIVE CRM] Erro ao carregar memórias:', error);
-                container.innerHTML = `<div style="color:var(--accent-red); padding:15px; font-size:0.85rem;">Erro: ${error.message}</div>`;
+                if (!silent) container.innerHTML = `<div style="color:var(--accent-red); padding:15px; font-size:0.85rem;">Erro: ${error.message}</div>`;
                 return;
             }
 
@@ -7530,7 +7565,7 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
             // Agrupar por telefone
             const grouped = {};
             memories.forEach(m => {
-                if (!m.phone || m.phone.startsWith('LOCK_') || m.phone === 'GLOBAL_CONFIG' || m.phone === 'DEBUG_AUDIO' || m.phone.includes('@g.us')) return;
+                if (!m.phone || m.phone.startsWith('LOCK_') || m.phone === 'GLOBAL_CONFIG' || m.phone === 'DEBUG_AUDIO' || m.phone === 'MARIA_TASK' || m.phone.includes('@g.us')) return;
                 let cleanPhone = m.phone.replace(/\D/g, '');
                 if (!cleanPhone || cleanPhone.length < 8) return;
                 if (!cleanPhone.startsWith('55') && cleanPhone.length >= 10 && cleanPhone.length <= 11) {
@@ -7587,6 +7622,9 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
                 return conv;
             });
 
+            // Ordenar conversas por data da última mensagem (mais recente no topo)
+            convList.sort((a, b) => new Date(b.lastTime || 0).getTime() - new Date(a.lastTime || 0).getTime());
+
             // Atualiza badge de blacklist
             const badgeEl = document.getElementById('count-blacklist');
             if (badgeEl) badgeEl.textContent = blacklistCount;
@@ -7594,9 +7632,9 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
             liveConversations = convList;
             renderLiveConversationsList();
 
-            // Se tem conversa selecionada, recarrega
+            // Se tem conversa selecionada, recarrega silenciosamente
             if (currentLivePhone) {
-                window.selectLiveConversation(currentLivePhone);
+                window.selectLiveConversation(currentLivePhone, true);
             }
 
         } catch (err) {
@@ -7663,7 +7701,7 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
         renderLiveConversationsList();
     };
 
-    window.selectLiveConversation = async function(phone) {
+    window.selectLiveConversation = async function(phone, silent = false) {
         currentLivePhone = phone;
         renderLiveConversationsList();
 
@@ -7728,10 +7766,10 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
             }
         }
 
-        // 1. Renderização Instantânea (Zero Delay / Cache em Memória)
-        if (conv && conv.messages && conv.messages.length > 0) {
-            renderLiveMessageStream(conv.messages.slice().reverse(), clientName, stream);
-        } else {
+        // 1. Renderização Instantânea com Cache em Memória
+        if (conv && conv.messages && conv.messages.length > 0 && !silent) {
+            renderLiveMessageStream([...conv.messages].reverse(), clientName, stream);
+        } else if (!silent) {
             stream.innerHTML = '<div style="text-align:center; padding:30px; color:var(--text-muted);"><i class="fa-solid fa-spinner fa-spin"></i> Carregando mensagens...</div>';
         }
 
@@ -7740,27 +7778,28 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
 
             // Normaliza variações de telefone (com 55, sem 55, com @s.whatsapp.net)
             const cleanDigits = phone.replace(/\D/g, '');
+            const without55 = cleanDigits.replace(/^55/, '');
+            const with55 = `55${without55}`;
             const phoneVariants = [
                 phone,
                 cleanDigits,
-                `55${cleanDigits}`,
-                cleanDigits.replace(/^55/, ''),
+                with55,
+                without55,
                 `${cleanDigits}@s.whatsapp.net`,
-                `55${cleanDigits.replace(/^55/, '')}@s.whatsapp.net`
+                `${with55}@s.whatsapp.net`,
+                `${without55}@s.whatsapp.net`
             ];
             const uniquePhones = [...new Set(phoneVariants.filter(Boolean))];
 
-            // Busca as últimas 50 mensagens mais recentes no banco
+            // Busca as últimas 60 mensagens mais recentes no banco
             const { data: rawMessages, error } = await supa.from('agent_memory')
                 .select('*')
                 .in('phone', uniquePhones)
                 .order('created_at', { ascending: false })
-                .limit(50);
+                .limit(60);
 
             if (error) {
-                if (!conv || !conv.messages || conv.messages.length === 0) {
-                    stream.innerHTML = `<div style="color:var(--accent-red); padding:15px;">Erro ao carregar mensagens: ${error.message}</div>`;
-                }
+                console.error('[LIVE CRM] Erro ao carregar mensagens:', error);
                 return;
             }
 
@@ -7771,8 +7810,9 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
                 return;
             }
 
-            // Atualiza o stream com a lista mais recente do banco
-            renderLiveMessageStream(rawMessages.reverse(), clientName, stream);
+            // Atualiza o stream com a lista mais recente do banco (sem mutar)
+            const orderedMessages = [...rawMessages].reverse();
+            renderLiveMessageStream(orderedMessages, clientName, stream);
 
         } catch (err) {
             console.error('[LIVE CRM] Erro ao carregar mensagens:', err);
