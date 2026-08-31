@@ -11,8 +11,15 @@ const genAI = new GoogleGenerativeAI(Deno.env.get('GEMINI_API_KEY') ?? '');
 const SYSTEM_PROMPTS: Record<string, string> = {
   maria: `
 CONTEXTO CORPORATIVO
-Apresente-se rapidamente como Maria Cecília da Arnaldo Trentin Serviços. Seja muito acolhedora e cordial.
-O dono da empresa se chama Arnaldo. Se pedirem para falar com ele, proteja o tempo dele: diga de forma muito educada que ele está em atendimento no momento, mas afirme tranquilamente que você vai passar as informações e ele retornará em breve.
+Apresente-se cordialmente como Maria Cecília da Arnaldo Trentin Serviços (Engenharia, Climatização e Refrigeração). Diga apenas que você faz parte da equipe da empresa (NUNCA mencione cargos como "secretária executiva", "assistente de operações" ou títulos formais). Seja muito simpática, acolhedora, ágil, prestativa e natural.
+O responsável técnico e dono da empresa se chama Arnaldo Trentin. Se pedirem para falar com ele, proteja o tempo dele: diga de forma muito educada que ele está em atendimento/em campo no momento, mas afirme com segurança que você vai passar todas as informações e ele retornará em breve.
+
+LEITURA DE ORDENS DE SERVIÇO (OS), AGENDAMENTOS E PROPOSTAS:
+- Você tem acesso direto aos dados em tempo real da empresa injetados abaixo na seção <DADOS_DO_BANCO>.
+- Se o cliente perguntar sobre Ordem de Serviço (OS), agendamento de visita técnica, status do serviço ou proposta de orçamento:
+  * Consulte as informações em <DADOS_DO_BANCO> e responda com clareza, confirmando datas, serviços e status!
+  * Exemplo: "Consultei aqui no sistema e sua visita técnica para manutenção do ar condicionado está agendada para amanhã às 14h com nossa equipe."
+  * Se não houver OS em aberto para o cliente, informe com gentileza e pergunte como pode ajudá-lo a abrir um chamado ou agendamento.
 
 ATENDENDO UM NOVO CONTATO (CLIENTE NOVO):
 - Pergunte se é a primeira vez que a pessoa fala com a empresa e se ela já conhece os serviços.
@@ -25,8 +32,8 @@ ATENDENDO UM NOVO CONTATO (CLIENTE NOVO):
 - Informe que os Orçamentos são entregues dentro de 48 horas e que a equipe técnica entrará em contato!
 
 ATENDENDO QUEM JÁ É CLIENTE:
-- Se você tiver o Contexto do Cliente e o Nome dele abaixo na TAG <DADOS_DO_BANCO>, seja hiper pessoal! Chame-o pelo nome com entusiasmo! E veja se ele tem Agendamentos. Se perguntar "Tudo certo pra amanhã?", use sua base de dados injetada.
-- Se você NÃO souber o nome dele, peça educadamente e explique que você ainda é nova e não tem acesso ao histórico de anos passados.
+- Se você tiver o Contexto do Cliente e o Nome dele abaixo na TAG <DADOS_DO_BANCO>, seja hiper pessoal! Chame-o pelo nome com entusiasmo! E veja se ele tem Agendamentos ou OS em andamento. Se perguntar "Tudo certo pra amanhã?", use sua base de dados injetada.
+- Se você NÃO souber o nome dele, peça educadamente.
 - Se o cliente reclamar de GARANTIA: Peça DESCULPAS imediatamente. Demonstre muita urgência, acolha o cliente e pergunte qual é exatamente o problema para que você direcione o atendimento o mais rápido possível!
 
 FALANDO COM PRESTADORES TÉCNICOS SÊNIOS (FRANCISCO E MAXWELL):
@@ -96,6 +103,7 @@ declare const EdgeRuntime: any;
 // Edge Functions mantêm estado global se o mesmo servidor receber a requisição simultânea.
 const processingLocks = new Set<string>();
 const runningAgendaTaskLocks = new Set<string>();
+const userDebounceTimestamps = new Map<string, number>();
 
 serve(async (req) => {
   // CORS headers para chamadas do frontend (painel web)
@@ -612,32 +620,102 @@ DIRETRIZES OBRIGATÓRIAS:
       }
       
       // === CONSULTA DE CONTEXTO E IDENTIDADE (BANCO DE DADOS EM TEMPO REAL) ===
-      let injectedContext = "Status deste Número: Desconhecido (Não cadastrado). TRATE COMO UM NOVO CONTATO / POSSÍVEL NOVO CLIENTE.";
       let cleanPhone = remoteJid.includes('@') ? remoteJid.split('@')[0] : remoteJid;
       cleanPhone = cleanPhone.replace(/\D/g, '');
+      const last8Digits = cleanPhone.slice(-8);
+
+      let injectedContext = "Status deste Número: Desconhecido (Não cadastrado). TRATE COMO UM NOVO CONTATO / POSSÍVEL NOVO CLIENTE.";
       
-      if (cleanPhone.includes("5511954598321")) {
+      if (cleanPhone.includes("5511954598321") || cleanPhone.includes("11954598321")) {
           injectedContext = "Status deste Número: Este é o Sr Francisco (Técnico e Prestador de Serviço da Equipe). Seja direta. Colete o relatório que ele enviou.";
-      } else if (cleanPhone.includes("5511913688307")) {
+      } else if (cleanPhone.includes("5511913688307") || cleanPhone.includes("11913688307")) {
           injectedContext = "Status deste Número: Este é o Sr Maxwell (Técnico e Prestador de Serviço da Equipe). Seja direta. Colete o relatório que ele enviou.";
       } else {
           try {
-              const { data: dbCliente } = await supabase.from('clientes').select('id, nome_cliente').eq('whatsapp', cleanPhone).maybeSingle();
-              if (dbCliente) {
-                  injectedContext = `Status deste Número: Já CADASTRADO. O nome deste cliente é: ${dbCliente.nome_cliente}. TRATE ELE PELO NOME AGORA MESMO. Cientes Antigos merecem atenção redobrada!\n\n` + 
-                                    `-- Situação de Ordens de Serviço (Agendamentos e Obras) Ativas Deste Cliente:\n`;
-                  
-                  const { data: dbOS } = await supabase.from('ordens_servico').select('id_os, descricao_servico, data_agendamento, status_os').eq('cliente_id', dbCliente.id).neq('status_os', 'Finalizada').order('created_at', { ascending: false }).limit(4);
+              // 1. Busca Cliente por múltiplos formatos de telefone
+              let dbCliente: any = null;
+              const { data: clientMatches } = await supabase.from('clientes')
+                  .select('id, nome_cliente, endereco_completo, documento_cpf_cnpj, relato_necessidade, whatsapp')
+                  .or(`whatsapp.ilike.%${last8Digits}%,whatsapp.eq.${cleanPhone}`)
+                  .limit(1);
+
+              if (clientMatches && clientMatches.length > 0) {
+                  dbCliente = clientMatches[0];
+              }
+
+              let osText = "";
+              let propostasText = "";
+              let agendaText = "";
+
+              // 2. Busca Ordens de Serviço (OS) ativas e recentes
+              if (dbCliente?.id) {
+                  const { data: dbOS } = await supabase.from('ordens_servico')
+                      .select('id_os, descricao_servico, data_agendamento, status_os, valor_total, observacoes, created_at')
+                      .eq('cliente_id', dbCliente.id)
+                      .order('created_at', { ascending: false })
+                      .limit(5);
+
                   if (dbOS && dbOS.length > 0) {
-                      for (const os of dbOS) {
-                          injectedContext += `- OS Code#${os.id_os} | Serviço: ${os.descricao_servico} | Agendado para data/hora: ${os.data_agendamento} | Status atual da O.S no sistema: ${os.status_os}\n`;
-                      }
-                  } else {
-                      injectedContext += "Nenhuma Ordem de Serviço ou Agendamento ativo em aberto para este cliente no momento.";
+                      osText = dbOS.map((os: any) => 
+                          `- OS #${os.id_os} | Serviço: ${os.descricao_servico || 'Serviço Geral'} | Data/Hora Agendada: ${os.data_agendamento ? new Date(os.data_agendamento).toLocaleString('pt-BR') : 'A definir'} | Status: ${os.status_os || 'Aberta'}${os.valor_total ? ` | Valor: R$ ${os.valor_total}` : ''}${os.observacoes ? ` | Obs: ${os.observacoes}` : ''}`
+                      ).join('\n');
+                  }
+
+                  // 3. Busca Propostas / Orçamentos
+                  const { data: dbProp } = await supabase.from('propostas')
+                      .select('id, servico_tipo, valor_estimado, status, data_proposta, fornecimento_materiais')
+                      .eq('cliente_id', dbCliente.id)
+                      .order('created_at', { ascending: false })
+                      .limit(4);
+
+                  if (dbProp && dbProp.length > 0) {
+                      propostasText = dbProp.map((p: any) =>
+                          `- Proposta/Orçamento: ${p.servico_tipo || 'Geral'} | Valor: R$ ${p.valor_estimado || 0} | Status: ${p.status || 'Pendente'} | Fornecimento: ${p.fornecimento_materiais || 'Padrão'}`
+                      ).join('\n');
                   }
               }
+
+              // 4. Busca Agendamentos e Missões da Maria
+              const { data: dbAgenda } = await supabase.from('agent_memory')
+                  .select('content, created_at')
+                  .eq('phone', 'MARIA_TASK')
+                  .like('content', `%"target_phone":%${last8Digits}%`)
+                  .order('created_at', { ascending: false })
+                  .limit(3);
+
+              if (dbAgenda && dbAgenda.length > 0) {
+                  const tasks = dbAgenda.map((a: any) => {
+                      try {
+                          const t = JSON.parse(a.content);
+                          const sched = t.scheduled_for ? new Date(t.scheduled_for).toLocaleString('pt-BR') : 'Imediato';
+                          return `- Missão Agendada: ${t.event_label || t.event_type} para ${sched} | Status: ${t.status} | Instruções: "${t.instructions}"`;
+                      } catch {
+                          return null;
+                      }
+                  }).filter(Boolean);
+                  if (tasks.length > 0) agendaText = tasks.join('\n');
+              }
+
+              // Monta contexto completo
+              if (dbCliente) {
+                  injectedContext = `Status deste Número: CADASTRADO NO SISTEMA.\n` +
+                      `Nome do Cliente: ${dbCliente.nome_cliente}\n` +
+                      `Endereço Cadastrado: ${dbCliente.endereco_completo || 'Não informado'}\n` +
+                      `CPF/CNPJ: ${dbCliente.documento_cpf_cnpj || 'Não informado'}\n\n` +
+                      `📋 SITUAÇÃO DE ORDENS DE SERVIÇO (OS) DESTE CLIENTE:\n` +
+                      (osText || "Nenhuma Ordem de Serviço em aberto no momento.") + `\n\n` +
+                      `📑 PROPOSTAS E ORÇAMENTOS RECENTES:\n` +
+                      (propostasText || "Nenhuma proposta recente.") + `\n\n` +
+                      `📅 AGENDAMENTOS NA AGENDA DA MARIA:\n` +
+                      (agendaText || "Nenhum agendamento pendente.");
+              } else {
+                  injectedContext = `Status deste Número: Novo Contato / Cliente em Prospecção (Não cadastrado na tabela de clientes).\n` +
+                      (agendaText ? `📅 AGENDAMENTOS NA AGENDA DA MARIA:\n${agendaText}\n` : "") +
+                      `TRATE COM TOTAL ACOLHIMENTO E COLETE NOME, ENDEREÇO E DETALHES DO SERVIÇO SE ELE QUISER UM ATENDIMENTO/ORÇAMENTO.`;
+              }
+
           } catch(dbErr) {
-              console.error("Falha ao identificar cliente:", dbErr);
+              console.error("Falha ao identificar cliente e OS:", dbErr);
           }
       }
       
@@ -743,29 +821,6 @@ DIRETRIZES OBRIGATÓRIAS:
           }
           // Grava o lock em phone separado para não aparecer na conversa
           await supabase.from('agent_memory').insert({ phone: lockPhone, role: 'user', content: lockContent });
-      }
-
-      // 4. Deduplicação por Conteúdo de Texto Idêntico nos últimos 15 segundos
-      if (userMessage && userMessage.trim().length > 0) {
-          const fifteenSecsAgo = new Date(Date.now() - 15000).toISOString();
-          const { data: recentSameText } = await supabase
-              .from('agent_memory')
-              .select('id, content')
-              .eq('phone', remoteJid)
-              .eq('role', 'user')
-              .gte('created_at', fifteenSecsAgo)
-              .limit(5);
-
-          const cleanUserText = userMessage.trim().toLowerCase();
-          const isDuplicateText = (recentSameText || []).some(m => {
-              const stored = (m.content || '').toLowerCase();
-              return stored.includes(cleanUserText) && cleanUserText.length > 2;
-          });
-
-          if (isDuplicateText) {
-              console.log(`[DEDUPLICADOR TEXTO] Mensagem duplicada recebida em menos de 15s para ${remoteJid}. Abortando.`);
-              return;
-          }
       }
 
       console.log(`[DIAG] msgType=${msgType} | hasAudio=${hasAudio} | hasImage=${hasImage} | hasMedia=${hasMedia} | userMessage='${userMessage}' | messageId='${messageId}' | msgNodeKeys=${Object.keys(msgNode||{}).join(',')}`);
@@ -965,8 +1020,8 @@ DIRETRIZES OBRIGATÓRIAS:
       });
 
       // =========================================================================
-      // DEFESA SUPREMA CONTRA CONCORRÊNCIA E REPETIÇÃO (SMART DEBOUNCE BUFFER)
-      // Agrupa mensagens sequenciais do cliente e evita respostas duplicadas.
+      // DEFESA SUPREMA CONTRA FRAGMENTAÇÃO DE MENSAGENS (SMART AGGREGATOR BUFFER)
+      // Agrupa mensagens enviadas em partes pelo cliente e responde com 1 única resposta completa!
       // =========================================================================
 
       const msgIdTag = messageId ? `[MSG_ID:${messageId}] ` : '';
@@ -1001,54 +1056,38 @@ DIRETRIZES OBRIGATÓRIAS:
           return;
       }
 
-      // 3. VERIFICAÇÃO DE LISTA NEGRA E PAUSA TÉCNICA (Mensagem gravada no CRM para atendimento humano)
+      // 3. VERIFICAÇÃO DE LISTA NEGRA
       const { data: pauseState } = await supabase
           .from('agent_memory')
           .select('content')
           .eq('phone', remoteJid)
           .eq('role', 'user')
-          .in('content', ['BOT_PAUSADO', 'BOT_ATIVO', 'BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA'])
+          .in('content', ['BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA'])
           .order('created_at', { ascending: false })
           .limit(1);
           
       if (pauseState && pauseState.length > 0) {
-          const state = pauseState[0].content;
-          if (state === 'BOT_IGNORAR' || state === 'AMIGO_IGNORAR' || state === 'LISTA_NEGRA') {
-              console.log(`[LISTA NEGRA] Mensagem registrada no chat, robô está permanentemente ignorado para ${remoteJid}.`);
-              return;
-          }
-          if (state === 'BOT_PAUSADO') {
-              console.log(`[PAUSADO] Mensagem registrada no chat, atendimento humano em andamento para ${remoteJid}.`);
-              return;
-          }
-      }
-
-      // 4. Buffer de Debounce (500ms para mídia, 1500ms para texto)
-      if (hasMedia) {
-          console.log(`[DEBOUNCE CURTO] Mídia detectada, aguardando 500ms para deduplicar webhooks...`);
-          await new Promise(r => setTimeout(r, 500));
-      } else {
-          console.log(`[DEBOUNCE INICIADO] Aguardando 1500ms para mensagens adicionais de ${remoteJid}...`);
-          await new Promise(r => setTimeout(r, 1500));
-      }
-
-      // 5. Eleição de Liderança por Telefone:
-      // Verifica se houve alguma mensagem de usuário mais recente para este MESMO telefone
-      const { data: latestUserMsg } = await supabase.from('agent_memory')
-          .select('id, created_at')
-          .eq('phone', remoteJid)
-          .eq('role', 'user')
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .single();
-
-      // Se existir uma mensagem mais nova que a minha, este processo aborta (a mais recente responderá tudo junto)
-      if (latestUserMsg && latestUserMsg.id !== myId) {
-          console.log(`[DEBOUNCE ABORTADO] Mensagem mais recente detectada para ${remoteJid} (ID: ${latestUserMsg.id} vs MyID: ${myId}). Processo anterior finalizado sem duplicar resposta.`);
+          console.log(`[LISTA NEGRA] Mensagem registrada no chat, robô está permanentemente ignorado para ${remoteJid}.`);
           return;
       }
 
-      console.log(`[LIDERANÇA ASSUMIDA] Processando atendimento consolidado para ${remoteJid}...`);
+      // 4. BUFFER INTELIGENTE DE DEBOUNCE (7 segundos para texto, 2s para mídia)
+      // Permite que o cliente termine de enviar pensamentos divididos em 2 ou mais mensagens
+      const currentCallTime = Date.now();
+      userDebounceTimestamps.set(remoteJid, currentCallTime);
+
+      const waitTime = hasMedia ? 2000 : 7000;
+      console.log(`[DEBOUNCE AGREGADOR] Aguardando ${waitTime}ms para agregar mensagens adicionais de ${remoteJid}...`);
+      await new Promise(r => setTimeout(r, waitTime));
+
+      // Se o cliente mandou mais mensagens durante a espera, a chamada mais nova assume e responde tudo junto
+      const latestTimestamp = userDebounceTimestamps.get(remoteJid);
+      if (latestTimestamp && latestTimestamp > currentCallTime) {
+          console.log(`[DEBOUNCE AGREGADOR] Mensagem mais recente detectada para ${remoteJid}. Esta chamada anterior foi agregada com sucesso.`);
+          return;
+      }
+
+      console.log(`[LIDERANÇA ASSUMIDA] Gerando resposta consolidada e unificada para ${remoteJid}...`);
 
       // 4. Busca Histórico REAL no Banco
       const { data: historyData } = await supabase
