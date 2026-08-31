@@ -1070,13 +1070,6 @@ DIRETRIZES OBRIGATÓRIAS:
       }
 
       // 3. VERIFICAÇÃO DE LISTA NEGRA E ATENDIMENTO HUMANO (PAUSA INDIVIDUAL)
-      const phoneVariants = [
-          remoteJid,
-          cleanPhone,
-          `55${cleanPhone.replace(/^55/, '')}`,
-          cleanPhone.replace(/^55/, '')
-      ].filter(Boolean);
-
       const { data: pauseState } = await supabase
           .from('agent_memory')
           .select('content, created_at')
