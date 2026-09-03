@@ -59,6 +59,7 @@ REGRAS FINAIS & NEGOCIAÇÃO DE VALORES:
   1. Acolha com extrema simpatia e presteza ("Com certeza! Compreendo perfeitamente sua solicitação.").
   2. Avise que vai passar imediatamente para o Arnaldo entrar em contato direto para alinhar uma condição especial com ele.
 - Nunca use jargões de robô. Não invente valores ou prazos de execução fictícios. Só cite o prazo do orçamento (48hrs).
+- REGRA ANTI-CONFUSÃO: Se no histórico houver mensagens de 'Arnaldo Trentin:', NUNCA diga ao cliente que você está conversando com o Arnaldo ou que o Arnaldo está em linha. Apenas continue atendendo com simpatia o que o cliente perguntou.
 
 --- <DADOS_DO_BANCO> ---
 [INJECT_DB_CONTEXT]
@@ -738,6 +739,12 @@ DIRETRIZES OBRIGATÓRIAS:
           userMessage = "";
       }
 
+      // Se for o próprio WhatsApp do Arnaldo (anotações próprias / teste pessoal)
+      if (remoteJid === '5511947434455' || cleanPhone === '5511947434455' || cleanPhone === '11947434455') {
+          console.log(`[ARNALDO DETECTADO] Mensagem do dono da empresa (${remoteJid}). Maria não atende o próprio dono como cliente.`);
+          return;
+      }
+
       const phoneVariants = [
           remoteJid,
           cleanPhone,
@@ -746,7 +753,13 @@ DIRETRIZES OBRIGATÓRIAS:
       ].filter(Boolean);
 
       // CONTROLE DE PAUSA E COMANDOS DO GESTOR (Atendimento Humano Individual)
-      const isMessageFromMe = payload?.message?.fromMe === true || payload?.fromMe === true || payload?.data?.key?.fromMe === true || payload?.data?.fromMe === true || msgNode?.fromMe === true;
+      const isMessageFromMe = payload?.message?.fromMe === true || 
+                              payload?.fromMe === true || 
+                              payload?.data?.key?.fromMe === true || 
+                              payload?.data?.fromMe === true || 
+                              payload?.data?.message?.key?.fromMe === true ||
+                              payload?.event?.fromMe === true ||
+                              msgNode?.fromMe === true;
       const sentByApi = payload?.message?.wasSentByApi === true || payload?.data?.message?.wasSentByApi === true || payload?.wasSentByApi === true;
       
       if (isMessageFromMe || sentByApi) {
@@ -1027,9 +1040,25 @@ DIRETRIZES OBRIGATÓRIAS:
       });
 
       // =========================================================================
-      // DEFESA SUPREMA CONTRA FRAGMENTAÇÃO DE MENSAGENS (SMART AGGREGATOR BUFFER)
+      // DEFESA SUPREMA CONTRA MENSAGENS DUPLICADAS E FRAGMENTAÇÃO
+      // (SMART DISTRIBUTED AGGREGATOR BUFFER - 18s)
       // Agrupa mensagens enviadas em partes pelo cliente e responde com 1 única resposta completa!
       // =========================================================================
+
+      // 1. DEDUPLICAÇÃO IMEDIATA DE WEBHOOKS PARALELOS COM MESMO MESSAGE_ID
+      if (messageId) {
+          const { data: existingMsg } = await supabase
+              .from('agent_memory')
+              .select('id')
+              .eq('phone', remoteJid)
+              .ilike('content', `%[MSG_ID:${messageId}]%`)
+              .limit(1);
+
+          if (existingMsg && existingMsg.length > 0) {
+              console.log(`[DEDUPLICAÇÃO SUPREMA] Webhook duplicado para MSG_ID ${messageId}. Abortando execução paralela.`);
+              return;
+          }
+      }
 
       const msgIdTag = messageId ? `[MSG_ID:${messageId}] ` : '';
       let exactUserPayload = `${msgIdTag}Mensagem do Cliente (${pushName}): ${userMessage}`;
@@ -1043,7 +1072,7 @@ DIRETRIZES OBRIGATÓRIAS:
           }
       }
 
-      // 1. O Isolate insere imediatamente a mensagem do usuário no banco (garantindo histórico em tempo real no CRM)
+      // 2. Grava a mensagem do usuário no banco (garantindo histórico em tempo real no CRM)
       const { data: insertedData, error: insertError } = await supabase.from('agent_memory').insert({
           phone: remoteJid,
           role: 'user',
@@ -1055,8 +1084,9 @@ DIRETRIZES OBRIGATÓRIAS:
           return;
       }
       const myId = insertedData.id;
+      const myCreatedAt = insertedData.created_at;
 
-      // 2. VERIFICAÇÃO DE PAUSA GLOBAL MESTRE (AUTOATENDIMENTO: OFF)
+      // 3. VERIFICAÇÃO DE PAUSA GLOBAL MESTRE (AUTOATENDIMENTO: OFF)
       const { data: globalCfg } = await supabase
           .from('agent_memory')
           .select('content')
@@ -1069,7 +1099,7 @@ DIRETRIZES OBRIGATÓRIAS:
           return;
       }
 
-      // 3. VERIFICAÇÃO DE LISTA NEGRA E ATENDIMENTO HUMANO (PAUSA INDIVIDUAL)
+      // 4. VERIFICAÇÃO DE LISTA NEGRA E ATENDIMENTO HUMANO (PAUSA INDIVIDUAL)
       const { data: pauseState } = await supabase
           .from('agent_memory')
           .select('content, created_at')
@@ -1097,23 +1127,59 @@ DIRETRIZES OBRIGATÓRIAS:
           }
       }
 
-      // 4. BUFFER INTELIGENTE DE DEBOUNCE (7 segundos para texto, 2s para mídia)
-      // Permite que o cliente termine de enviar pensamentos divididos em 2 ou mais mensagens
+      // 5. BUFFER INTELIGENTE DE DEBOUNCE (18 segundos para texto, 10s para mídia/áudio)
+      // Permite que o cliente termine de enviar pensamentos divididos em 2, 3 ou 4 mensagens consecutivas
       const currentCallTime = Date.now();
       userDebounceTimestamps.set(remoteJid, currentCallTime);
 
-      const waitTime = hasMedia ? 2000 : 7000;
+      const waitTime = hasMedia ? 10000 : 18000;
       console.log(`[DEBOUNCE AGREGADOR] Aguardando ${waitTime}ms para agregar mensagens adicionais de ${remoteJid}...`);
       await new Promise(r => setTimeout(r, waitTime));
 
-      // Se o cliente mandou mais mensagens durante a espera, a chamada mais nova assume e responde tudo junto
-      const latestTimestamp = userDebounceTimestamps.get(remoteJid);
-      if (latestTimestamp && latestTimestamp > currentCallTime) {
-          console.log(`[DEBOUNCE AGREGADOR] Mensagem mais recente detectada para ${remoteJid}. Esta chamada anterior foi agregada com sucesso.`);
+      // 6. VERIFICAÇÃO DISTRIBUÍDA NO BANCO: O cliente enviou alguma mensagem mais recente enquanto esperávamos?
+      const { data: newerUserMsgs } = await supabase
+          .from('agent_memory')
+          .select('id, created_at')
+          .eq('phone', remoteJid)
+          .eq('role', 'user')
+          .not('content', 'ilike', 'BOT_%')
+          .not('content', 'ilike', 'AMIGO_%')
+          .not('content', 'ilike', 'LISTA_%')
+          .not('content', 'ilike', 'LOCK_%')
+          .gt('created_at', myCreatedAt)
+          .limit(1);
+
+      if (newerUserMsgs && newerUserMsgs.length > 0) {
+          console.log(`[DEBOUNCE DISTRIBUÍDO] Detectada mensagem mais recente (${newerUserMsgs[0].id}) de ${remoteJid}. Esta chamada anterior cede a vez e foi agregada com sucesso.`);
           return;
       }
 
-      // 5. RE-VERIFICAÇÃO DE SEGURANÇA APÓS DEBOUNCE (Garante que se o usuário pausou durante os 7 segundos, aborta)
+      // 7. TRAVA DISTRIBUÍDA DE EXECUÇÃO ÚNICA (CROSS-ISOLATE LOCK)
+      // Garante que apenas 1 instância do servidor gere e envie a resposta ao cliente
+      const leaderLockPhone = `LEADER_${remoteJid}`;
+      const { data: recentLock } = await supabase
+          .from('agent_memory')
+          .select('id, created_at, content')
+          .eq('phone', leaderLockPhone)
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+      if (recentLock && recentLock.length > 0) {
+          const lockAge = Date.now() - new Date(recentLock[0].created_at).getTime();
+          if (lockAge < 25000) {
+              console.log(`[LOCK DISTRIBUÍDO] Outro isolate já está gerando/enviando resposta para ${remoteJid}. Abortando duplicidade.`);
+              return;
+          }
+      }
+
+      // Registra a reivindicação de liderança no banco
+      await supabase.from('agent_memory').insert({
+          phone: leaderLockPhone,
+          role: 'user',
+          content: `CLAIM_${myId}_${Date.now()}`
+      });
+
+      // 8. RE-VERIFICAÇÃO DE SEGURANÇA APÓS BUFFER (Se o usuário pausou durante os 18s)
       const { data: recheckGlobal } = await supabase
           .from('agent_memory')
           .select('content')
@@ -1145,6 +1211,23 @@ DIRETRIZES OBRIGATÓRIAS:
           }
           if (state === 'BOT_PAUSADO' && isRecentlyPaused) {
               console.log(`[PAUSA DETECTADA APÓS BUFFER] Status é BOT_PAUSADO recente. Abortando.`);
+              return;
+          }
+      }
+
+      // 9. BLINDAGEM ANTI-ATROPELO: Se Arnaldo conversou diretamente com este cliente nas últimas 2 horas
+      const { data: arnaldoRecentMsg } = await supabase
+          .from('agent_memory')
+          .select('id, created_at, content')
+          .eq('phone', remoteJid)
+          .ilike('content', '%Arnaldo Trentin:%')
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+      if (arnaldoRecentMsg && arnaldoRecentMsg.length > 0) {
+          const arnaldoMsgTime = new Date(arnaldoRecentMsg[0].created_at || 0).getTime();
+          if ((Date.now() - arnaldoMsgTime) < (2 * 60 * 60 * 1000)) { // 2 horas de proteção ativa
+              console.log(`[ANTI-ATROPELO] Arnaldo conversou diretamente com ${remoteJid} nas últimas 2h. Maria não vai responder por cima.`);
               return;
           }
       }
@@ -1339,16 +1422,12 @@ DIRETRIZES OBRIGATÓRIAS:
     }
   };
 
-  // 3. Executar Processador em Background, sem prender a Response.
-  const promise = processRequest();
-  
-  if (typeof EdgeRuntime !== 'undefined' && typeof EdgeRuntime.waitUntil === 'function') {
-      EdgeRuntime.waitUntil(promise);
-  } else {
-      // Fallback
-      promise.catch(console.error);
+  // 3. Executar Processador com ciclo de vida garantido
+  try {
+      await processRequest();
+  } catch (err) {
+      console.error("[CRITICAL] Falha em processRequest:", err);
   }
 
-  // 4. Liberação Imediata da Uazapi (Aniquila a causa raiz da duplicação/timeout)
   return new Response(JSON.stringify({ status: "OK" }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 });

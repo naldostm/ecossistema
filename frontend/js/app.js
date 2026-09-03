@@ -7565,7 +7565,7 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
             // Agrupar por telefone
             const grouped = {};
             memories.forEach(m => {
-                if (!m.phone || m.phone.startsWith('LOCK_') || m.phone === 'GLOBAL_CONFIG' || m.phone === 'DEBUG_AUDIO' || m.phone === 'MARIA_TASK' || m.phone.includes('@g.us')) return;
+                if (!m.phone || m.phone.startsWith('LOCK_') || m.phone.startsWith('LEADER_') || m.phone === 'GLOBAL_CONFIG' || m.phone === 'DEBUG_AUDIO' || m.phone === 'MARIA_TASK' || m.phone.includes('@g.us')) return;
                 let cleanPhone = m.phone.replace(/\D/g, '');
                 if (!cleanPhone || cleanPhone.length < 8) return;
                 if (!cleanPhone.startsWith('55') && cleanPhone.length >= 10 && cleanPhone.length <= 11) {
