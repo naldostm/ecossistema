@@ -296,6 +296,12 @@
                 <div class="menu-section">
                     <h3 class="menu-toggle"><i class="fa-solid fa-briefcase"></i> Comercial</h3>
                     <ul class="submenu">
+                        <li>
+                            <a href="#" class="nav-link" data-target="view-tarefas" id="nav-item-tarefas">
+                                <i class="fa-solid fa-list-check" style="color: #f1c40f;"></i> Minhas Tarefas 
+                                <span class="badge-count" id="badge-tarefas-pendentes" style="background: #e74c3c; color: #fff; border-radius: 10px; padding: 2px 7px; font-size: 0.72rem; margin-left: 6px; font-weight: 800; display: none; box-shadow: 0 0 10px rgba(231,76,60,0.5);">0</span>
+                            </a>
+                        </li>
                         <li><a href="#" class="nav-link" data-target="view-clientes"><i class="fa-solid fa-users"></i> Clientes</a></li>
                         <li><a href="#" class="nav-link" data-target="view-propostas"><i class="fa-solid fa-file-invoice-dollar"></i> Propostas & Orçamentos</a></li>
                         <li><a href="#" class="nav-link" data-target="view-mensagens"><i class="fa-brands fa-whatsapp" style="color: #25D366;"></i> Central de Mensagens</a></li>
@@ -489,6 +495,81 @@
                     </div>
                 </div>
 
+                <!-- VIEW: MINHAS TAREFAS & SOLICITAÇÕES DO ARNALDO (GERADAS PELA MARIA CECÍLIA) -->
+                <div id="view-tarefas" class="view-page" style="display:none; flex-direction: column; width: 100%;">
+                    <!-- HEADER DA VIEW -->
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px;">
+                        <div>
+                            <h2 style="font-size: 1.6rem; font-weight: 800; color: #f1c40f; margin: 0; display: flex; align-items: center; gap: 10px;">
+                                <i class="fa-solid fa-list-check"></i> Minhas Tarefas & Pedidos
+                            </h2>
+                            <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 4px;">
+                                Solicitações de orçamentos, ligações e visitas técnicas captadas automaticamente pela Maria Cecília.
+                            </p>
+                        </div>
+                        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                            <button class="action-btn" onclick="window.loadTarefasArnaldo()" title="Atualizar tarefas" style="background: var(--surface-light); padding: 10px 16px; border-radius: 8px; font-size: 0.85rem;">
+                                <i class="fa-solid fa-rotate"></i> Atualizar
+                            </button>
+                            <button class="action-btn" onclick="window.openModalNovaTarefa()" style="background: #f1c40f; color: #000; height: 42px; padding: 0 20px; font-weight: 800; font-size: 0.9rem; border-radius: 8px; box-shadow: 0 4px 15px rgba(241,196,15,0.3);">
+                                <i class="fa-solid fa-plus"></i> Nova Tarefa
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- CARDS DE MÉTRICAS RÁPIDAS (KPIS) -->
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 22px;">
+                        <div class="glass-panel" style="padding: 16px 20px; border-radius: 12px; border-left: 4px solid #e74c3c; background: rgba(0,0,0,0.25);">
+                            <div style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Pendentes (Ação)</div>
+                            <div id="metric-tarefas-pendentes" style="font-size: 1.8rem; font-weight: 800; color: #e74c3c; margin-top: 4px;">0</div>
+                        </div>
+                        <div class="glass-panel" style="padding: 16px 20px; border-radius: 12px; border-left: 4px solid #3498db; background: rgba(0,0,0,0.25);">
+                            <div style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Em Andamento</div>
+                            <div id="metric-tarefas-andamento" style="font-size: 1.8rem; font-weight: 800; color: #3498db; margin-top: 4px;">0</div>
+                        </div>
+                        <div class="glass-panel" style="padding: 16px 20px; border-radius: 12px; border-left: 4px solid #2ecc71; background: rgba(0,0,0,0.25);">
+                            <div style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Concluídas</div>
+                            <div id="metric-tarefas-concluidas" style="font-size: 1.8rem; font-weight: 800; color: #2ecc71; margin-top: 4px;">0</div>
+                        </div>
+                        <div class="glass-panel" style="padding: 16px 20px; border-radius: 12px; border-left: 4px solid #f1c40f; background: rgba(0,0,0,0.25);">
+                            <div style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Orçamentos</div>
+                            <div id="metric-tarefas-orcamentos" style="font-size: 1.8rem; font-weight: 800; color: #f1c40f; margin-top: 4px;">0</div>
+                        </div>
+                    </div>
+
+                    <!-- BARRA DE FILTROS E BUSCA -->
+                    <div class="glass-panel" style="padding: 14px 18px; border-radius: 12px; margin-bottom: 20px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; background: rgba(0,0,0,0.25);">
+                        <div style="flex: 1; min-width: 220px;">
+                            <input type="text" id="filtro-tarefas-busca" class="modal-input" placeholder="Buscar por cliente, telefone ou descrição..." style="width: 100%; color: #000; background: #fff; border: 1px solid var(--border-color); padding: 8px 12px; border-radius: 8px; font-size: 0.85rem;" onkeyup="window.filterTarefas()">
+                        </div>
+                        <div style="min-width: 170px;">
+                            <select id="filtro-tarefas-status" class="modal-input" style="width: 100%; color: #000; background: #fff; border: 1px solid var(--border-color); padding: 8px 12px; border-radius: 8px; font-size: 0.85rem;" onchange="window.filterTarefas()">
+                                <option value="todos">Todos os Status</option>
+                                <option value="pendente" selected>🟡 Apenas Pendentes</option>
+                                <option value="em_andamento">🔵 Em Andamento</option>
+                                <option value="concluido">🟢 Concluídas</option>
+                            </select>
+                        </div>
+                        <div style="min-width: 180px;">
+                            <select id="filtro-tarefas-tipo" class="modal-input" style="width: 100%; color: #000; background: #fff; border: 1px solid var(--border-color); padding: 8px 12px; border-radius: 8px; font-size: 0.85rem;" onchange="window.filterTarefas()">
+                                <option value="todos">Todos os Tipos</option>
+                                <option value="ORCAMENTO">💰 Orçamentos / Cotações</option>
+                                <option value="LIGACAO_RETORNO">📞 Ligações de Retorno</option>
+                                <option value="VISITA_TECNICA">🚗 Visitas Técnicas</option>
+                                <option value="DUVIDA_NEGOCIACAO">💬 Negociação / Dúvida</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- CONTAINER DOS CARDS DE TAREFA -->
+                    <div id="tarefas-cards-container" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; align-items: start;">
+                        <div style="grid-column: 1 / -1; text-align: center; padding: 40px 10px; color: var(--text-muted); font-size: 0.9rem;">
+                            <i class="fa-solid fa-spinner fa-spin" style="font-size: 1.8rem; margin-bottom: 10px; display: block; color: #f1c40f;"></i>
+                            Carregando suas tarefas...
+                        </div>
+                    </div>
+                </div>
+
                 <!-- VIEW: CLIENTES -->
                 <div id="view-clientes" class="view-page" style="display:none;">
                     <div class="glass-panel table-container">
@@ -600,12 +681,27 @@
                                     </div>
 
                                     <!-- CAIXA DE COMANDO RÁPIDO PARA MARIA CECÍLIA (⚡) -->
-                                    <div style="display: flex; gap: 10px; align-items: center; background: rgba(37,211,102,0.06); padding: 8px 12px; border-radius: 8px; border: 1px dashed rgba(37,211,102,0.4);">
-                                        <span style="font-size: 0.8rem; font-weight: 800; color: #25D366; white-space: nowrap;"><i class="fa-solid fa-bolt"></i> Ordem para Maria:</span>
-                                        <input type="text" id="live-chat-ai-cmd-input" class="modal-input" placeholder="Ex: Ofereça a preventiva com 10% de desconto se ele fechar para esta semana..." style="flex: 1; color: #000; background: #fff; border: 1px solid rgba(37,211,102,0.3); padding: 6px 10px; border-radius: 6px; font-size: 0.85rem;" onkeydown="if(event.key==='Enter') window.executeAiActiveCommand()">
-                                        <button class="action-btn" id="btn-exec-ai-cmd" onclick="window.executeAiActiveCommand()" style="background: #25D366; color: #fff; font-weight: 700; padding: 0 14px; height: 34px; border-radius: 6px; font-size: 0.8rem; white-space: nowrap;">
-                                            <i class="fa-solid fa-paper-plane"></i> Disparar Ordem
-                                        </button>
+                                    <div style="display: flex; flex-direction: column; gap: 6px; background: rgba(37,211,102,0.06); padding: 8px 12px; border-radius: 8px; border: 1px dashed rgba(37,211,102,0.4);">
+                                        <div style="display: flex; gap: 8px; align-items: center;">
+                                            <span style="font-size: 0.8rem; font-weight: 800; color: #25D366; white-space: nowrap;"><i class="fa-solid fa-bolt"></i> Ordem para Maria:</span>
+                                            <input type="text" id="live-chat-ai-cmd-input" class="modal-input" placeholder="Ex: Envie o orçamento em anexo com 5% de desconto para fechar esta semana..." style="flex: 1; color: #000; background: #fff; border: 1px solid rgba(37,211,102,0.3); padding: 6px 10px; border-radius: 6px; font-size: 0.85rem;" onkeydown="if(event.key==='Enter') window.executeAiActiveCommand()">
+                                            
+                                            <!-- Botão Anexar Arquivo / Orçamento -->
+                                            <input type="file" id="live-chat-ai-file-input" style="display: none;" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.xlsx" onchange="window.handleAiOrderFileUpload(event)">
+                                            <button type="button" class="action-btn" id="btn-ai-attach-file" onclick="document.getElementById('live-chat-ai-file-input').click()" style="background: rgba(37,211,102,0.15); color: #25D366; border: 1px solid rgba(37,211,102,0.4); padding: 0 10px; height: 34px; border-radius: 6px; font-size: 0.85rem;" title="Anexar Orçamento ou Arquivo (PDF, Imagem, Documento)">
+                                                <i class="fa-solid fa-paperclip"></i>
+                                            </button>
+
+                                            <button class="action-btn" id="btn-exec-ai-cmd" onclick="window.executeAiActiveCommand()" style="background: #25D366; color: #fff; font-weight: 700; padding: 0 14px; height: 34px; border-radius: 6px; font-size: 0.8rem; white-space: nowrap;">
+                                                <i class="fa-solid fa-paper-plane"></i> Disparar Ordem
+                                            </button>
+                                        </div>
+
+                                        <!-- Preview do Arquivo Anexado -->
+                                        <div id="ai-order-file-badge" style="display: none; align-items: center; gap: 8px; font-size: 0.75rem; background: rgba(37,211,102,0.15); color: #1e7e34; padding: 4px 8px; border-radius: 4px; border: 1px solid rgba(37,211,102,0.3); width: fit-content;">
+                                            <i class="fa-solid fa-file-pdf"></i> <span id="ai-order-file-name-text">arquivo.pdf</span>
+                                            <button type="button" onclick="window.removeAiOrderFile()" style="background: none; border: none; color: #e74c3c; cursor: pointer; font-weight: 700; padding: 0 4px;" title="Remover anexo">✕</button>
+                                        </div>
                                     </div>
 
                                 </div>
@@ -3589,6 +3685,58 @@
                     <span style="font-size: 10pt; color: #7f8c8d;">Assinatura Digital / Responsável Financeiro</span>
                 </div>
             </div>
+        </div>
+    </div>
+    <!-- MODAL: NOVA TAREFA MANUAL DO ARNALDO -->
+    <div class="modal-overlay" id="modal-nova-tarefa" style="display: none;">
+        <div class="modal-content glass-panel-dark" style="width: 95%; max-width: 550px;">
+            <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h2 style="font-size: 1.2rem; color: #f1c40f; margin: 0;"><i class="fa-solid fa-circle-plus"></i> Nova Tarefa / Solicitação</h2>
+                <button type="button" class="modal-close" onclick="closeModal('modal-nova-tarefa')"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form id="form-nova-tarefa" onsubmit="window.salvarNovaTarefaManual(event)">
+                <div class="input-group" style="margin-bottom: 12px;">
+                    <label style="font-size: 0.85rem; color: var(--text-primary); margin-bottom: 4px; display: block;">Título da Tarefa</label>
+                    <input type="text" id="tarefa-manual-titulo" class="modal-input" placeholder="Ex: Retornar para Dr. Carlos sobre orçamento de 3 splits" required style="width: 100%; color: #000; background: #fff; border: 1px solid var(--border-color); padding: 8px 12px; border-radius: 8px;">
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px;">
+                    <div class="input-group">
+                        <label style="font-size: 0.85rem; color: var(--text-primary); margin-bottom: 4px; display: block;">Nome do Cliente</label>
+                        <input type="text" id="tarefa-manual-cliente" class="modal-input" placeholder="Nome do Cliente" required style="width: 100%; color: #000; background: #fff; border: 1px solid var(--border-color); padding: 8px 12px; border-radius: 8px;">
+                    </div>
+                    <div class="input-group">
+                        <label style="font-size: 0.85rem; color: var(--text-primary); margin-bottom: 4px; display: block;">WhatsApp / Telefone</label>
+                        <input type="text" id="tarefa-manual-telefone" class="modal-input" placeholder="(11) 99999-9999" required style="width: 100%; color: #000; background: #fff; border: 1px solid var(--border-color); padding: 8px 12px; border-radius: 8px;">
+                    </div>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px;">
+                    <div class="input-group">
+                        <label style="font-size: 0.85rem; color: var(--text-primary); margin-bottom: 4px; display: block;">Tipo de Solicitação</label>
+                        <select id="tarefa-manual-tipo" class="modal-input" style="width: 100%; color: #000; background: #fff; border: 1px solid var(--border-color); padding: 8px 12px; border-radius: 8px;">
+                            <option value="ORCAMENTO">💰 Orçamento / Proposta</option>
+                            <option value="LIGACAO_RETORNO">📞 Ligação de Retorno</option>
+                            <option value="VISITA_TECNICA">🚗 Visita Técnica</option>
+                            <option value="DUVIDA_NEGOCIACAO">💬 Dúvida / Negociação</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label style="font-size: 0.85rem; color: var(--text-primary); margin-bottom: 4px; display: block;">Prioridade</label>
+                        <select id="tarefa-manual-prioridade" class="modal-input" style="width: 100%; color: #000; background: #fff; border: 1px solid var(--border-color); padding: 8px 12px; border-radius: 8px;">
+                            <option value="alta">🔴 Alta</option>
+                            <option value="media" selected>🟡 Média</option>
+                            <option value="baixa">⚪ Baixa</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="input-group" style="margin-bottom: 18px;">
+                    <label style="font-size: 0.85rem; color: var(--text-primary); margin-bottom: 4px; display: block;">Descrição / Detalhes</label>
+                    <textarea id="tarefa-manual-descricao" class="modal-input" rows="3" placeholder="Informações detalhadas sobre o que precisa ser feito..." required style="width: 100%; color: #000; background: #fff; border: 1px solid var(--border-color); padding: 8px 12px; border-radius: 8px; resize: vertical;"></textarea>
+                </div>
+                <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                    <button type="button" class="action-btn" onclick="closeModal('modal-nova-tarefa')" style="background: var(--surface-light); padding: 8px 16px; border-radius: 8px;">Cancelar</button>
+                    <button type="submit" class="action-btn" style="background: #f1c40f; color: #000; font-weight: 800; padding: 8px 18px; border-radius: 8px;"><i class="fa-solid fa-check"></i> Salvar Tarefa</button>
+                </div>
+            </form>
         </div>
     </div>
 </body>

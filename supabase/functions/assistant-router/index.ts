@@ -8,11 +8,86 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 const genAI = new GoogleGenerativeAI(Deno.env.get('GEMINI_API_KEY') ?? '');
 
+// === FUNÇÕES AUXILIARES DE NORMALIZAÇÃO E TEMPO ===
+
+function getPhoneVariants(rawPhone: string): string[] {
+  const digits = (rawPhone || '').replace(/\D/g, '');
+  if (!digits || digits.length < 8) return [];
+  const variants = new Set<string>();
+  variants.add(digits);
+  
+  const without55 = digits.replace(/^55/, '');
+  variants.add(without55);
+  variants.add(`55${without55}`);
+
+  // Se for celular brasileiro (com DDD)
+  if (without55.length === 11 && without55.charAt(2) === '9') {
+    const ddd = without55.substring(0, 2);
+    const rest8 = without55.substring(3);
+    variants.add(`${ddd}${rest8}`);
+    variants.add(`55${ddd}${rest8}`);
+  } else if (without55.length === 10) {
+    const ddd = without55.substring(0, 2);
+    const rest8 = without55.substring(2);
+    variants.add(`${ddd}9${rest8}`);
+    variants.add(`55${ddd}9${rest8}`);
+  }
+  return Array.from(variants);
+}
+
+function buildTemporalContext(): { promptContext: string; saudacaoObrigatoria: string; isExpediente: boolean; spTimeStr: string } {
+  // Horário oficial de Brasília (America/Sao_Paulo)
+  const spNow = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+  const spHour = spNow.getHours();
+  const spMinute = spNow.getMinutes();
+  const spDayOfWeek = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'][spNow.getDay()];
+  const spDateStr = spNow.toLocaleDateString('pt-BR');
+  const spTimeStr = `${String(spHour).padStart(2, '0')}:${String(spMinute).padStart(2, '0')}`;
+
+  const isExpediente = spHour >= 7 && spHour < 20;
+  let saudacaoObrigatoria = "";
+  let periodoNome = "";
+
+  if (spHour >= 7 && spHour < 12) {
+    saudacaoObrigatoria = "Bom dia";
+    periodoNome = "Manhã (07h às 12h)";
+  } else if (spHour >= 12 && spHour < 18) {
+    saudacaoObrigatoria = "Boa tarde";
+    periodoNome = "Tarde (12h às 18h)";
+  } else if (spHour >= 18 && spHour < 20) {
+    saudacaoObrigatoria = "Boa noite";
+    periodoNome = "Noite (18h às 20h - final de expediente)";
+  } else {
+    saudacaoObrigatoria = (spHour >= 20 || spHour < 5) ? "Boa noite" : "Bom dia";
+    periodoNome = "Fora do Horário de Expediente (Expediente: todos os dias das 07h às 20h)";
+  }
+
+  const promptContext = `
+=== CONTEXTO TEMPORAL & REGRAS DE HORÁRIO (RIGOROSO) ===
+- Data e Hora Atual (Horário de Brasília): ${spDayOfWeek}, ${spDateStr} às ${spTimeStr}.
+- Período Atual: ${periodoNome}.
+- REGRA ABSOLUTA DE SAUDAÇÃO: Se for saudar o cliente, você DEVE usar estritamente a saudação "${saudacaoObrigatoria}".
+  * NUNCA diga "Boa tarde" após as 18:00! (Após as 18h é estritamente "Boa noite").
+  * NUNCA diga "Bom dia" após as 12:00! (A partir das 12h é estritamente "Boa tarde").
+  * NUNCA diga "Boa noite" antes das 18:00!
+- HORÁRIO DE ATENDIMENTO DA EMPRESA: Todos os dias das 07:00 às 20:00.
+${!isExpediente ? `- ⚠️ ATENÇÃO: ESTAMOS FORA DO HORÁRIO DE EXPEDIENTE (Agora são ${spTimeStr}).
+  * Acolha com muito carinho, simpatia e gentileza.
+  * Informe educadamente que o expediente de hoje encerrou às 20h e que a equipe técnica e atendimento retornarão a partir das 07h da manhã.
+  * Colete todos os detalhes do serviço/necessidade e tranquilize o cliente garantindo que a solicitação foi registrada com prioridade total para abertura do dia seguinte.` : '- ✅ DENTRO DO HORÁRIO DE EXPEDIENTE (07:00 às 20:00): Atendimento comercial a pleno vapor.'}
+========================================================
+`;
+
+  return { promptContext, saudacaoObrigatoria, isExpediente, spTimeStr };
+}
+
 const SYSTEM_PROMPTS: Record<string, string> = {
   maria: `
 CONTEXTO CORPORATIVO
 Apresente-se cordialmente como Maria Cecília da Arnaldo Trentin Serviços (Engenharia, Climatização e Refrigeração). Diga apenas que você faz parte da equipe da empresa (NUNCA mencione cargos como "secretária executiva", "assistente de operações" ou títulos formais). Seja muito simpática, acolhedora, ágil, prestativa e natural.
 O responsável técnico e dono da empresa se chama Arnaldo Trentin. Se pedirem para falar com ele, proteja o tempo dele: diga de forma muito educada que ele está em atendimento/em campo no momento, mas afirme com segurança que você vai passar todas as informações e ele retornará em breve.
+
+[INJECT_TEMPORAL_CONTEXT]
 
 LEITURA DE ORDENS DE SERVIÇO (OS), AGENDAMENTOS E PROPOSTAS:
 - Você tem acesso direto aos dados em tempo real da empresa injetados abaixo na seção <DADOS_DO_BANCO>.
@@ -21,27 +96,49 @@ LEITURA DE ORDENS DE SERVIÇO (OS), AGENDAMENTOS E PROPOSTAS:
   * Exemplo: "Consultei aqui no sistema e sua visita técnica para manutenção do ar condicionado está agendada para amanhã às 14h com nossa equipe."
   * Se não houver OS em aberto para o cliente, informe com gentileza e pergunte como pode ajudá-lo a abrir um chamado ou agendamento.
 
-ATENDENDO UM NOVO CONTATO (CLIENTE NOVO):
-- Pergunte se é a primeira vez que a pessoa fala com a empresa e se ela já conhece os serviços.
-- Se for a primeira vez e for fechar o cadastro, peça: Nome completo, Endereço completo onde o serviço será realizado e CPF/CNPJ.
-- Investigue a necessidade para fechar o Orçamento:
+ATENDENDO UM NOVO CONTATO (CLIENTE NOVO / NÃO CADASTRADO):
+- Se o contexto indicar que é um novo contato: pergunte se é a primeira vez que fala com a empresa e acolha com entusiasmo.
+- Para concluir o cadastro inicial de um NOVO cliente, colete com gentileza: Nome completo, Endereço completo onde o serviço será realizado e CPF/CNPJ (se tiver em mãos).
+- Investigue a necessidade para a Engenharia elaborar o Orçamento:
   * Manutenção de Ar Condicionado: peça as fotos do aparelho, vídeos e descrição da falha.
   * Elétrica: pergunte os detalhes urgentes do problema.
   * Obra Nova: pergunte se a pessoa já possui o Projeto (Plantas).
   * Instalação de Ar: pergunte se o local já tem espera/projeto.
 - Informe que os Orçamentos são entregues dentro de 48 horas e que a equipe técnica entrará em contato!
 
-ATENDENDO QUEM JÁ É CLIENTE:
-- Se você tiver o Contexto do Cliente e o Nome dele abaixo na TAG <DADOS_DO_BANCO>, seja hiper pessoal! Chame-o pelo nome com entusiasmo! E veja se ele tem Agendamentos ou OS em andamento. Se perguntar "Tudo certo pra amanhã?", use sua base de dados injetada.
-- Se você NÃO souber o nome dele, peça educadamente.
+ATENDENDO QUEM JÁ É CLIENTE (Status: CADASTRADO NO SISTEMA):
+- Chame SEMPRE pelo nome com carinho e entusiasmo!
+- ⚠️ REGRA CRÍTICA ANTI-DUPLICAÇÃO:
+  * NUNCA, SOB HIPÓTESE ALGUMA, peça Nome, Endereço ou CPF/CNPJ novamente para quem já é cadastrado!
+  * Se o cliente pedir um novo serviço, visita técnica, manutenção ou orçamento: acolha com presteza, anote os detalhes da necessidade e diga claramente que já está registrando a solicitação no sistema e encaminhando para a equipe técnica retornar.
+  * NUNCA execute a ação CRIAR_CADASTRO para clientes que já constam cadastrados. Apenas converse naturalmente confirmando o registro do novo chamado!
 - Se o cliente reclamar de GARANTIA: Peça DESCULPAS imediatamente. Demonstre muita urgência, acolha o cliente e pergunte qual é exatamente o problema para que você direcione o atendimento o mais rápido possível!
+
+🛡️ REGRA ABSOLUTA ANTI-SPAM, ANTI-PROPAGANDA E OUTROS ROBÔS/IAs:
+- Se o remetente for uma mensagem automática de banco (ex: Itaú, Bradesco, Santander, Nubank com faturas, códigos ou avisos), propaganda de operadora (Claro, Vivo, Tim), código SMS/OTP de verificação, anúncio comercial externo ou OUTRA INTELIGÊNCIA ARTIFICIAL/ROBÔ CORPORATIVO tentando vender produtos ou apresentando menu automático (ex: "digite 1", "escolha uma opção"):
+  * NUNCA RESPONDA AO ROBÔ OU PROPAGANDA! NUNCA inicie conversa com robôs corporativos!
+  * Silêncio absoluto! Retorne ESTRITAMENTE o JSON:
+  {"acao": "IGNORAR_SPAM_ROBO", "motivo": "Propaganda/Robô bancário ou corporativo detectado"}
+  * Nenhuma palavra fora do JSON.
+
+🎯 AÇÃO MÁGICA - CRIAR_TAREFA_GESTOR (TAREFAS E PEDIDOS PARA O ARNALDO):
+- Você DEVE acionar esta ação para registrar no mural pessoal de tarefas do Arnaldo sempre que o cliente:
+  1. Pedir Orçamento / Cotação de produtos ou serviços (manutenção de ar, instalação, obras, elétrica, PMOC).
+  2. Pedir para falar diretamente com o Arnaldo ou solicitar que o Arnaldo ligue de volta.
+  3. Solicitar agendamento de Visita Técnica presencial.
+  4. Apresentar dúvida técnica aprofundada, pedido de desconto especial ou negociação que fuja do seu escopo.
+- Formato rigoroso do retorno JSON:
+{"acao": "CRIAR_TAREFA_GESTOR", "tipo_solicitacao": "ORCAMENTO", "titulo": "Orçamento: Instalação de Ar Condicionado", "descricao": "Cliente precisa de cotação para 2 aparelhos inverter no local informado...", "prioridade": "alta", "nome_cliente": "Nome do Cliente", "resposta_pro_cliente": "Sua mensagem calorosa confirmando com segurança que anotou todos os dados e passou imediatamente para o Arnaldo avaliar e entrar em contato!"}
+* Valores possíveis para tipo_solicitacao: "ORCAMENTO", "LIGACAO_RETORNO", "VISITA_TECNICA", "DUVIDA_NEGOCIACAO".
+* Valores possíveis para prioridade: "alta", "media", "baixa".
 
 FALANDO COM PRESTADORES TÉCNICOS SÊNIOS (FRANCISCO E MAXWELL):
 - Se seu contexto disser que está falando com "Sr Francisco" ou "Sr Maxwell", não tente vender. Colete os relatórios de instalação e fotos deles, agradeça seus colegas de trabalho.
 
-AÇÃO MÁGICA - QUANDO DISPARAR:
-1. Assim que você concluir a coleta de dados de um cliente novo ou coletar os detalhes do serviço (Nome, Endereço do local onde será o serviço, CPF/CNPJ e relato do problema), retorne IMEDIATAMENTE APENAS o JSON abaixo:
+AÇÃO MÁGICA - CRIAR_CADASTRO (EXCLUSIVO PARA CLIENTES NOVOS):
+1. Dispare a ação abaixo APENAS E EXCLUSIVAMENTE para clientes que AINDA NÃO SÃO CADASTRADOS (Status: Novo Contato/Desconhecido), após coletar Nome e Endereço:
 {"acao": "CRIAR_CADASTRO", "nome_cliente": "Nome Completo", "endereco_completo": "Rua X, nº Y, Bairro, Cidade (Endereço EXATO informado pelo cliente)", "cpf_cnpj": "123.456.789-00 ou deixe vazio se não informado", "relato": "Forte Resumo do Caso e Detalhes do Serviço", "mensagem_pro_cliente": "Seu agradecimento confirmando que registrou os dados e que a equipe técnica entrará em contato dentro de 48h."}
+* Se o cliente JÁ FOR CADASTRADO, NUNCA envie este JSON. Converse normalmente confirmando que o pedido já foi recebido e encaminhado.
 
 REGRAS ABSOLUTAS DE PRECISÃO E FIDELIDADE (ÁUDIO E TEXTO):
 - NUNCA invente, presuma ou preencha endereços fictícios. Use SEMPRE o endereço real e exato que o cliente informou em texto ou por mensagem de áudio de voz.
@@ -203,6 +300,10 @@ serve(async (req) => {
       }
       const clientName = payload.nome_cliente || 'Cliente';
       const cmdText = payload.ordem || '';
+      const fileName = payload.file_name || '';
+      const fileType = payload.file_type || (fileName.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
+      const fileBase64 = payload.file_base64 || '';
+      const fileUrl = payload.file_url || '';
 
       if (!targetPhone || !cmdText) {
           return new Response(JSON.stringify({ error: 'Telefone ou ordem vazia' }), { 
@@ -231,6 +332,7 @@ serve(async (req) => {
 O gestor da empresa, Arnaldo Trentin, te deu a seguinte ordem direta para enviar para o(a) cliente ${clientName}:
 "${cmdText}"
 
+${fileName ? `DOCUMENTO / ARQUIVO / ORÇAMENTO ANEXADO: ${fileName}\n(Mencione educadamente na mensagem que o arquivo segue em anexo para avaliação do cliente)` : ''}
 ${histContext}
 DIRETRIZES DE RESPOSTA:
 1. Escreva uma mensagem de WhatsApp COMPLETA, calorosa, educada e persuasiva para o(a) cliente ${clientName}.
@@ -265,26 +367,66 @@ DIRETRIZES DE RESPOSTA:
               content: 'BOT_ATIVO'
           });
 
-          // 2. Grava a mensagem gerada pela Maria no histórico
+          // 2. Grava a mensagem gerada pela Maria no histórico (com menção ao anexo se houver)
+          const storedMsg = fileName ? `${generatedMsg}\n📎 _[Arquivo enviado: ${fileName}]_` : generatedMsg;
           await supabase.from('agent_memory').insert({
               phone: targetPhone,
               role: 'model',
-              content: generatedMsg
+              content: storedMsg
           });
 
-          // 3. Dispara a mensagem via UazAPI / WhatsApp
-          const sendResp = await fetch(`${manualUazapiUrl}/send/text`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'token': manualToken },
-              body: JSON.stringify({ number: targetPhone, text: generatedMsg })
-          });
+          // 3. Dispara a mensagem via UazAPI / WhatsApp (com arquivo ou texto puro)
+          let sendStatus = 200;
+          if (fileBase64 || fileUrl) {
+              try {
+                  const mediaEndpoint = `${manualUazapiUrl}/send/media`;
+                  const mediaPayload = {
+                      number: targetPhone,
+                      media: fileBase64 || fileUrl,
+                      caption: generatedMsg,
+                      fileName: fileName || 'orcamento.pdf',
+                      type: fileType.includes('pdf') ? 'document' : 'image'
+                  };
+                  const mediaResp = await fetch(mediaEndpoint, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', 'token': manualToken },
+                      body: JSON.stringify(mediaPayload)
+                  });
+                  sendStatus = mediaResp.status;
+                  if (!mediaResp.ok) {
+                      console.warn('[ORDEM IA MÍDIA FALHOU] Tentando texto puro via UazAPI...', mediaResp.status);
+                      const txtResp = await fetch(`${manualUazapiUrl}/send/text`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json', 'token': manualToken },
+                          body: JSON.stringify({ number: targetPhone, text: generatedMsg })
+                      });
+                      sendStatus = txtResp.status;
+                  }
+              } catch (mediaErr) {
+                  console.error('[ORDEM IA MÍDIA ERRO] Tentando texto:', mediaErr);
+                  const txtResp = await fetch(`${manualUazapiUrl}/send/text`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', 'token': manualToken },
+                      body: JSON.stringify({ number: targetPhone, text: generatedMsg })
+                  });
+                  sendStatus = txtResp.status;
+              }
+          } else {
+              const sendResp = await fetch(`${manualUazapiUrl}/send/text`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'token': manualToken },
+                  body: JSON.stringify({ number: targetPhone, text: generatedMsg })
+              });
+              sendStatus = sendResp.status;
+          }
 
-          console.log(`[ORDEM IA SUCESSO] Maria disparou para ${targetPhone}: "${generatedMsg}". Status Uazapi: ${sendResp.status}`);
+          console.log(`[ORDEM IA SUCESSO] Maria disparou para ${targetPhone}: "${generatedMsg}" ${fileName ? `(Com arquivo: ${fileName})` : ''}. Status Uazapi: ${sendStatus}`);
 
           return new Response(JSON.stringify({ 
               success: true, 
               mensagem_gerada: generatedMsg,
-              status_uazapi: sendResp.status 
+              arquivo_enviado: fileName || null,
+              status_uazapi: sendStatus 
           }), {
               status: 200,
               headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -603,7 +745,7 @@ DIRETRIZES OBRIGATÓRIAS:
           msgNode = payload?.data?.message || payload?.message || {};
           // Uazapi: messageType está em msgNode.messageType ("AudioMessage"), msgNode.type é genérico ("media")
           msgType = payload?.data?.messageType || payload?.messageType || msgNode?.messageType || msgNode?.type || payload?.type || "";
-          remoteJid = msgNode?.chatid || msgNode?.sender_pn || payload?.chat?.wa_chatid || payload?.data?.key?.remoteJid;
+          remoteJid = msgNode?.chatid || msgNode?.sender_pn || payload?.chat?.wa_chatid || payload?.data?.key?.remoteJid || payload?.data?.remoteJid || payload?.remoteJid || payload?.sender || "";
           pushName = msgNode?.senderName || payload?.data?.pushName || payload?.chat?.name || "Cliente";
           // Não incluir msgNode.content na cadeia — no Uazapi, content é um OBJETO com URL/mimetype, não string
           userMessage = msgNode?.conversation || msgNode?.extendedTextMessage?.text || msgNode?.audioMessage?.text || msgNode?.audioMessage?.transcription || msgNode?.imageMessage?.caption || msgNode?.videoMessage?.caption || (typeof msgNode?.text === 'string' && msgNode.text.length > 0 ? msgNode.text : "") || payload?.text || "";
@@ -612,19 +754,104 @@ DIRETRIZES OBRIGATÓRIAS:
           const contentMime = typeof msgNode?.content?.mimetype === 'string' ? msgNode.content.mimetype.toLowerCase() : "";
           hasAudio = msgType.toLowerCase().includes('audio') || msgType === 'ptt' || msgNode?.mediaType === 'ptt' || msgNode?.audioMessage || contentMime.includes('audio');
           hasImage = msgType.toLowerCase().includes('image') || msgType.toLowerCase().includes('video') || msgNode?.imageMessage || msgNode?.videoMessage || contentMime.includes('image');
-          hasMedia = hasAudio || hasImage || msgType === 'media' || msgNode?.mediaType === 'ptt';
+          
+          const docFileName = msgNode?.documentMessage?.fileName || msgNode?.documentWithCaptionMessage?.message?.documentMessage?.fileName || "";
+          const hasDocument = msgType.toLowerCase().includes('document') || Boolean(msgNode?.documentMessage) || Boolean(msgNode?.documentWithCaptionMessage) || contentMime.includes('pdf') || contentMime.includes('application');
+          const hasLocation = msgType.toLowerCase().includes('location') || Boolean(msgNode?.locationMessage);
+          const hasContact = msgType.toLowerCase().includes('contact') || Boolean(msgNode?.contactMessage) || Boolean(msgNode?.contactsArrayMessage);
+
+          if (!userMessage) {
+              if (hasDocument) userMessage = `[📄 Documento / Arquivo PDF enviado pelo cliente${docFileName ? `: ${docFileName}` : ''}]`;
+              else if (hasLocation) userMessage = `[📍 Localização compartilhada pelo cliente]`;
+              else if (hasContact) userMessage = `[👤 Cartão de Contato enviado pelo cliente]`;
+          }
+
+          hasMedia = hasAudio || hasImage || hasDocument || msgType === 'media' || msgNode?.mediaType === 'ptt';
       }
 
       if (!remoteJid) {
           console.log(`[IGNORADO] remoteJid não encontrado.`);
           return;
       }
+
+      remoteJid = remoteJid.split('@')[0].replace(/\D/g, '');
+      if (!remoteJid.startsWith('55') && remoteJid.length >= 10 && remoteJid.length <= 11) {
+          remoteJid = '55' + remoteJid;
+      }
+      const cleanPhone = remoteJid.replace(/^55/, '');
+      const last8Digits = remoteJid.slice(-8);
+      const allPhoneVariants = getPhoneVariants(remoteJid);
+
+      // === 0. VERIFICAÇÃO ANTECIPADA E INFALÍVEL DE LISTA NEGRA (BLACKLIST) E SPAM ===
+      const { data: earlyBlacklist } = await supabase
+          .from('agent_memory')
+          .select('content, created_at')
+          .in('phone', allPhoneVariants)
+          .in('content', ['BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA', 'BOT_ATIVO', 'SPAM_ROBO'])
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+      if (earlyBlacklist && earlyBlacklist.length > 0) {
+          const st = earlyBlacklist[0].content;
+          if (st === 'BOT_IGNORAR' || st === 'AMIGO_IGNORAR' || st === 'LISTA_NEGRA' || st === 'SPAM_ROBO') {
+              console.log(`[LISTA NEGRA / SPAM - BLOQUEIO ANTECIPADO] Contato ${remoteJid} bloqueado/ignorado (status: ${st}).`);
+              return;
+          }
+      }
+
+      if (last8Digits && last8Digits.length === 8) {
+          const { data: partialBlocked } = await supabase
+              .from('agent_memory')
+              .select('phone, created_at')
+              .in('content', ['BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA', 'SPAM_ROBO'])
+              .like('phone', `%${last8Digits}%`)
+              .order('created_at', { ascending: false })
+              .limit(1);
+          if (partialBlocked && partialBlocked.length > 0) {
+              console.log(`[LISTA NEGRA - BLOQUEIO POR FINAL ${last8Digits}] Contato ${remoteJid} bloqueado.`);
+              return;
+          }
+      }
+
+      // === 0.1 ESCUDO HEURÍSTICO ANTI-SPAM & ANTI-ROBÔ (BANCOS, OPERADORAS E OUTRAS IAS) ===
+      const textToCheck = (userMessage || '').toLowerCase();
+      const isSpamOrBankBot = (
+          // Bancos e notificações automatizadas de OTP / faturas
+          /(itau|itaú|bradesco|santander|banco do brasil|nubank|caixa econ[oô]mica|banco inter|c6 bank)/i.test(textToCheck) &&
+          /(c[oó]digo de seguran[çc]a|chave pix|fatura fechada|fatura dispon[ií]vel|limite aprovado|cart[aã]o|token|n[aã]o compartilhe|transa[çc][aã]o suspeita|seguran[çc]a do banco|sua conta corrente)/i.test(textToCheck)
+      ) || (
+          // Operadoras e mensagens promocionais invasivas
+          /(claro|vivo|tim)\s*(informa|recarga|promo[çc][aã]o|oferta|alerta)/i.test(textToCheck) ||
+          /(recarga premiada|voc[eê] ganhou|parab[eé]ns voc[eê] foi selecionado|clube de vantagens|b[oô]nus de internet)/i.test(textToCheck)
+      ) || (
+          // Robôs de menu interativo de outras empresas
+          /(digite \d para|escolha uma das op[çc][oõ]es|menu de atendimento:|protocolo de atendimento:|sou a assistente virtual|atendimento autom[aá]tico)/i.test(textToCheck)
+      );
+
+      if (isSpamOrBankBot) {
+          console.log(`[ESCUDO ANTI-SPAM HEURÍSTICO] Mensagem automática ignorada de ${remoteJid}: "${userMessage.substring(0, 60)}..."`);
+          // Etiqueta na memória como SPAM_ROBO
+          await supabase.from('agent_memory').insert({ phone: remoteJid, role: 'user', content: 'SPAM_ROBO' });
+          if (userMessage) {
+              await supabase.from('agent_memory').insert({ phone: remoteJid, role: 'user', content: userMessage });
+          }
+          return; // Silêncio absoluto: não aciona Gemini e não responde WhatsApp
+      }
+
+      // Bloqueio de Mensagens de Grupos de WhatsApp
+      const isGroup = msgNode?.isGroup || payload?.data?.isGroup || remoteJid.includes('@g.us');
+      if (isGroup) {
+          console.log(`[IGNORADO] Mensagem de grupo detectada. JID: ${remoteJid}`);
+          return;
+      }
+
+      // Se for o próprio WhatsApp do Arnaldo (anotações próprias / teste pessoal)
+      if (remoteJid === '5511947434455' || cleanPhone === '5511947434455' || cleanPhone === '11947434455') {
+          console.log(`[ARNALDO DETECTADO] Mensagem do dono da empresa (${remoteJid}). Maria não atende o próprio dono como cliente.`);
+          return;
+      }
       
       // === CONSULTA DE CONTEXTO E IDENTIDADE (BANCO DE DADOS EM TEMPO REAL) ===
-      let cleanPhone = remoteJid.includes('@') ? remoteJid.split('@')[0] : remoteJid;
-      cleanPhone = cleanPhone.replace(/\D/g, '');
-      const last8Digits = cleanPhone.slice(-8);
-
       let injectedContext = "Status deste Número: Desconhecido (Não cadastrado). TRATE COMO UM NOVO CONTATO / POSSÍVEL NOVO CLIENTE.";
       
       if (cleanPhone.includes("5511954598321") || cleanPhone.includes("11954598321")) {
@@ -637,7 +864,7 @@ DIRETRIZES OBRIGATÓRIAS:
               let dbCliente: any = null;
               const { data: clientMatches } = await supabase.from('clientes')
                   .select('id, nome_cliente, endereco_completo, documento_cpf_cnpj, relato_necessidade, whatsapp')
-                  .or(`whatsapp.ilike.%${last8Digits}%,whatsapp.eq.${cleanPhone}`)
+                  .or(`whatsapp.ilike.%${last8Digits}%,whatsapp.eq.${cleanPhone},whatsapp.eq.${remoteJid}`)
                   .limit(1);
 
               if (clientMatches && clientMatches.length > 0) {
@@ -703,6 +930,11 @@ DIRETRIZES OBRIGATÓRIAS:
                       `Nome do Cliente: ${dbCliente.nome_cliente}\n` +
                       `Endereço Cadastrado: ${dbCliente.endereco_completo || 'Não informado'}\n` +
                       `CPF/CNPJ: ${dbCliente.documento_cpf_cnpj || 'Não informado'}\n\n` +
+                      `⚠️ REGRA CRÍTICA PARA CLIENTE JÁ CADASTRADO:\n` +
+                      `- Este cliente JÁ ESTÁ CADASTRADO no sistema. NUNCA peça Nome, Endereço ou CPF/CNPJ novamente!\n` +
+                      `- Chame-o sempre pelo nome com simpatia (${dbCliente.nome_cliente}).\n` +
+                      `- Se ele pedir um novo serviço, visita técnica, manutenção ou orçamento: acolha com presteza e informe com segurança que você já está registrando o chamado no sistema e encaminhando para a equipe técnica retornar.\n` +
+                      `- NUNCA execute a ação CRIAR_CADASTRO para este cliente, pois ele já existe no banco!\n\n` +
                       `📋 SITUAÇÃO DE ORDENS DE SERVIÇO (OS) DESTE CLIENTE:\n` +
                       (osText || "Nenhuma Ordem de Serviço em aberto no momento.") + `\n\n` +
                       `📑 PROPOSTAS E ORÇAMENTOS RECENTES:\n` +
@@ -720,37 +952,17 @@ DIRETRIZES OBRIGATÓRIAS:
           }
       }
       
-      const finalSystemPrompt = systemPrompt.replace("[INJECT_DB_CONTEXT]", injectedContext);
-      
-      // Bloqueio de Mensagens de Grupos de WhatsApp
-      const isGroup = msgNode?.isGroup || payload?.data?.isGroup || remoteJid.includes('@g.us');
-      if (isGroup) {
-          console.log(`[IGNORADO] Mensagem de grupo detectada. JID: ${remoteJid}`);
-          return;
-      }
-
-      remoteJid = remoteJid.split('@')[0].replace(/\D/g, '');
-      if (!remoteJid.startsWith('55') && remoteJid.length >= 10 && remoteJid.length <= 11) {
-          remoteJid = '55' + remoteJid;
-      }
+      const { promptContext: tempoPromptContext } = buildTemporalContext();
+      const finalSystemPrompt = systemPrompt
+          .replace("[INJECT_TEMPORAL_CONTEXT]", tempoPromptContext)
+          .replace("[INJECT_DB_CONTEXT]", injectedContext);
       
       // Sanitização Limpa antes de usar na Triagem de Arquivos
       if (typeof userMessage !== 'string') {
           userMessage = "";
       }
 
-      // Se for o próprio WhatsApp do Arnaldo (anotações próprias / teste pessoal)
-      if (remoteJid === '5511947434455' || cleanPhone === '5511947434455' || cleanPhone === '11947434455') {
-          console.log(`[ARNALDO DETECTADO] Mensagem do dono da empresa (${remoteJid}). Maria não atende o próprio dono como cliente.`);
-          return;
-      }
-
-      const phoneVariants = [
-          remoteJid,
-          cleanPhone,
-          `55${cleanPhone.replace(/^55/, '')}`,
-          cleanPhone.replace(/^55/, '')
-      ].filter(Boolean);
+      const phoneVariants = allPhoneVariants;
 
       // CONTROLE DE PAUSA E COMANDOS DO GESTOR (Atendimento Humano Individual)
       const isMessageFromMe = payload?.message?.fromMe === true || 
@@ -1127,12 +1339,12 @@ DIRETRIZES OBRIGATÓRIAS:
           }
       }
 
-      // 5. BUFFER INTELIGENTE DE DEBOUNCE (18 segundos para texto, 10s para mídia/áudio)
-      // Permite que o cliente termine de enviar pensamentos divididos em 2, 3 ou 4 mensagens consecutivas
+      // 5. BUFFER INTELIGENTE DE DEBOUNCE OTIMIZADO (3s texto, 4s mídia/áudio)
+      // Permite agregar mensagens rápidas sem estourar o timeout de 5-10s do webhook da UazAPI
       const currentCallTime = Date.now();
       userDebounceTimestamps.set(remoteJid, currentCallTime);
 
-      const waitTime = hasMedia ? 10000 : 18000;
+      const waitTime = hasMedia ? 4000 : 3000;
       console.log(`[DEBOUNCE AGREGADOR] Aguardando ${waitTime}ms para agregar mensagens adicionais de ${remoteJid}...`);
       await new Promise(r => setTimeout(r, waitTime));
 
@@ -1305,7 +1517,7 @@ DIRETRIZES OBRIGATÓRIAS:
 
       // MULTI-ACTION ROUTER: Se o LLM Cuspiu um JSON para Banco de Dados
       try {
-          if (aiResponse.includes('"acao"') || aiResponse.includes('"CRIAR_CADASTRO"') || aiResponse.includes('"LANCAR_CAIXA"')) {
+          if (aiResponse.includes('"acao"') || aiResponse.includes('"CRIAR_CADASTRO"') || aiResponse.includes('"LANCAR_CAIXA"') || aiResponse.includes('"IGNORAR_SPAM_ROBO"') || aiResponse.includes('"CRIAR_TAREFA_GESTOR"')) {
               // Extrair JSON robusto (mesmo se misturado com texto ou markdown)
               let jsonStr = aiResponse.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
               
@@ -1318,7 +1530,74 @@ DIRETRIZES OBRIGATÓRIAS:
               const actionData = JSON.parse(jsonStr);
               console.log(`[ACTION] Ação detectada: ${actionData.acao}`);
 
-              if (actionData.acao === "LANCAR_CAIXA") {
+              // 🛡️ AÇÃO ANTI-SPAM / ANTI-ROBÔ DA IA
+              if (actionData.acao === "IGNORAR_SPAM_ROBO") {
+                  console.log(`[SPAM / ROBÔ DETECTADO PELA IA] Contato ${remoteJid} classificado como SPAM_ROBO. Silêncio mantido.`);
+                  await supabase.from('agent_memory').insert({
+                      phone: remoteJid,
+                      role: 'user',
+                      content: 'SPAM_ROBO'
+                  });
+                  return; // Silêncio absoluto, não envia WhatsApp e encerra
+              }
+
+              // 🎯 AÇÃO: CRIAR TAREFA PARA O ARNALDO (PEDIDOS / SOLICITAÇÕES)
+              else if (actionData.acao === "CRIAR_TAREFA_GESTOR") {
+                  const taskPayload = {
+                      cliente_nome: actionData.nome_cliente || pushName || 'Cliente',
+                      cliente_telefone: remoteJid,
+                      tipo_solicitacao: actionData.tipo_solicitacao || 'ORCAMENTO',
+                      titulo: actionData.titulo || 'Nova Solicitação do Cliente',
+                      descricao: actionData.descricao || userMessage,
+                      prioridade: actionData.prioridade || 'alta',
+                      status: 'pendente',
+                      resposta_ia: actionData.resposta_pro_cliente || actionData.mensagem_pro_cliente || '',
+                      created_at: new Date().toISOString()
+                  };
+
+                  // 1. Tenta salvar na tabela dedicada tarefas_arnaldo
+                  try {
+                      const { error: taskDbErr } = await supabase.from('tarefas_arnaldo').insert(taskPayload);
+                      if (taskDbErr) console.warn('[TAREFA ARNALDO] Tabela tarefas_arnaldo indisponível:', taskDbErr.message);
+                      else console.log('[TAREFA ARNALDO] Salva com sucesso na tabela tarefas_arnaldo!');
+                  } catch (dbErr) {
+                      console.warn('[TAREFA ARNALDO] Erro ao gravar em tarefas_arnaldo:', dbErr);
+                  }
+
+                  // 2. Grava como redundância garantida em agent_memory com identificador único
+                  const memoryTask = { id: `TASK_${Date.now()}`, ...taskPayload };
+                  await supabase.from('agent_memory').insert({
+                      phone: 'ARNALDO_TASK',
+                      role: 'system',
+                      content: JSON.stringify(memoryTask)
+                  });
+
+                  // 3. Atualiza relato do cliente na tabela clientes
+                  try {
+                      const { data: existClient } = await supabase.from('clientes')
+                          .select('id, relato_necessidade')
+                          .or(`whatsapp.ilike.%${last8Digits}%,whatsapp.eq.${cleanPhone},whatsapp.eq.${remoteJid}`)
+                          .limit(1);
+
+                      if (existClient && existClient.length > 0) {
+                          const currRelato = existClient[0].relato_necessidade || '';
+                          const updatedRelato = `${currRelato ? currRelato + '\n' : ''}[Solicitação ${new Date().toLocaleDateString('pt-BR')} - ${taskPayload.tipo_solicitacao}]: ${taskPayload.descricao}`;
+                          await supabase.from('clientes').update({ relato_necessidade: updatedRelato }).eq('id', existClient[0].id);
+                      } else if (actionData.nome_cliente && actionData.nome_cliente !== 'Cliente') {
+                          await supabase.from('clientes').insert({
+                              nome_cliente: actionData.nome_cliente,
+                              whatsapp: remoteJid,
+                              relato_necessidade: `[Solicitação ${new Date().toLocaleDateString('pt-BR')} - ${taskPayload.tipo_solicitacao}]: ${taskPayload.descricao}`
+                          });
+                      }
+                  } catch (cErr) {
+                      console.error('[TAREFA ARNALDO] Erro ao sincronizar cliente:', cErr);
+                  }
+
+                  whatsAppText = actionData.resposta_pro_cliente || actionData.mensagem_pro_cliente || "Perfeito! Já registrei todos os detalhes da sua solicitação e passei diretamente para o Arnaldo avaliar. Ele retornará em breve!";
+              }
+
+              else if (actionData.acao === "LANCAR_CAIXA") {
                   const { error: insertErr } = await supabase.from('fluxo_caixa').insert({
                       tipo_movimentacao: actionData.tipo_movimentacao,
                       descricao: actionData.descricao,
@@ -1351,15 +1630,37 @@ DIRETRIZES OBRIGATÓRIAS:
                   whatsAppText = `🔍 Laudo processado e salvo na base de notificações para auditoria futura.`;
               }
               else if (actionData.acao === "CRIAR_CADASTRO") {
-                  const { error: insertErr } = await supabase.from('clientes').insert({
-                      nome_cliente: actionData.nome_cliente,
-                      whatsapp: remoteJid,
-                      endereco_completo: actionData.endereco_completo,
-                      documento_cpf_cnpj: actionData.cpf_cnpj,
-                      relato_necessidade: actionData.relato
-                  });
-                  if (insertErr) console.error("[ACTION] Erro ao inserir cliente:", insertErr);
-                  else console.log(`[ACTION] ✅ CLIENTE SALVO: ${actionData.nome_cliente} | ${remoteJid}`);
+                  // Verificação Anti-Duplicação: Verifica se o WhatsApp ou final de 8 dígitos já existe em clientes
+                  const { data: existingClients } = await supabase
+                      .from('clientes')
+                      .select('id, nome_cliente, relato_necessidade, endereco_completo, documento_cpf_cnpj')
+                      .or(`whatsapp.ilike.%${last8Digits}%,whatsapp.eq.${cleanPhone},whatsapp.eq.${remoteJid}`)
+                      .limit(1);
+
+                  if (existingClients && existingClients.length > 0) {
+                      const exist = existingClients[0];
+                      console.log(`[ANTI-DUPLICAÇÃO] Cliente já cadastrado no banco (ID: ${exist.id}, Nome: ${exist.nome_cliente}). Atualizando registro.`);
+                      const prevRelato = exist.relato_necessidade || '';
+                      const newRelato = actionData.relato ? `${prevRelato ? prevRelato + '\n' : ''}[Novo Chamado ${new Date().toLocaleDateString('pt-BR')}]: ${actionData.relato}` : prevRelato;
+                      
+                      const updatePayload: Record<string, any> = { relato_necessidade: newRelato };
+                      if (!exist.endereco_completo && actionData.endereco_completo) updatePayload.endereco_completo = actionData.endereco_completo;
+                      if (!exist.documento_cpf_cnpj && actionData.cpf_cnpj) updatePayload.documento_cpf_cnpj = actionData.cpf_cnpj;
+
+                      const { error: updErr } = await supabase.from('clientes').update(updatePayload).eq('id', exist.id);
+                      if (updErr) console.error("[ANTI-DUPLICAÇÃO] Erro ao atualizar cliente existente:", updErr);
+                      else console.log(`[ANTI-DUPLICAÇÃO] ✅ CLIENTE ATUALIZADO: ${exist.nome_cliente} | ID: ${exist.id}`);
+                  } else {
+                      const { error: insertErr } = await supabase.from('clientes').insert({
+                          nome_cliente: actionData.nome_cliente,
+                          whatsapp: remoteJid,
+                          endereco_completo: actionData.endereco_completo,
+                          documento_cpf_cnpj: actionData.cpf_cnpj,
+                          relato_necessidade: actionData.relato
+                      });
+                      if (insertErr) console.error("[ACTION] Erro ao inserir novo cliente:", insertErr);
+                      else console.log(`[ACTION] ✅ NOVO CLIENTE SALVO: ${actionData.nome_cliente} | ${remoteJid}`);
+                  }
                   whatsAppText = actionData.mensagem_pro_cliente || "✅ Perfeito! Tudo registrado e encaminhado aos responsáveis. Retornaremos assim que possível!";
               }
               else if (actionData.acao === "DISPARAR_CONTATO_ATIVO" && actionData.telefone_destino) {
@@ -1398,7 +1699,7 @@ DIRETRIZES OBRIGATÓRIAS:
       await supabase.from('agent_memory').insert({
           phone: remoteJid,
           role: 'model',
-          content: aiResponse
+          content: whatsAppText
       });
 
       // uazapiUrl and uazapiToken already declared and fetched at the top of processRequest

@@ -27,5 +27,7 @@ package/
 *.txt
 !checklist_final.txt
 *.log
+supabase/.temp/
+
 
 

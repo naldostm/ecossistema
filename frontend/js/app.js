@@ -269,6 +269,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (targetId === 'view-calc-custos' && typeof window.renderCalcCustos === 'function') {
             window.renderCalcCustos();
         }
+
+        // Se for Minhas Tarefas, carrega e renderiza as tarefas do Arnaldo
+        if (targetId === 'view-tarefas' && typeof window.loadTarefasArnaldo === 'function') {
+            window.loadTarefasArnaldo();
+        }
     };
 
     document.querySelectorAll('.nav-link').forEach(link => {
@@ -7593,11 +7598,14 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
                     m.content === 'AMIGO_IGNORAR' || 
                     m.content === 'LISTA_NEGRA' || 
                     m.content === 'BOT_PAUSADO' || 
-                    m.content === 'BOT_ATIVO'
+                    m.content === 'BOT_ATIVO' ||
+                    m.content === 'SPAM_ROBO'
                 );
 
                 if (statusCmd) {
-                    if (statusCmd.content === 'BOT_IGNORAR' || statusCmd.content === 'AMIGO_IGNORAR' || statusCmd.content === 'LISTA_NEGRA') {
+                    if (statusCmd.content === 'SPAM_ROBO') {
+                        conv.status = 'spam';
+                    } else if (statusCmd.content === 'BOT_IGNORAR' || statusCmd.content === 'AMIGO_IGNORAR' || statusCmd.content === 'LISTA_NEGRA') {
                         conv.status = 'ignorado';
                         blacklistCount++;
                     } else if (statusCmd.content === 'BOT_PAUSADO') {
@@ -7616,7 +7624,7 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
                 // Filtrar última mensagem legível (ignorar comandos internos)
                 const lastVisibleMsg = conv.messages.find(m => 
                     m.content && 
-                    !['BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA', 'BOT_PAUSADO', 'BOT_ATIVO'].includes(m.content)
+                    !['BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA', 'BOT_PAUSADO', 'BOT_ATIVO', 'SPAM_ROBO'].includes(m.content)
                 );
                 conv.displayLastMsg = lastVisibleMsg ? lastVisibleMsg.content : 'Conversa iniciada';
 
@@ -7669,6 +7677,8 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
                 statusBadge = `<span style="font-size:0.68rem; padding:2px 6px; border-radius:4px; font-weight:700; background:rgba(230,126,34,0.15); color:#e67e22;">🟠 Humano</span>`;
             } else if (c.status === 'ignorado') {
                 statusBadge = `<span style="font-size:0.68rem; padding:2px 6px; border-radius:4px; font-weight:700; background:rgba(231,76,60,0.15); color:#e74c3c;">🚫 Amigo / Ignorado</span>`;
+            } else if (c.status === 'spam') {
+                statusBadge = `<span style="font-size:0.68rem; padding:2px 6px; border-radius:4px; font-weight:700; background:rgba(231,76,60,0.25); color:#ff6b6b; border:1px solid rgba(231,76,60,0.4);">🚨 Spam / Robô</span>`;
             }
 
             const initial = (c.clientName || 'W').charAt(0).toUpperCase();
@@ -7729,7 +7739,12 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
         // Atualizar botões e badge
         const currentStatus = conv ? conv.status : 'ativo';
         if (statusBadge) {
-            if (currentStatus === 'pausado') {
+            if (currentStatus === 'spam') {
+                statusBadge.style.background = 'rgba(231,76,60,0.25)';
+                statusBadge.style.color = '#ff6b6b';
+                statusBadge.style.border = '1px solid rgba(231,76,60,0.4)';
+                statusBadge.innerHTML = '🚨 Propaganda / Robô (IA Silenciada)';
+            } else if (currentStatus === 'pausado') {
                 statusBadge.style.background = 'rgba(230,126,34,0.15)';
                 statusBadge.style.color = '#e67e22';
                 statusBadge.style.border = '1px solid rgba(230,126,34,0.3)';
@@ -7962,6 +7977,30 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
         }
     };
 
+    // Helper para extrair variações brasileiras de telefone (com/sem 55, com/sem o 9º dígito)
+    function getFrontendPhoneVariants(rawPhone) {
+        const digits = (rawPhone || '').replace(/\D/g, '');
+        if (!digits || digits.length < 8) return [];
+        const variants = new Set();
+        variants.add(digits);
+        const without55 = digits.replace(/^55/, '');
+        variants.add(without55);
+        variants.add(`55${without55}`);
+
+        if (without55.length === 11 && without55.charAt(2) === '9') {
+            const ddd = without55.substring(0, 2);
+            const rest8 = without55.substring(3);
+            variants.add(`${ddd}${rest8}`);
+            variants.add(`55${ddd}${rest8}`);
+        } else if (without55.length === 10) {
+            const ddd = without55.substring(0, 2);
+            const rest8 = without55.substring(2);
+            variants.add(`${ddd}9${rest8}`);
+            variants.add(`55${ddd}9${rest8}`);
+        }
+        return Array.from(variants);
+    }
+
     // Bloquear / Desbloquear na Lista Negra direto da conversa
     window.toggleCurrentChatBlacklist = async function() {
         if (!currentLivePhone) return;
@@ -7975,11 +8014,14 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
 
         try {
             const supa = getSupa();
-            await supa.from('agent_memory').insert({
-                phone: currentLivePhone,
+            const phoneList = getFrontendPhoneVariants(currentLivePhone);
+            const rows = phoneList.map(p => ({
+                phone: p,
                 role: 'user',
                 content: newCmd
-            });
+            }));
+
+            await supa.from('agent_memory').insert(rows);
 
             window.loadLiveConversations();
             window.loadBlacklistTable();
@@ -8058,7 +8100,45 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
         }
     };
 
-    // Executar Ordem de IA para a Maria Cecília
+    // Variável para arquivo anexado na ordem da Maria Cecília
+    let _currentAiOrderFile = null;
+
+    window.handleAiOrderFileUpload = function(e) {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+
+        if (file.size > 15 * 1024 * 1024) {
+            alert('O arquivo selecionado ultrapassa o limite de 15MB.');
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = function(evt) {
+            _currentAiOrderFile = {
+                name: file.name,
+                type: file.type || (file.name.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg'),
+                base64: evt.target.result
+            };
+
+            const badge = document.getElementById('ai-order-file-badge');
+            const nameText = document.getElementById('ai-order-file-name-text');
+            if (badge && nameText) {
+                nameText.innerText = file.name;
+                badge.style.display = 'inline-flex';
+            }
+        };
+        reader.readAsDataURL(file);
+    };
+
+    window.removeAiOrderFile = function() {
+        _currentAiOrderFile = null;
+        const fileInput = document.getElementById('live-chat-ai-file-input');
+        if (fileInput) fileInput.value = '';
+        const badge = document.getElementById('ai-order-file-badge');
+        if (badge) badge.style.display = 'none';
+    };
+
+    // Executar Ordem de IA para a Maria Cecília (com suporte a envio de arquivos/orçamentos)
     window.executeAiActiveCommand = async function() {
         if (!currentLivePhone) {
             alert('⚠️ Selecione uma conversa na lista à esquerda antes de disparar a ordem.');
@@ -8066,8 +8146,8 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
         }
         const input = document.getElementById('live-chat-ai-cmd-input');
         const cmdText = input?.value?.trim();
-        if (!cmdText) {
-            alert('⚠️ Digite uma ordem ou instrução para a Maria Cecília antes de disparar.');
+        if (!cmdText && !_currentAiOrderFile) {
+            alert('⚠️ Digite uma instrução ou anexe um arquivo para a Maria Cecília enviar.');
             return;
         }
 
@@ -8087,7 +8167,10 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
                     action: 'execute_ai_order',
                     telefone_destino: currentLivePhone,
                     nome_cliente: clientName,
-                    ordem: cmdText
+                    ordem: cmdText || 'Envie o documento anexado cordialmente para o cliente.',
+                    file_name: _currentAiOrderFile?.name || null,
+                    file_type: _currentAiOrderFile?.type || null,
+                    file_base64: _currentAiOrderFile?.base64 || null
                 }
             });
 
@@ -8095,6 +8178,7 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
             if (res.data?.error) throw new Error(res.data.error);
 
             if (input) input.value = '';
+            window.removeAiOrderFile();
 
             // Recarrega o chat imediatamente
             await window.selectLiveConversation(currentLivePhone);
@@ -8188,11 +8272,15 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
 
         try {
             const supa = getSupa();
-            await supa.from('agent_memory').insert({
-                phone: fullPhone,
+            // Grava para todas as variações de DDD e 9º dígito
+            const variants = getFrontendPhoneVariants(fullPhone);
+            const rows = variants.map(p => ({
+                phone: p,
                 role: 'user',
                 content: 'BOT_IGNORAR'
-            });
+            }));
+
+            await supa.from('agent_memory').insert(rows);
 
             if (inputNome) inputNome.value = '';
             if (inputPhone) inputPhone.value = '';
@@ -8211,11 +8299,14 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
 
         try {
             const supa = getSupa();
-            await supa.from('agent_memory').insert({
-                phone: phone,
+            const variants = getFrontendPhoneVariants(phone);
+            const rows = variants.map(p => ({
+                phone: p,
                 role: 'user',
                 content: 'BOT_ATIVO'
-            });
+            }));
+
+            await supa.from('agent_memory').insert(rows);
 
             window.loadBlacklistTable();
             window.loadLiveConversations();
@@ -9060,12 +9151,462 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
         }
     };
 
+    // ==========================================
+    // MURAL DE TAREFAS & SOLICITAÇÕES DO ARNALDO (MARIA CECÍLIA)
+    // ==========================================
+    window.arnaldoTarefas = [];
+
+    window.openModalNovaTarefa = function() {
+        const modal = document.getElementById('modal-nova-tarefa');
+        if (modal) {
+            modal.style.display = 'flex';
+            document.getElementById('form-nova-tarefa')?.reset();
+            setTimeout(() => document.getElementById('tarefa-manual-titulo')?.focus(), 100);
+        }
+    };
+
+    window.loadTarefasArnaldo = async function(silent = false) {
+        const container = document.getElementById('tarefas-cards-container');
+        if (!container) return;
+
+        if (!silent && (!window.arnaldoTarefas || window.arnaldoTarefas.length === 0)) {
+            container.innerHTML = `
+                <div style="grid-column: 1 / -1; text-align: center; padding: 40px 10px; color: var(--text-muted); font-size: 0.9rem;">
+                    <i class="fa-solid fa-spinner fa-spin" style="font-size: 1.8rem; margin-bottom: 10px; display: block; color: #f1c40f;"></i>
+                    Carregando suas tarefas...
+                </div>
+            `;
+        }
+
+        try {
+            const supa = getSupa();
+            const allTasks = [];
+
+            // 1. Tenta carregar da tabela dedicada tarefas_arnaldo
+            try {
+                const { data: dbTasks, error: errDb } = await supa
+                    .from('tarefas_arnaldo')
+                    .select('*')
+                    .order('created_at', { ascending: false });
+
+                if (!errDb && dbTasks) {
+                    allTasks.push(...dbTasks);
+                }
+            } catch (e) {
+                console.warn('[TAREFAS] Erro ao consultar tabela tarefas_arnaldo:', e);
+            }
+
+            // 2. Carrega de agent_memory (phone = 'ARNALDO_TASK') para resiliência imediata
+            try {
+                const { data: memTasks, error: errMem } = await supa
+                    .from('agent_memory')
+                    .select('id, content, created_at')
+                    .eq('phone', 'ARNALDO_TASK')
+                    .order('created_at', { ascending: false });
+
+                if (!errMem && memTasks) {
+                    memTasks.forEach(m => {
+                        try {
+                            const parsed = JSON.parse(m.content);
+                            // Evita duplicar se já veio da tabela tarefas_arnaldo
+                            const exists = allTasks.some(t => t.id === parsed.id || (t.cliente_telefone === parsed.cliente_telefone && t.titulo === parsed.titulo));
+                            if (!exists) {
+                                allTasks.push({
+                                    id: parsed.id || m.id,
+                                    memory_record_id: m.id,
+                                    cliente_nome: parsed.cliente_nome || 'Cliente',
+                                    cliente_telefone: parsed.cliente_telefone || '',
+                                    tipo_solicitacao: parsed.tipo_solicitacao || 'ORCAMENTO',
+                                    titulo: parsed.titulo || 'Solicitação de Cliente',
+                                    descricao: parsed.descricao || '',
+                                    prioridade: parsed.prioridade || 'alta',
+                                    status: parsed.status || 'pendente',
+                                    resposta_ia: parsed.resposta_ia || '',
+                                    created_at: parsed.created_at || m.created_at
+                                });
+                            }
+                        } catch (pErr) {
+                            console.warn('[TAREFAS] Falha no parse da memória:', pErr);
+                        }
+                    });
+                }
+            } catch (e) {
+                console.warn('[TAREFAS] Erro ao consultar agent_memory ARNALDO_TASK:', e);
+            }
+
+            // Ordena mais recentes no topo
+            allTasks.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+            window.arnaldoTarefas = allTasks;
+
+            // Atualiza contadores e KPIs
+            const pendentes = allTasks.filter(t => (t.status || 'pendente') === 'pendente').length;
+            const andamento = allTasks.filter(t => t.status === 'em_andamento').length;
+            const concluidas = allTasks.filter(t => t.status === 'concluido').length;
+            const orcamentos = allTasks.filter(t => t.tipo_solicitacao === 'ORCAMENTO').length;
+
+            const elPend = document.getElementById('metric-tarefas-pendentes');
+            const elAnd = document.getElementById('metric-tarefas-andamento');
+            const elConc = document.getElementById('metric-tarefas-concluidas');
+            const elOrc = document.getElementById('metric-tarefas-orcamentos');
+            const badgeNav = document.getElementById('badge-tarefas-pendentes');
+
+            if (elPend) elPend.textContent = pendentes;
+            if (elAnd) elAnd.textContent = andamento;
+            if (elConc) elConc.textContent = concluidas;
+            if (elOrc) elOrc.textContent = orcamentos;
+
+            if (badgeNav) {
+                badgeNav.textContent = pendentes;
+                badgeNav.style.display = pendentes > 0 ? 'inline-block' : 'none';
+            }
+
+            window.renderTarefasList();
+
+        } catch (err) {
+            console.error('[TAREFAS] Erro geral ao carregar:', err);
+            if (!silent) {
+                container.innerHTML = `<div style="grid-column: 1 / -1; color: var(--accent-red); padding: 20px; text-align: center;">Erro ao carregar tarefas: ${err.message}</div>`;
+            }
+        }
+    };
+
+    window.renderTarefasList = function() {
+        const container = document.getElementById('tarefas-cards-container');
+        if (!container) return;
+
+        const search = (document.getElementById('filtro-tarefas-busca')?.value || '').toLowerCase().trim();
+        const statusFilter = document.getElementById('filtro-tarefas-status')?.value || 'pendente';
+        const tipoFilter = document.getElementById('filtro-tarefas-tipo')?.value || 'todos';
+
+        const filtered = (window.arnaldoTarefas || []).filter(t => {
+            // Filtro por status
+            if (statusFilter !== 'todos' && (t.status || 'pendente') !== statusFilter) return false;
+            // Filtro por tipo
+            if (tipoFilter !== 'todos' && t.tipo_solicitacao !== tipoFilter) return false;
+            // Filtro por busca
+            if (search) {
+                const matchNome = (t.cliente_nome || '').toLowerCase().includes(search);
+                const matchTel = (t.cliente_telefone || '').includes(search);
+                const matchTit = (t.titulo || '').toLowerCase().includes(search);
+                const matchDesc = (t.descricao || '').toLowerCase().includes(search);
+                if (!matchNome && !matchTel && !matchTit && !matchDesc) return false;
+            }
+            return true;
+        });
+
+        if (filtered.length === 0) {
+            container.innerHTML = `
+                <div style="grid-column: 1 / -1; text-align: center; padding: 50px 20px; background: rgba(0,0,0,0.2); border-radius: 12px; border: 1px dashed rgba(255,255,255,0.1);">
+                    <i class="fa-solid fa-clipboard-check" style="font-size: 2.2rem; color: #2ecc71; margin-bottom: 12px; display: block; opacity: 0.7;"></i>
+                    <h3 style="color: var(--text-primary); font-size: 1.1rem; margin-bottom: 6px;">Nenhuma tarefa encontrada neste filtro</h3>
+                    <p style="color: var(--text-muted); font-size: 0.85rem;">Todas as pendências deste filtro foram concluídas ou ainda não foram registradas.</p>
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = filtered.map(t => {
+            const id = t.id;
+            const status = t.status || 'pendente';
+            const tipo = t.tipo_solicitacao || 'ORCAMENTO';
+            const prioridade = t.prioridade || 'media';
+
+            // Configuração visual de Tipo
+            let tipoLabel = '💰 Orçamento';
+            let tipoBg = 'rgba(241, 196, 15, 0.15)';
+            let tipoColor = '#f1c40f';
+            let tipoBorder = 'rgba(241, 196, 15, 0.35)';
+
+            if (tipo === 'LIGACAO_RETORNO') {
+                tipoLabel = '📞 Ligação de Retorno';
+                tipoBg = 'rgba(52, 152, 219, 0.15)';
+                tipoColor = '#3498db';
+                tipoBorder = 'rgba(52, 152, 219, 0.35)';
+            } else if (tipo === 'VISITA_TECNICA') {
+                tipoLabel = '🚗 Visita Técnica';
+                tipoBg = 'rgba(230, 126, 34, 0.15)';
+                tipoColor = '#e67e22';
+                tipoBorder = 'rgba(230, 126, 34, 0.35)';
+            } else if (tipo === 'DUVIDA_NEGOCIACAO') {
+                tipoLabel = '💬 Negociação / Dúvida';
+                tipoBg = 'rgba(155, 89, 182, 0.15)';
+                tipoColor = '#9b59b6';
+                tipoBorder = 'rgba(155, 89, 182, 0.35)';
+            }
+
+            // Prioridade
+            let prioLabel = '🟡 Média';
+            let prioColor = '#f39c12';
+            if (prioridade === 'alta') {
+                prioLabel = '🔴 Alta';
+                prioColor = '#e74c3c';
+            } else if (prioridade === 'baixa') {
+                prioLabel = '⚪ Baixa';
+                prioColor = '#95a5a6';
+            }
+
+            // Status Badge
+            let statusLabel = '🟡 Pendente';
+            let statusBg = 'rgba(241, 196, 15, 0.12)';
+            let statusColor = '#f1c40f';
+            if (status === 'em_andamento') {
+                statusLabel = '🔵 Em Andamento';
+                statusBg = 'rgba(52, 152, 219, 0.15)';
+                statusColor = '#3498db';
+            } else if (status === 'concluido') {
+                statusLabel = '🟢 Concluída';
+                statusBg = 'rgba(46, 204, 113, 0.15)';
+                statusColor = '#2ecc71';
+            }
+
+            const cleanPhone = (t.cliente_telefone || '').replace(/\D/g, '');
+            const dateStr = t.created_at ? new Date(t.created_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : 'Data rec.';
+
+            return `
+                <div class="glass-panel" style="padding: 16px; border-radius: 12px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.08); display: flex; flex-direction: column; gap: 12px; transition: all 0.3s; position: relative;">
+                    <!-- HEADER DO CARD -->
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+                        <span style="font-size: 0.72rem; padding: 4px 8px; border-radius: 6px; font-weight: 700; background: ${tipoBg}; color: ${tipoColor}; border: 1px solid ${tipoBorder};">
+                            ${tipoLabel}
+                        </span>
+                        <div style="display: flex; gap: 6px; align-items: center;">
+                            <span style="font-size: 0.70rem; font-weight: 700; color: ${prioColor};">
+                                ${prioLabel}
+                            </span>
+                            <span style="font-size: 0.70rem; padding: 3px 8px; border-radius: 20px; font-weight: 700; background: ${statusBg}; color: ${statusColor};">
+                                ${statusLabel}
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- TÍTULO -->
+                    <h3 style="font-size: 1rem; font-weight: 800; color: var(--text-primary); margin: 0; line-height: 1.3;">
+                        ${t.titulo}
+                    </h3>
+
+                    <!-- DADOS DO CLIENTE -->
+                    <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05);">
+                        <div>
+                            <div style="font-weight: 700; font-size: 0.85rem; color: var(--text-primary);"><i class="fa-solid fa-user" style="color: var(--accent-orange); margin-right: 6px;"></i>${t.cliente_nome}</div>
+                            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px;">${t.cliente_telefone || 'Sem número'}</div>
+                        </div>
+                        ${cleanPhone ? `
+                            <a href="https://wa.me/${cleanPhone}" target="_blank" class="action-btn" style="background: rgba(37,211,102,0.15); color: #25D366; border: 1px solid rgba(37,211,102,0.3); padding: 5px 10px; font-size: 0.75rem; border-radius: 6px; text-decoration: none;" title="Abrir WhatsApp Web">
+                                <i class="fa-brands fa-whatsapp"></i> WhatsApp
+                            </a>
+                        ` : ''}
+                    </div>
+
+                    <!-- DESCRIÇÃO -->
+                    <div style="font-size: 0.82rem; color: var(--text-secondary); line-height: 1.45; background: rgba(0,0,0,0.2); padding: 10px; border-radius: 8px; border-left: 3px solid ${tipoColor};">
+                        ${t.descricao}
+                    </div>
+
+                    <!-- RESPOSTA DADA PELA MARIA -->
+                    ${t.resposta_ia ? `
+                        <div style="font-size: 0.74rem; color: #25D366; opacity: 0.9; font-style: italic; display: flex; gap: 6px;">
+                            <span>💬</span> <span><strong>Maria respondeu:</strong> "${t.resposta_ia.substring(0, 90)}${t.resposta_ia.length > 90 ? '...' : ''}"</span>
+                        </div>
+                    ` : ''}
+
+                    <!-- FOOTER DO CARD -->
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 10px;">
+                        <span style="font-size: 0.7rem; color: var(--text-muted);"><i class="fa-regular fa-clock" style="margin-right: 4px;"></i>${dateStr}</span>
+                        
+                        <div style="display: flex; gap: 6px;">
+                            ${status === 'pendente' ? `
+                                <button class="action-btn" onclick="window.updateTarefaStatus('${id}', 'em_andamento')" style="background: rgba(52, 152, 219, 0.2); color: #3498db; border: 1px solid rgba(52, 152, 219, 0.4); padding: 5px 10px; font-size: 0.75rem; border-radius: 6px;" title="Marcar Em Andamento">
+                                    <i class="fa-solid fa-play"></i> Iniciar
+                                </button>
+                            ` : ''}
+
+                            ${status !== 'concluido' ? `
+                                <button class="action-btn" onclick="window.updateTarefaStatus('${id}', 'concluido')" style="background: rgba(46, 204, 113, 0.2); color: #2ecc71; border: 1px solid rgba(46, 204, 113, 0.4); padding: 5px 10px; font-size: 0.75rem; border-radius: 6px;" title="Concluir Tarefa">
+                                    <i class="fa-solid fa-check"></i> Concluir
+                                </button>
+                            ` : `
+                                <button class="action-btn" onclick="window.updateTarefaStatus('${id}', 'pendente')" style="background: var(--surface-light); color: var(--text-primary); padding: 5px 10px; font-size: 0.75rem; border-radius: 6px;" title="Reabrir Tarefa">
+                                    <i class="fa-solid fa-rotate-left"></i> Reabrir
+                                </button>
+                            `}
+
+                            ${cleanPhone ? `
+                                <button class="action-btn" onclick="window.openChatFromTarefa('${cleanPhone}')" style="background: var(--surface-light); padding: 5px 10px; font-size: 0.75rem; border-radius: 6px;" title="Abrir no Live Chat da Maria">
+                                    <i class="fa-solid fa-comments"></i>
+                                </button>
+                            ` : ''}
+
+                            <button class="action-btn" onclick="window.deleteTarefa('${id}')" style="background: rgba(231, 76, 60, 0.15); color: #e74c3c; border: 1px solid rgba(231, 76, 60, 0.3); padding: 5px 8px; font-size: 0.75rem; border-radius: 6px;" title="Excluir Tarefa">
+                                <i class="fa-solid fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    };
+
+    window.filterTarefas = function() {
+        window.renderTarefasList();
+    };
+
+    window.updateTarefaStatus = async function(id, newStatus) {
+        try {
+            const supa = getSupa();
+            
+            // 1. Atualiza na tabela tarefas_arnaldo
+            try {
+                await supa.from('tarefas_arnaldo').update({
+                    status: newStatus,
+                    concluido_em: newStatus === 'concluido' ? new Date().toISOString() : null
+                }).eq('id', id);
+            } catch (e) {}
+
+            // 2. Atualiza em agent_memory
+            try {
+                const targetTask = window.arnaldoTarefas.find(t => t.id === id);
+                if (targetTask) {
+                    targetTask.status = newStatus;
+                    targetTask.concluido_em = newStatus === 'concluido' ? new Date().toISOString() : null;
+
+                    if (targetTask.memory_record_id) {
+                        await supa.from('agent_memory').update({
+                            content: JSON.stringify(targetTask)
+                        }).eq('id', targetTask.memory_record_id);
+                    } else {
+                        const { data: recs } = await supa.from('agent_memory')
+                            .select('id, content')
+                            .eq('phone', 'ARNALDO_TASK')
+                            .like('content', `%"id":"${id}"%`)
+                            .limit(1);
+                        if (recs && recs.length > 0) {
+                            await supa.from('agent_memory').update({
+                                content: JSON.stringify(targetTask)
+                            }).eq('id', recs[0].id);
+                        }
+                    }
+                }
+            } catch (e) {}
+
+            // Recarrega silenciosamente
+            await window.loadTarefasArnaldo(true);
+
+        } catch (err) {
+            console.error('[TAREFAS] Erro ao atualizar status:', err);
+            alert('Falha ao atualizar tarefa: ' + err.message);
+        }
+    };
+
+    window.deleteTarefa = async function(id) {
+        if (!confirm('Deseja realmente excluir esta tarefa?')) return;
+        try {
+            const supa = getSupa();
+            
+            // 1. Deleta de tarefas_arnaldo
+            try {
+                await supa.from('tarefas_arnaldo').delete().eq('id', id);
+            } catch (e) {}
+
+            // 2. Deleta de agent_memory
+            try {
+                const targetTask = window.arnaldoTarefas.find(t => t.id === id);
+                if (targetTask?.memory_record_id) {
+                    await supa.from('agent_memory').delete().eq('id', targetTask.memory_record_id);
+                } else {
+                    const { data: recs } = await supa.from('agent_memory')
+                        .select('id')
+                        .eq('phone', 'ARNALDO_TASK')
+                        .like('content', `%"id":"${id}"%`)
+                        .limit(1);
+                    if (recs && recs.length > 0) {
+                        await supa.from('agent_memory').delete().eq('id', recs[0].id);
+                    }
+                }
+            } catch (e) {}
+
+            await window.loadTarefasArnaldo(true);
+
+        } catch (err) {
+            console.error('[TAREFAS] Erro ao excluir:', err);
+            alert('Falha ao excluir tarefa.');
+        }
+    };
+
+    window.salvarNovaTarefaManual = async function(event) {
+        if (event) event.preventDefault();
+
+        const titulo = document.getElementById('tarefa-manual-titulo')?.value?.trim();
+        const clienteNome = document.getElementById('tarefa-manual-cliente')?.value?.trim();
+        const clienteTel = document.getElementById('tarefa-manual-telefone')?.value?.trim();
+        const tipo = document.getElementById('tarefa-manual-tipo')?.value || 'ORCAMENTO';
+        const prioridade = document.getElementById('tarefa-manual-prioridade')?.value || 'media';
+        const descricao = document.getElementById('tarefa-manual-descricao')?.value?.trim();
+
+        if (!titulo || !clienteNome || !descricao) {
+            alert('Preencha os campos obrigatórios da tarefa.');
+            return;
+        }
+
+        const taskData = {
+            id: `TASK_${Date.now()}`,
+            cliente_nome: clienteNome,
+            cliente_telefone: clienteTel,
+            tipo_solicitacao: tipo,
+            titulo: titulo,
+            descricao: descricao,
+            prioridade: prioridade,
+            status: 'pendente',
+            resposta_ia: '',
+            created_at: new Date().toISOString()
+        };
+
+        try {
+            const supa = getSupa();
+            
+            // 1. Tenta tabela
+            try {
+                await supa.from('tarefas_arnaldo').insert(taskData);
+            } catch (e) {}
+
+            // 2. Garante em agent_memory
+            await supa.from('agent_memory').insert({
+                phone: 'ARNALDO_TASK',
+                role: 'system',
+                content: JSON.stringify(taskData)
+            });
+
+            closeModal('modal-nova-tarefa');
+            await window.loadTarefasArnaldo(true);
+
+        } catch (err) {
+            console.error('[TAREFAS] Erro ao salvar manual:', err);
+            alert('Erro ao salvar tarefa: ' + err.message);
+        }
+    };
+
+    window.openChatFromTarefa = function(phone) {
+        window.showSection('view-mensagens');
+        if (typeof window.switchMensagensTab === 'function') {
+            window.switchMensagensTab('live');
+        }
+        setTimeout(() => {
+            if (typeof window.selectLiveConversation === 'function') {
+                window.selectLiveConversation(phone);
+            }
+        }, 200);
+    };
+
+    // Carrega contadores das tarefas no boot
+    setTimeout(() => {
+        window.loadTarefasArnaldo(true);
+    }, 1500);
+
     // Auto-verificador a cada 45 segundos quando o CRM está aberto
     setInterval(() => {
         window.checkAndRunPendingTasks();
     }, 45000);
 
-    console.log('[CentralAtendimento v2.1] Live CRM, Agenda da Maria, Outbound e Lista Negra carregados.');
+    console.log('[CentralAtendimento v2.2] Live CRM, Anti-Spam Shield, Minhas Tarefas e Agenda da Maria carregados.');
 })();
 
 
