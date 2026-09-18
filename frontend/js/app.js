@@ -2947,22 +2947,39 @@ ${materiaisTxt}${extrasTxt}
     if (authForm) {
         authForm.addEventListener('submit', async (e) => {
             e.preventDefault();
-            const email = document.getElementById('login-email').value;
+            const email = document.getElementById('login-email').value.trim();
             const password = document.getElementById('login-password').value;
+            const submitBtn = authForm.querySelector('button[type="submit"]');
 
             loginError.style.color = 'var(--text-primary)';
-            loginError.textContent = 'Trancando credenciais via Supabase Auth...';
+            loginError.textContent = 'Autenticando via Supabase Auth...';
+            if (submitBtn) submitBtn.disabled = true;
 
-            const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+            try {
+                const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
-            if (error) {
+                if (error) {
+                    console.error('[Auth Login Error]:', error);
+                    loginError.style.color = 'var(--accent-red)';
+                    if (error.message.includes('Invalid login credentials')) {
+                        loginError.textContent = '❌ E-mail ou Senha incorretos.';
+                    } else if (error.message.includes('Email not confirmed')) {
+                        loginError.textContent = '⚠️ E-mail ainda não confirmado. Verifique sua caixa de entrada.';
+                    } else {
+                        loginError.textContent = `❌ Falha no login: ${error.message}`;
+                    }
+                } else {
+                    loginError.style.color = 'var(--accent-green)';
+                    loginError.textContent = '✅ Acesso Liberado!';
+                    // Garante transição imediata
+                    if (data.session) syncAppView(data.session);
+                }
+            } catch (err) {
+                console.error('[Auth Exception]:', err);
                 loginError.style.color = 'var(--accent-red)';
-                loginError.textContent = '❌ Acesso Negado: E-mail ou Senha incorretos.';
-            } else {
-                loginError.style.color = 'var(--accent-green)';
-                loginError.textContent = '✅ Acesso Liberado!';
-                // Garante transição imediata
-                if (data.session) syncAppView(data.session);
+                loginError.textContent = `❌ Erro de conexão: ${err.message}`;
+            } finally {
+                if (submitBtn) submitBtn.disabled = false;
             }
         });
     }
