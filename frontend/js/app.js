@@ -9142,6 +9142,13 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
     let _isCheckingAgenda = false;
     window.checkAndRunPendingTasks = async function() {
         if (_isCheckingAgenda) return;
+
+        // 🛡️ Filtro no navegador: Não aciona o webhook fora do horário comercial (08:00 às 20:00)
+        const currentHour = new Date().getHours();
+        if (currentHour < 8 || currentHour >= 20) {
+            return;
+        }
+
         _isCheckingAgenda = true;
 
         const SUPABASE_URL = ((typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_URL) ? import.meta.env.VITE_SUPABASE_URL : 'https://tmpwmtpdxcvulglkahcg.supabase.co').trim();

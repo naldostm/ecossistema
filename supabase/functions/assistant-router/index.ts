@@ -511,11 +511,14 @@ DIRETRIZES DE RESPOSTA:
                   eventGuidance = "Objetivo da Mensagem: Atuação como Secretária Executiva e Assistente Comercial da Arnaldo Trentin Serviços. Execute fielmente as instruções fornecidas pelo Arnaldo.";
               }
 
+              const temporal = buildTemporalContext();
               const prompt = `Você é Maria Cecília, secretária executiva e assistente de operações da Arnaldo Trentin Serviços (Engenharia, Climatização e Refrigeração).
 O gestor da empresa, Arnaldo Trentin, agendou a seguinte missão para você executar agora com o contato ${targetName} (${targetPhone}):
 
 TIPO DE EVENTO: ${eventLabel}
 ${eventGuidance}
+
+${temporal.promptContext}
 
 INSTRUÇÕES ESPECÍFICAS DO GESTOR (ARNALDO):
 "${instructions}"
@@ -526,9 +529,10 @@ DIRETRIZES OBRIGATÓRIAS:
 1. Escreva uma mensagem de WhatsApp COMPLETA, elegante, educada e altamente profissional.
 2. NUNCA corte frases. Finalize a mensagem do começo ao fim.
 3. Se houver arquivo anexado (${fileName}), mencione educadamente que o documento segue em anexo para análise.
-4. Finalize com uma pergunta comercial acolhedora para facilitar a resposta do destinatário.
-5. Fale em primeira pessoa como Maria Cecília da Arnaldo Trentin Serviços.
-6. Retorne APENAS o texto exato que será enviado no WhatsApp, sem aspas e sem explicações.`;
+4. Utilize estritamente a saudação adequada ao horário atual de Brasília ("${temporal.saudacaoObrigatoria}"). NUNCA dê "Bom dia" à noite ou "Boa noite" de dia.
+5. Finalize com uma pergunta comercial acolhedora para facilitar a resposta do destinatário.
+6. Fale em primeira pessoa como Maria Cecília da Arnaldo Trentin Serviços.
+7. Retorne APENAS o texto exato que será enviado no WhatsApp, sem aspas e sem explicações.`;
 
               let model = genAI.getGenerativeModel({
                   model: "gemini-2.5-flash",
@@ -556,27 +560,30 @@ DIRETRIZES OBRIGATÓRIAS:
                   content: 'BOT_ATIVO'
               });
 
-              // 3. Grava a mensagem no histórico do contato
-              const storedMsg = fileName ? `${generatedMsg}\n📎 _[Arquivo enviado: ${fileName}]_` : generatedMsg;
+              // 3. Registra na memória a mensagem enviada pela Maria
               await supabase.from('agent_memory').insert({
                   phone: targetPhone,
                   role: 'model',
-                  content: storedMsg
+                  content: generatedMsg
               });
 
-              // 4. Disparo no WhatsApp via UazAPI
+              // 4. Envia via UaZAPI
               let sendStatus = 200;
               if (fileBase64 || fileUrl) {
                   try {
-                      const mediaEndpoint = `${manualUazapiUrl}/send/media`;
-                      const mediaPayload = {
+                      const mediaPayload: Record<string, any> = {
                           number: targetPhone,
-                          media: fileBase64 || fileUrl,
                           caption: generatedMsg,
-                          fileName: fileName || 'documento.pdf',
-                          type: fileType.includes('pdf') ? 'document' : 'image'
+                          type: fileName.endsWith('.pdf') ? 'document' : 'image'
                       };
-                      const mediaResp = await fetch(mediaEndpoint, {
+                      if (fileBase64) {
+                          mediaPayload.file = fileBase64;
+                          mediaPayload.fileName = fileName || 'documento.pdf';
+                      } else {
+                          mediaPayload.url = fileUrl;
+                      }
+
+                      const mediaResp = await fetch(`${manualUazapiUrl}/send/media`, {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json', 'token': manualToken },
                           body: JSON.stringify(mediaPayload)
@@ -656,6 +663,24 @@ DIRETRIZES OBRIGATÓRIAS:
           }
 
           if (payload?.action === 'process_maria_agenda') {
+              const temporal = buildTemporalContext();
+
+              // 🛡️ BLINDAGEM SUPREMA DE HORÁRIO COMERCIAL (ANTI-MADRUGADA):
+              // O piloto automático da Maria NUNCA pode disparar mensagens proativas fora do horário comercial (08:00 às 20:00).
+              const spNow = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+              const currentHour = spNow.getHours();
+              if (currentHour < 8 || currentHour >= 20) {
+                  console.log(`[AGENDA AUTO] 🌙 Fora do horário comercial (${temporal.spTimeStr} em Brasília). Disparos automáticos bloqueados.`);
+                  return new Response(JSON.stringify({ 
+                      success: true, 
+                      processed_count: 0, 
+                      message: `Fora do horário comercial (${temporal.spTimeStr} em Brasília). Disparos automáticos bloqueados até as 08:00.` 
+                  }), {
+                      status: 200,
+                      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+                  });
+              }
+
               const { data: records } = await supabase.from('agent_memory')
                   .select('id, content')
                   .eq('phone', 'MARIA_TASK')
@@ -671,6 +696,24 @@ DIRETRIZES OBRIGATÓRIAS:
                           const task = JSON.parse(r.content);
                           if (task.status === 'pendente' && task.scheduled_for) {
                               const schedDate = new Date(task.scheduled_for);
+
+                              // 🛡️ PROTEÇÃO CONTRA TAREFAS VENCIDAS ANTIGAS:
+                              // Se a tarefa era de um dia anterior ou atrasou mais de 4 horas (ex: sistema ficou fora),
+                              // NÃO dispara de supetão. Remarca para as 09:00 de hoje para preservar o relacionamento com o cliente.
+                              const diffHours = (now.getTime() - schedDate.getTime()) / (1000 * 60 * 60);
+                              if (diffHours > 4 || schedDate.toDateString() !== now.toDateString()) {
+                                  console.log(`[AGENDA AUTO] Tarefa ${task.id} (${task.target_name}) estava atrasada há ${diffHours.toFixed(1)}h. Remarcando para as 09:00.`);
+                                  const postponed = new Date(spNow);
+                                  postponed.setHours(9, 0, 0, 0);
+                                  if (currentHour >= 9) {
+                                      postponed.setTime(spNow.getTime() + 15 * 60 * 1000);
+                                  }
+                                  task.scheduled_for = postponed.toISOString();
+                                  task.observacao = `Remarcado automaticamente para horário comercial adequado (original: ${schedDate.toLocaleString('pt-BR')})`;
+                                  await supabase.from('agent_memory').update({ content: JSON.stringify(task) }).eq('id', r.id);
+                                  continue;
+                              }
+
                               if (schedDate <= now) {
                                   console.log(`[AGENDA AUTO] Executando tarefa agendada: ${task.id} (${task.target_name})`);
                                   const res = await executeSingleTask(task, r.id);
