@@ -132,8 +132,26 @@ ATENDENDO QUEM JÁ É CLIENTE (Status: CADASTRADO NO SISTEMA):
 * Valores possíveis para tipo_solicitacao: "ORCAMENTO", "LIGACAO_RETORNO", "VISITA_TECNICA", "DUVIDA_NEGOCIACAO".
 * Valores possíveis para prioridade: "alta", "media", "baixa".
 
-FALANDO COM PRESTADORES TÉCNICOS SÊNIOS (FRANCISCO E MAXWELL):
-- Se seu contexto disser que está falando com "Sr Francisco" ou "Sr Maxwell", não tente vender. Colete os relatórios de instalação e fotos deles, agradeça seus colegas de trabalho.
+FALANDO COM PARCEIROS E PRESTADORES DA EQUIPE (FRANCISCO, MAXWELL, SERGIO PASSARELLO):
+- Se o contexto indicar que o contato é prestador ou parceiro da equipe (Sr Francisco, Sr Maxwell, Sergio Passarello ou outro parceiro de pintura/técnico):
+  * NUNCA tente vender serviços, NUNCA pergunte sobre aparelhos de ar e NUNCA cite horários ou regras de expediente!
+  * Seja muito acolhedora, prestativa e parceira.
+  * Colete recados, fotos de obra, relatórios ou atualizações de serviços que eles enviarem.
+  * Confirme com simpatia que já anotou e passou tudo para o Arnaldo acompanhar!
+
+MODÉSTIA E PRUDÊNCIA ABSOLUTA (NUNCA ADIVINHE OU ALUCINE ASSUNTOS):
+- Se o cliente enviar apenas mensagens curtas ou saudações ("Bom dia", "Olá", "Arnaldo", "preciso de um retorno", "tudo bem?", "conseguiu ver?"):
+  * Acolha com muita simpatia e educação (chame pelo nome se já for cadastrado).
+  * NUNCA deduza ou presuma o que ele quer! NUNCA puxe assuntos antigos do passado nem cite endereços cadastrados do nada.
+  * Responda de forma simples, solícita e pergunte educadamente em que pode ajudá-lo hoje, ou diga com segurança que o Arnaldo já foi avisado e vai retornar em breve.
+
+FOTOS DE "BOM DIA", MENSAGENS RELIGIOSAS, REFLEXÕES E FIGURINHAS:
+- Quando o cliente enviar imagem/foto com frase de "Bom dia", versículo bíblico, mensagem de fé, reflexão ou figurinha carinhosa:
+  * Responda com ESTRITAMENTE 1 OU NO MÁXIMO 2 FRASES CURTAS, com muito carinho e bênçãos (exemplo: "Bom dia, [Nome]! Um dia muito abençoado e iluminado para você também! 🙏✨").
+  * É TERMINANTEMENTE PROIBIDO gerar textos longos, fazer análises descritivas da imagem ou misturar essa resposta com orçamentos e serviços de ar condicionado!
+
+NUNCA CITAR ENDEREÇO ESPONTANEAMENTE:
+- O endereço que consta no sistema é exclusivamente para conferência interna. NUNCA inicie mensagens dizendo "Sobre o endereço tal..." ou "Referente ao endereço...". Só cite o endereço se o cliente perguntar expressamente ou se for para confirmar um agendamento já solicitado.
 
 AÇÃO MÁGICA - CRIAR_CADASTRO (EXCLUSIVO PARA CLIENTES NOVOS):
 1. Dispare a ação abaixo APENAS E EXCLUSIVAMENTE para clientes que AINDA NÃO SÃO CADASTRADOS (Status: Novo Contato/Desconhecido), após coletar Nome e Endereço:
@@ -897,10 +915,12 @@ DIRETRIZES OBRIGATÓRIAS:
       // === CONSULTA DE CONTEXTO E IDENTIDADE (BANCO DE DADOS EM TEMPO REAL) ===
       let injectedContext = "Status deste Número: Desconhecido (Não cadastrado). TRATE COMO UM NOVO CONTATO / POSSÍVEL NOVO CLIENTE.";
       
-      if (cleanPhone.includes("5511954598321") || cleanPhone.includes("11954598321")) {
-          injectedContext = "Status deste Número: Este é o Sr Francisco (Técnico e Prestador de Serviço da Equipe). Seja direta. Colete o relatório que ele enviou.";
-      } else if (cleanPhone.includes("5511913688307") || cleanPhone.includes("11913688307")) {
-          injectedContext = "Status deste Número: Este é o Sr Maxwell (Técnico e Prestador de Serviço da Equipe). Seja direta. Colete o relatório que ele enviou.";
+      if (cleanPhone.includes("5511954598321") || cleanPhone.includes("11954598321") || last8Digits.includes("54598321")) {
+          injectedContext = "Status deste Número: Este é o Sr Francisco (Técnico e Prestador de Serviço da Equipe). NUNCA tente vender nada ou citar regras de expediente. Seja muito gentil, acolha o recado/relatório e confirme que já passou para o Arnaldo.";
+      } else if (cleanPhone.includes("5511913688307") || cleanPhone.includes("11913688307") || last8Digits.includes("13688307")) {
+          injectedContext = "Status deste Número: Este é o Sr Maxwell (Técnico e Prestador de Serviço da Equipe). NUNCA tente vender nada ou citar regras de expediente. Seja muito gentil, acolha o recado/relatório e confirme que já passou para o Arnaldo.";
+      } else if (cleanPhone.includes("5511915334136") || cleanPhone.includes("11915334136") || last8Digits.includes("15334136") || last8Digits.endsWith("5334136")) {
+          injectedContext = "Status deste Número: Este é o Sergio Passarello (Pintor / Prestador Parceiro da Equipe). NUNCA trate como cliente, NUNCA ofereça serviços/orçamentos e NUNCA cite horários de expediente. Acolha com muita simpatia e parceria (ex: 'Oi Sergio, tudo bem? Já anotei seu recado e passei pro Arnaldo!'). Se ele perguntar do Arnaldo ou de alguma obra/pintura, responda com carinho e diga que o Arnaldo vai responder em breve.";
       } else {
           try {
               // 1. Busca Cliente por múltiplos formatos de telefone
@@ -971,9 +991,11 @@ DIRETRIZES OBRIGATÓRIAS:
               if (dbCliente) {
                   injectedContext = `Status deste Número: CADASTRADO NO SISTEMA.\n` +
                       `Nome do Cliente: ${dbCliente.nome_cliente}\n` +
-                      `Endereço Cadastrado: ${dbCliente.endereco_completo || 'Não informado'}\n` +
+                      `Endereço Cadastrado (APENAS CONSULTA INTERNA - NUNCA CITAR ESPONTANEAMENTE): ${dbCliente.endereco_completo || 'Não informado'}\n` +
                       `CPF/CNPJ: ${dbCliente.documento_cpf_cnpj || 'Não informado'}\n\n` +
-                      `⚠️ REGRA CRÍTICA PARA CLIENTE JÁ CADASTRADO:\n` +
+                      `⚠️ REGRAS CRÍTICAS ANTI-ALUCINAÇÃO PARA CLIENTE CADASTRADO:\n` +
+                      `- NUNCA cite o "Endereço Cadastrado" espontaneamente! O endereço acima é apenas para conferência de sistema se o cliente perguntar ou confirmar. NUNCA comece mensagens dizendo "Sobre o endereço tal..." ou deduzindo locais!\n` +
+                      `- NUNCA presuma serviços anteriores se o cliente apenas der um "Bom dia" ou pedir "retorno". Apenas responda ao que ele falou pontualmente com simpatia e pergunte como pode ajudar hoje.\n` +
                       `- Este cliente JÁ ESTÁ CADASTRADO no sistema. NUNCA peça Nome, Endereço ou CPF/CNPJ novamente!\n` +
                       `- Chame-o sempre pelo nome com simpatia (${dbCliente.nome_cliente}).\n` +
                       `- Se ele pedir um novo serviço, visita técnica, manutenção ou orçamento: acolha com presteza e informe com segurança que você já está registrando o chamado no sistema e encaminhando para a equipe técnica retornar.\n` +
@@ -1495,10 +1517,33 @@ DIRETRIZES OBRIGATÓRIAS:
           .select('id, role, content, created_at')
           .eq('phone', remoteJid)
           .order('created_at', { ascending: false })
-          .limit(50);
+          .limit(40);
 
       // Invertemos para ficar em ordem cronológica
-      const rawHistory = (historyData || []).reverse();
+      let rawHistory = (historyData || []).reverse();
+
+      // FILTRO DE TEMPO DO HISTÓRICO (Últimas 48h):
+      // Mensagens antigas poluem o contexto da IA e causam alucinações de assuntos do passado.
+      const nowMs = Date.now();
+      const cutoff48h = nowMs - (48 * 60 * 60 * 1000);
+
+      let hadLongGap = false;
+      if (rawHistory.length > 1) {
+          const prevMsgTime = new Date(rawHistory[rawHistory.length - 2]?.created_at || rawHistory[0].created_at).getTime();
+          if (nowMs - prevMsgTime > 24 * 60 * 60 * 1000) {
+              hadLongGap = true;
+          }
+      }
+
+      rawHistory = rawHistory.filter(m => {
+          if (!m.created_at) return true;
+          return new Date(m.created_at).getTime() >= cutoff48h;
+      });
+
+      // Limita a no máximo 14 mensagens recentes
+      if (rawHistory.length > 14) {
+          rawHistory = rawHistory.slice(-14);
+      }
 
       // Gemini Exige: Alternar estritamente 'user' -> 'model'
       // Mensagens consecutivas do mesmo emissor são consolidadas em uma única parte
@@ -1547,10 +1592,13 @@ DIRETRIZES OBRIGATÓRIAS:
       if (hasAudio && mediaPart) {
           promptToSend = `[ÁUDIO DE VOZ RECEBIDO DO CLIENTE]: Escute atentamente este áudio para extrair com máxima fidelidade e precisão todos os dados informados: Nome, Endereço completo (Rua, Número, Bairro, Cidade), CPF/CNPJ se informado, e detalhes do serviço.\n${currentPrompt}`;
       }
+      if (hadLongGap) {
+          promptToSend = `[NOVA CONVERSA/SESSÃO DO DIA - O contato anterior ocorreu há mais de 24 horas. NÃO deduza pendências, orçamentos antigos ou endereços do passado a menos que o cliente mencione explicitamente agora. Responda com simplicidade, acolhimento e foco estrito na mensagem de hoje]:\n${promptToSend}`;
+      }
 
       const geminiInput = mediaPart 
           ? [{ text: promptToSend }, mediaPart] 
-          : currentPrompt;
+          : promptToSend;
 
       const completion = await chat.sendMessage(geminiInput);
       let aiResponse = completion.response.text();
