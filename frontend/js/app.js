@@ -1342,7 +1342,8 @@ ${materiaisTxt}${extrasTxt}
                         os_materiais_utilizados(material_id, quantidade_usada, valor_unitario_cobrado, subtotal_material, materiais(nome_material, unidade_medida)),
                         os_datas(data, descricao)
                     `)
-                    .order('data_hora', { ascending: false });
+                    .order('data_hora', { ascending: false })
+                    .limit(100);
 
                 if (errOrdens) {
                     console.error('Erro Crítico [ordens_servico]:', errOrdens.message);
@@ -1370,8 +1371,8 @@ ${materiaisTxt}${extrasTxt}
             }
 
             // 1.5 Traz Obras
-            const { data: obras, error: errObras } = await supabase.from('obras').select('*, clientes(nome_cliente)').order('created_at', { ascending: false });
-            if (errObras) alert("Erro Supabase nas Obras: " + JSON.stringify(errObras));
+            const { data: obras, error: errObras } = await supabase.from('obras').select('*, clientes(nome_cliente)').order('created_at', { ascending: false }).limit(100);
+            if (errObras) console.error("Erro Supabase nas Obras:", errObras);
             if (!errObras && obras) {
                 window.obrasCache = obras; // Pra usar nas Super Fichas
                 const tbody = document.querySelector('#table-obras tbody');
@@ -1379,8 +1380,8 @@ ${materiaisTxt}${extrasTxt}
             }
 
             // 1.6 Traz Fluxo de Caixa Central
-            const { data: caixa, error: errCaixa } = await supabase.from('fluxo_caixa').select('*').order('data_ocorrencia', { ascending: false });
-            if (errCaixa) alert("Erro Supabase no Caixa: " + JSON.stringify(errCaixa));
+            const { data: caixa, error: errCaixa } = await supabase.from('fluxo_caixa').select('*').order('data_ocorrencia', { ascending: false }).limit(200);
+            if (errCaixa) console.error("Erro Supabase no Caixa:", errCaixa);
             if (!errCaixa && caixa) {
                 window.caixaCache = caixa;
                 const tbody = document.querySelector('#table-caixa tbody');
@@ -2703,9 +2704,13 @@ ${materiaisTxt}${extrasTxt}
     };
 
     // Engine de Permissões (Role Based Access Control)
-    async function checkPermissions() {
+    async function checkPermissions(cachedUser = null) {
         try {
-            const { data: { user } } = await supabase.auth.getUser();
+            let user = cachedUser;
+            if (!user) {
+                const { data } = await supabase.auth.getUser();
+                user = data?.user;
+            }
             if (!user) return;
 
             const { data: colab, error: colabErr } = await supabase.from('colaboradores').select('cargo, nome_completo, telefone_whatsapp').eq('id', user.id).single();
@@ -2824,11 +2829,8 @@ ${materiaisTxt}${extrasTxt}
 
                 if (document.getElementById('chat-sec-toggle')) document.getElementById('chat-sec-toggle').style.display = 'none';
 
-                // Grava último acesso rapidamente antes de processar os dados da tabela
-                // await supabase.from('colaboradores').update({ ultimo_acesso: new Date().toISOString() }).eq('id', session.user.id);
-
-                // Agora processa as regras de negócio em background ou await
-                await checkPermissions();
+                // Agora processa as permissões de forma rápida passando o usuário da sessão para evitar deadlock
+                await checkPermissions(session.user);
             } else {
                 dashboardApp.style.display = 'none';
                 homeApp.style.display = 'flex';
