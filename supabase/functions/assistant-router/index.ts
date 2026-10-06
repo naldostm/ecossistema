@@ -850,7 +850,12 @@ DIRETRIZES OBRIGATÓRIAS:
       }
 
       remoteJid = remoteJid.split('@')[0].replace(/\D/g, '');
-      if (!remoteJid.startsWith('55') && remoteJid.length >= 10 && remoteJid.length <= 11) {
+      const isNorthAmerica = remoteJid.startsWith('1') && remoteJid.length === 11;
+      const isArnaldoAdmin = remoteJid === '18253369239' || 
+                             remoteJid.includes('8253369239') || 
+                             remoteJid.slice(-7) === '3369239';
+
+      if (!isNorthAmerica && !isArnaldoAdmin && !remoteJid.startsWith('55') && remoteJid.length >= 10 && remoteJid.length <= 11) {
           remoteJid = '55' + remoteJid;
       }
       const cleanPhone = remoteJid.replace(/^55/, '');
@@ -858,39 +863,41 @@ DIRETRIZES OBRIGATÓRIAS:
       const allPhoneVariants = getPhoneVariants(remoteJid);
 
       // === 0. VERIFICAÇÃO ANTECIPADA E INFALÍVEL DE LISTA NEGRA (BLACKLIST) E SPAM ===
-      const { data: earlyBlacklist } = await supabase
-          .from('agent_memory')
-          .select('content, created_at')
-          .in('phone', allPhoneVariants)
-          .in('content', ['BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA', 'BOT_ATIVO', 'SPAM_ROBO'])
-          .order('created_at', { ascending: false })
-          .limit(1);
-
-      if (earlyBlacklist && earlyBlacklist.length > 0) {
-          const st = earlyBlacklist[0].content;
-          if (st === 'BOT_IGNORAR' || st === 'AMIGO_IGNORAR' || st === 'LISTA_NEGRA' || st === 'SPAM_ROBO') {
-              console.log(`[LISTA NEGRA / SPAM - BLOQUEIO ANTECIPADO] Contato ${remoteJid} bloqueado/ignorado (status: ${st}).`);
-              return;
-          }
-      }
-
-      if (last8Digits && last8Digits.length === 8) {
-          const { data: partialBlocked } = await supabase
+      if (!isArnaldoAdmin) {
+          const { data: earlyBlacklist } = await supabase
               .from('agent_memory')
-              .select('phone, created_at')
-              .in('content', ['BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA', 'SPAM_ROBO'])
-              .like('phone', `%${last8Digits}%`)
+              .select('content, created_at')
+              .in('phone', allPhoneVariants)
+              .in('content', ['BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA', 'BOT_ATIVO', 'SPAM_ROBO'])
               .order('created_at', { ascending: false })
               .limit(1);
-          if (partialBlocked && partialBlocked.length > 0) {
-              console.log(`[LISTA NEGRA - BLOQUEIO POR FINAL ${last8Digits}] Contato ${remoteJid} bloqueado.`);
-              return;
+
+          if (earlyBlacklist && earlyBlacklist.length > 0) {
+              const st = earlyBlacklist[0].content;
+              if (st === 'BOT_IGNORAR' || st === 'AMIGO_IGNORAR' || st === 'LISTA_NEGRA' || st === 'SPAM_ROBO') {
+                  console.log(`[LISTA NEGRA / SPAM - BLOQUEIO ANTECIPADO] Contato ${remoteJid} bloqueado/ignorado (status: ${st}).`);
+                  return;
+              }
+          }
+
+          if (last8Digits && last8Digits.length === 8) {
+              const { data: partialBlocked } = await supabase
+                  .from('agent_memory')
+                  .select('phone, created_at')
+                  .in('content', ['BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA', 'SPAM_ROBO'])
+                  .like('phone', `%${last8Digits}%`)
+                  .order('created_at', { ascending: false })
+                  .limit(1);
+              if (partialBlocked && partialBlocked.length > 0) {
+                  console.log(`[LISTA NEGRA - BLOQUEIO POR FINAL ${last8Digits}] Contato ${remoteJid} bloqueado.`);
+                  return;
+              }
           }
       }
 
       // === 0.1 ESCUDO HEURÍSTICO ANTI-SPAM & ANTI-ROBÔ (BANCOS, OPERADORAS E OUTRAS IAS) ===
       const textToCheck = (userMessage || '').toLowerCase();
-      const isSpamOrBankBot = (
+      const isSpamOrBankBot = !isArnaldoAdmin && ((
           // Bancos e notificações automatizadas de OTP / faturas
           /(itau|itaú|bradesco|santander|banco do brasil|nubank|caixa econ[oô]mica|banco inter|c6 bank)/i.test(textToCheck) &&
           /(c[oó]digo de seguran[çc]a|chave pix|fatura fechada|fatura dispon[ií]vel|limite aprovado|cart[aã]o|token|n[aã]o compartilhe|transa[çc][aã]o suspeita|seguran[çc]a do banco|sua conta corrente)/i.test(textToCheck)
@@ -901,7 +908,7 @@ DIRETRIZES OBRIGATÓRIAS:
       ) || (
           // Robôs de menu interativo de outras empresas
           /(digite \d para|escolha uma das op[çc][oõ]es|menu de atendimento:|protocolo de atendimento:|sou a assistente virtual|atendimento autom[aá]tico)/i.test(textToCheck)
-      );
+      ));
 
       if (isSpamOrBankBot) {
           console.log(`[ESCUDO ANTI-SPAM HEURÍSTICO] Mensagem automática ignorada de ${remoteJid}: "${userMessage.substring(0, 60)}..."`);
@@ -920,16 +927,101 @@ DIRETRIZES OBRIGATÓRIAS:
           return;
       }
 
-      // Se for o próprio WhatsApp do Arnaldo (anotações próprias / teste pessoal)
-      if (remoteJid === '5511947434455' || cleanPhone === '5511947434455' || cleanPhone === '11947434455') {
-          console.log(`[ARNALDO DETECTADO] Mensagem do dono da empresa (${remoteJid}). Maria não atende o próprio dono como cliente.`);
+      // Se for o próprio WhatsApp da empresa (anotações próprias no mesmo número 5511947434455)
+      if ((remoteJid === '5511947434455' || cleanPhone === '5511947434455' || cleanPhone === '11947434455') && !isArnaldoAdmin) {
+          console.log(`[NUMERO DA EMPRESA DETECTADO] Mensagem no número oficial (${remoteJid}). Não responde a si mesma.`);
           return;
       }
       
       // === CONSULTA DE CONTEXTO E IDENTIDADE (BANCO DE DADOS EM TEMPO REAL) ===
       let injectedContext = "Status deste Número: Desconhecido (Não cadastrado). TRATE COMO UM NOVO CONTATO / POSSÍVEL NOVO CLIENTE.";
       
-      if (cleanPhone.includes("5511954598321") || cleanPhone.includes("11954598321") || last8Digits.includes("54598321")) {
+      if (isArnaldoAdmin) {
+          console.log(`[MODO GESTOR ATIVADO] Mensagem recebida do Gestor Arnaldo Trentin (${remoteJid})!`);
+          
+          let tarefasGestorTexto = "";
+          try {
+              const { data: pendTarefas } = await supabase
+                  .from('tarefas_arnaldo')
+                  .select('id, cliente_nome, cliente_telefone, titulo, descricao, prioridade, status, created_at')
+                  .in('status', ['pendente', 'em_andamento'])
+                  .order('created_at', { ascending: false })
+                  .limit(10);
+
+              if (pendTarefas && pendTarefas.length > 0) {
+                  tarefasGestorTexto = pendTarefas.map((t, idx) => 
+                      `${idx + 1}. [${(t.prioridade || 'ALTA').toUpperCase()}] ${t.cliente_nome || 'Cliente'} (${t.cliente_telefone || 'Sem tel'}): "${t.titulo}" - Detalhes: ${t.descricao || 'N/A'}`
+                  ).join('\n');
+              } else {
+                  tarefasGestorTexto = "Nenhuma tarefa pendente no momento. Todas estão em dia!";
+              }
+          } catch(tErr) {
+              console.warn("Erro ao buscar tarefas para gestor:", tErr);
+          }
+
+          let ultimosContatosTexto = "";
+          try {
+              const { data: ultimosClientes } = await supabase
+                  .from('agent_memory')
+                  .select('phone, content, created_at')
+                  .eq('role', 'user')
+                  .not('content', 'ilike', 'BOT_%')
+                  .not('content', 'ilike', 'SPAM_%')
+                  .order('created_at', { ascending: false })
+                  .limit(6);
+              if (ultimosClientes && ultimosClientes.length > 0) {
+                  ultimosContatosTexto = ultimosClientes.map(c => 
+                      `- Tel ${c.phone}: ${(c.content || '').replace(/\[MSG_ID:[^\]]+\]\s*/g, '').slice(0, 80)}...`
+                  ).join('\n');
+              }
+          } catch(cErr) {
+              console.warn("Erro ao buscar contatos recentes:", cErr);
+          }
+
+          injectedContext = `
+=== MODO EXECUTIVO ATIVADO: VOCÊ ESTÁ FALANDO COM O SEU CHEFE E DIRETOR DA EMPRESA, ARNALDO TRENTIN! ===
+- O interlocutor atual é o próprio ARNALDO TRENTIN (dono e responsável técnico da Arnaldo Trentin Serviços).
+- Chame-o de "Arnaldo" com extremo respeito, afeto, agilidade e postura de secretária executiva de confiança.
+- NUNCA se apresente como se ele fosse um cliente ("Olá, sou Maria Cecília da Arnaldo Trentin..."). Ele já é seu chefe!
+- NUNCA cite horários de expediente ou regras de atendimento comercial para ele.
+- NUNCA tente vender nada para ele.
+
+SUAS CAPACIDADES ATIVAS PARA O ARNALDO:
+1. ENVIAR MENSAGENS PARA CLIENTES (DISPARO ATIVO VIA WHATSAPP):
+   Se o Arnaldo pedir para você mandar mensagem para qualquer cliente (seja pelo nome ou pelo telefone), por exemplo:
+   "Maria, manda mensagem pro Dr. Carlos perguntando se ele aprovou os splits", ou
+   "Avisa o cliente no 11988887777 que a equipe chega às 14h":
+   -> Você DEVE responder com uma ação JSON:
+   {
+     "acao": "DISPARAR_CONTATO_ATIVO",
+     "nome_cliente": "Nome do Cliente",
+     "telefone_destino": "telefone com DDD ou apenas números se souber",
+     "mensagem_gerada": "Texto profissional, acolhedor e simpático que você vai enviar para o cliente pelo WhatsApp da empresa",
+     "confirmacao_gestor": "Arnaldo, já enviei a seguinte mensagem para o cliente: '...' Te aviso assim que ele responder!"
+   }
+
+2. CONSULTA DE TAREFAS / AGENDA:
+   Se ele perguntar sobre pendências, o que tem para fazer hoje ou clientes aguardando:
+   -> Responda de forma direta, clara e organizada listando as pendências abaixo e ofereça ajuda para disparar mensagem para algum deles.
+
+3. ANOTAR LEMBRETES E TAREFAS:
+   Se ele pedir para anotar algo ("Anota aí...", "Lembrar de comprar capacitor...", "Registra uma visita"):
+   -> Você DEVE responder com uma ação JSON:
+   {
+     "acao": "CRIAR_TAREFA_GESTOR",
+     "titulo": "Título curto e claro",
+     "descricao": "Detalhes completos do que o Arnaldo pediu",
+     "prioridade": "alta",
+     "resposta_ao_gestor": "Anotado, Arnaldo! Registrei essa tarefa nas suas pendências do sistema."
+   }
+
+📋 TAREFAS ATUAIS DO ARNALDO NO SISTEMA:
+${tarefasGestorTexto}
+
+💬 ÚLTIMAS MENSAGENS RECEBIDAS NO CRM:
+${ultimosContatosTexto || 'Nenhuma recente.'}
+`;
+      } else if (cleanPhone.includes("5511954598321") || cleanPhone.includes("11954598321") || last8Digits.includes("54598321")) {
           injectedContext = "Status deste Número: Este é o Sr Francisco (Técnico e Prestador de Serviço da Equipe). NUNCA tente vender nada ou citar regras de expediente. Seja muito gentil, acolha o recado/relatório e confirme que já passou para o Arnaldo.";
       } else if (cleanPhone.includes("5511913688307") || cleanPhone.includes("11913688307") || last8Digits.includes("13688307")) {
           injectedContext = "Status deste Número: Este é o Sr Maxwell (Técnico e Prestador de Serviço da Equipe). NUNCA tente vender nada ou citar regras de expediente. Seja muito gentil, acolha o recado/relatório e confirme que já passou para o Arnaldo.";
@@ -1425,29 +1517,31 @@ DIRETRIZES OBRIGATÓRIAS:
       }
 
       // 4. VERIFICAÇÃO DE LISTA NEGRA E ATENDIMENTO HUMANO (PAUSA INDIVIDUAL)
-      const { data: pauseState } = await supabase
-          .from('agent_memory')
-          .select('content, created_at')
-          .in('phone', phoneVariants)
-          .in('content', ['BOT_PAUSADO', 'BOT_ATIVO', 'BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA'])
-          .order('created_at', { ascending: false })
-          .limit(1);
-          
-      if (pauseState && pauseState.length > 0) {
-          const state = pauseState[0].content;
-          const createdAt = new Date(pauseState[0].created_at || 0).getTime();
-          const isRecentlyPaused = (Date.now() - createdAt) < (45 * 60 * 1000); // 45 minutos
+      if (!isArnaldoAdmin) {
+          const { data: pauseState } = await supabase
+              .from('agent_memory')
+              .select('content, created_at')
+              .in('phone', phoneVariants)
+              .in('content', ['BOT_PAUSADO', 'BOT_ATIVO', 'BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA'])
+              .order('created_at', { ascending: false })
+              .limit(1);
+              
+          if (pauseState && pauseState.length > 0) {
+              const state = pauseState[0].content;
+              const createdAt = new Date(pauseState[0].created_at || 0).getTime();
+              const isRecentlyPaused = (Date.now() - createdAt) < (45 * 60 * 1000); // 45 minutos
 
-          if (state === 'BOT_IGNORAR' || state === 'AMIGO_IGNORAR' || state === 'LISTA_NEGRA') {
-              console.log(`[LISTA NEGRA] Mensagem registrada no chat, robô está permanentemente ignorado para ${remoteJid}.`);
-              return;
-          }
-          if (state === 'BOT_PAUSADO') {
-              if (isRecentlyPaused) {
-                  console.log(`[ATENDIMENTO HUMANO / PAUSADO RECENTE] Mensagem registrada no chat, atendimento humano em andamento para ${remoteJid}. Robô em silêncio.`);
+              if (state === 'BOT_IGNORAR' || state === 'AMIGO_IGNORAR' || state === 'LISTA_NEGRA') {
+                  console.log(`[LISTA NEGRA] Mensagem registrada no chat, robô está permanentemente ignorado para ${remoteJid}.`);
                   return;
-              } else {
-                  console.log(`[PAUSA EXPIRADA] Pausa humana de ${remoteJid} foi há mais de 45m. Maria Cecília assumindo novo chamado.`);
+              }
+              if (state === 'BOT_PAUSADO') {
+                  if (isRecentlyPaused) {
+                      console.log(`[ATENDIMENTO HUMANO / PAUSADO RECENTE] Mensagem registrada no chat, atendimento humano em andamento para ${remoteJid}. Robô em silêncio.`);
+                      return;
+                  } else {
+                      console.log(`[PAUSA EXPIRADA] Pausa humana de ${remoteJid} foi há mais de 45m. Maria Cecília assumindo novo chamado.`);
+                  }
               }
           }
       }
@@ -1517,43 +1611,45 @@ DIRETRIZES OBRIGATÓRIAS:
           return;
       }
 
-      const { data: recheckPause } = await supabase
-          .from('agent_memory')
-          .select('content, created_at')
-          .in('phone', phoneVariants)
-          .in('content', ['BOT_PAUSADO', 'BOT_ATIVO', 'BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA'])
-          .order('created_at', { ascending: false })
-          .limit(1);
+      if (!isArnaldoAdmin) {
+          const { data: recheckPause } = await supabase
+              .from('agent_memory')
+              .select('content, created_at')
+              .in('phone', phoneVariants)
+              .in('content', ['BOT_PAUSADO', 'BOT_ATIVO', 'BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA'])
+              .order('created_at', { ascending: false })
+              .limit(1);
 
-      if (recheckPause && recheckPause.length > 0) {
-          const state = recheckPause[0].content;
-          const createdAt = new Date(recheckPause[0].created_at || 0).getTime();
-          const isRecentlyPaused = (Date.now() - createdAt) < (45 * 60 * 1000);
+          if (recheckPause && recheckPause.length > 0) {
+              const state = recheckPause[0].content;
+              const createdAt = new Date(recheckPause[0].created_at || 0).getTime();
+              const isRecentlyPaused = (Date.now() - createdAt) < (45 * 60 * 1000);
 
-          if (state === 'BOT_IGNORAR' || state === 'AMIGO_IGNORAR' || state === 'LISTA_NEGRA') {
-              console.log(`[PAUSA DETECTADA APÓS BUFFER] Status é ${state}. Abortando.`);
-              return;
+              if (state === 'BOT_IGNORAR' || state === 'AMIGO_IGNORAR' || state === 'LISTA_NEGRA') {
+                  console.log(`[PAUSA DETECTADA APÓS BUFFER] Status é ${state}. Abortando.`);
+                  return;
+              }
+              if (state === 'BOT_PAUSADO' && isRecentlyPaused) {
+                  console.log(`[PAUSA DETECTADA APÓS BUFFER] Status é BOT_PAUSADO recente. Abortando.`);
+                  return;
+              }
           }
-          if (state === 'BOT_PAUSADO' && isRecentlyPaused) {
-              console.log(`[PAUSA DETECTADA APÓS BUFFER] Status é BOT_PAUSADO recente. Abortando.`);
-              return;
-          }
-      }
 
-      // 9. BLINDAGEM ANTI-ATROPELO: Se Arnaldo conversou diretamente com este cliente nas últimas 2 horas
-      const { data: arnaldoRecentMsg } = await supabase
-          .from('agent_memory')
-          .select('id, created_at, content')
-          .eq('phone', remoteJid)
-          .ilike('content', '%Arnaldo Trentin:%')
-          .order('created_at', { ascending: false })
-          .limit(1);
+          // 9. BLINDAGEM ANTI-ATROPELO: Se Arnaldo conversou diretamente com este cliente nas últimas 2 horas
+          const { data: arnaldoRecentMsg } = await supabase
+              .from('agent_memory')
+              .select('id, created_at, content')
+              .eq('phone', remoteJid)
+              .ilike('content', '%Arnaldo Trentin:%')
+              .order('created_at', { ascending: false })
+              .limit(1);
 
-      if (arnaldoRecentMsg && arnaldoRecentMsg.length > 0) {
-          const arnaldoMsgTime = new Date(arnaldoRecentMsg[0].created_at || 0).getTime();
-          if ((Date.now() - arnaldoMsgTime) < (2 * 60 * 60 * 1000)) { // 2 horas de proteção ativa
-              console.log(`[ANTI-ATROPELO] Arnaldo conversou diretamente com ${remoteJid} nas últimas 2h. Maria não vai responder por cima.`);
-              return;
+          if (arnaldoRecentMsg && arnaldoRecentMsg.length > 0) {
+              const arnaldoMsgTime = new Date(arnaldoRecentMsg[0].created_at || 0).getTime();
+              if ((Date.now() - arnaldoMsgTime) < (2 * 60 * 60 * 1000)) { // 2 horas de proteção ativa
+                  console.log(`[ANTI-ATROPELO] Arnaldo conversou diretamente com ${remoteJid} nas últimas 2h. Maria não vai responder por cima.`);
+                  return;
+              }
           }
       }
 
@@ -1746,7 +1842,11 @@ DIRETRIZES OBRIGATÓRIAS:
                       console.error('[TAREFA ARNALDO] Erro ao sincronizar cliente:', cErr);
                   }
 
-                  whatsAppText = actionData.resposta_pro_cliente || actionData.mensagem_pro_cliente || "Perfeito! Já registrei todos os detalhes da sua solicitação e passei diretamente para o Arnaldo avaliar. Ele retornará em breve!";
+                  if (isArnaldoAdmin) {
+                      whatsAppText = actionData.resposta_ao_gestor || actionData.confirmacao_gestor || `✅ Anotado, Arnaldo! Registrei a tarefa "${taskPayload.titulo}" nas suas pendências do sistema.`;
+                  } else {
+                      whatsAppText = actionData.resposta_pro_cliente || actionData.mensagem_pro_cliente || "Perfeito! Já registrei todos os detalhes da sua solicitação e passei diretamente para o Arnaldo avaliar. Ele retornará em breve!";
+                  }
               }
 
               else if (actionData.acao === "LANCAR_CAIXA") {
@@ -1815,33 +1915,64 @@ DIRETRIZES OBRIGATÓRIAS:
                   }
                   whatsAppText = actionData.mensagem_pro_cliente || "✅ Perfeito! Tudo registrado e encaminhado aos responsáveis. Retornaremos assim que possível!";
               }
-              else if (actionData.acao === "DISPARAR_CONTATO_ATIVO" && actionData.telefone_destino) {
-                  let targetPhone = String(actionData.telefone_destino).replace(/\D/g, '');
-                  if (!targetPhone.startsWith('55') && targetPhone.length <= 11) targetPhone = '55' + targetPhone;
+              else if (actionData.acao === "DISPARAR_CONTATO_ATIVO") {
+                  let targetPhone = String(actionData.telefone_destino || '').replace(/\D/g, '');
                   
-                  // Salva a mensagem no histórico do cliente para a IA manter o contexto
-                  await supabase.from('agent_memory').insert({
-                      phone: targetPhone,
-                      role: 'model',
-                      content: actionData.mensagem_gerada
-                  });
-
-                  // Dispara via UazAPI / WhatsApp
-                  if (uazapiUrl) {
-                      try {
-                          const endpoint = uazapiUrl.endsWith('/') ? `${uazapiUrl}send/text` : `${uazapiUrl}/send/text`;
-                          const activeToken = payload?.token || uazapiToken || '';
-                          await fetch(endpoint, {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json', 'token': activeToken },
-                              body: JSON.stringify({ number: targetPhone, text: actionData.mensagem_gerada })
-                          });
-                          console.log(`[DISPARO ATIVO SUCESSO] Mensagem enviada para ${targetPhone}`);
-                      } catch (sendErr) {
-                          console.error("[DISPARO ATIVO ERRO] Falha ao enviar:", sendErr);
+                  // Se não veio número direto mas veio nome do cliente, busca no banco
+                  if (!targetPhone || targetPhone.length < 8) {
+                      const searchName = actionData.nome_cliente || '';
+                      if (searchName) {
+                          try {
+                              const { data: cFound } = await supabase.from('clientes')
+                                  .select('whatsapp')
+                                  .ilike('nome_cliente', `%${searchName}%`)
+                                  .limit(1);
+                              if (cFound && cFound.length > 0 && cFound[0].whatsapp) {
+                                  targetPhone = cFound[0].whatsapp.replace(/\D/g, '');
+                              } else {
+                                  const { data: tFound } = await supabase.from('tarefas_arnaldo')
+                                      .select('cliente_telefone')
+                                      .ilike('cliente_nome', `%${searchName}%`)
+                                      .limit(1);
+                                  if (tFound && tFound.length > 0 && tFound[0].cliente_telefone) {
+                                      targetPhone = tFound[0].cliente_telefone.replace(/\D/g, '');
+                                  }
+                              }
+                          } catch (fErr) {
+                              console.warn("[BUSCA CONTATO] Erro ao buscar telefone por nome:", fErr);
+                          }
                       }
                   }
-                  whatsAppText = actionData.confirmacao_gestor || `✅ Mensagem enviada para ${actionData.nome_cliente || targetPhone} no WhatsApp!`;
+
+                  if (targetPhone && targetPhone.length >= 8) {
+                      if (!targetPhone.startsWith('55') && targetPhone.length <= 11) targetPhone = '55' + targetPhone;
+                      
+                      // Salva a mensagem no histórico do cliente para a IA manter o contexto
+                      await supabase.from('agent_memory').insert({
+                          phone: targetPhone,
+                          role: 'model',
+                          content: actionData.mensagem_gerada
+                      });
+
+                      // Dispara via UazAPI / WhatsApp
+                      if (uazapiUrl) {
+                          try {
+                              const endpoint = uazapiUrl.endsWith('/') ? `${uazapiUrl}send/text` : `${uazapiUrl}/send/text`;
+                              const activeToken = payload?.token || uazapiToken || '';
+                              await fetch(endpoint, {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json', 'token': activeToken },
+                                  body: JSON.stringify({ number: targetPhone, text: actionData.mensagem_gerada })
+                              });
+                              console.log(`[DISPARO ATIVO SUCESSO] Mensagem enviada para ${targetPhone}`);
+                          } catch (sendErr) {
+                              console.error("[DISPARO ATIVO ERRO] Falha ao enviar:", sendErr);
+                          }
+                      }
+                      whatsAppText = actionData.confirmacao_gestor || `✅ Mensagem enviada para ${actionData.nome_cliente || targetPhone} no WhatsApp!`;
+                  } else {
+                      whatsAppText = `Arnaldo, não consegui localizar o número de telefone de ${actionData.nome_cliente || 'deste cliente'}. Poderia me passar o número dele para eu disparar?`;
+                  }
               }
           }
       } catch(e) {
