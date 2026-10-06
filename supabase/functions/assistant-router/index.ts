@@ -35,6 +35,22 @@ function getPhoneVariants(rawPhone: string): string[] {
   return Array.from(variants);
 }
 
+function sanitizePushName(rawName?: string): string {
+  if (!rawName) return "";
+  const clean = rawName.trim();
+  if (/^(cliente|usuario|user|contato)$/i.test(clean)) return "";
+  if (clean.length < 3) return "";
+  if (/^[A-Z0-9_\-\.\s]{1,4}$/.test(clean)) return ""; // Siglas tipo YP, ADM
+  if (/[#@\*\$0-9]/.test(clean)) return ""; // Símbolos ou números tipo 256#
+  if (/^(iphone|android|whatsapp|celular)/i.test(clean)) return "";
+  
+  const firstName = clean.split(' ')[0];
+  if (/^[A-Za-zÀ-ÖØ-öø-ÿ]{3,}$/.test(firstName)) {
+    return firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase();
+  }
+  return "";
+}
+
 function buildTemporalContext(): { promptContext: string; saudacaoObrigatoria: string; isExpediente: boolean; spTimeStr: string } {
   // Horário oficial de Brasília (America/Sao_Paulo)
   const spNow = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
@@ -145,14 +161,29 @@ FALANDO COM PARCEIROS E PRESTADORES DA EQUIPE (FRANCISCO, MAXWELL, SERGIO PASSAR
   * NUNCA dê uma nova saudação formal de abertura se vocês já estão conversando em sequência!
   * Responda de forma ágil, natural, empática e humana (ex: "Perfeito, Bruno! Já anotei aqui que na sexta o elevador estará liberado para a equipe.", "Combinado!", "Entendido perfeitamente!").
 
+🔄 CONTINUIDADE OBRIGATÓRIA QUANDO VOCÊ OU A EMPRESA INICIOU O CONTATO:
+- Se a mensagem anterior no histórico foi enviada por você ou pelo Arnaldo (por exemplo: perguntando sobre barulho ou defeito no ar-condicionado, proposta de orçamento, visita técnica, agendamento ou cobrança):
+  * O cliente pode responder apenas dizendo "Bom dia", "Olá", "Tudo bem", "Como vai?" ou agradecendo.
+  * ⚠️ NUNCA, SOB HIPÓTESE ALGUMA, pergunte "Como posso te ajudar hoje?" nessas situações! Você foi quem puxou o assunto!
+  * NUNCA aja como se fosse um primeiro contato ou como se a conversa estivesse começando do zero!
+  * Você DEVE agradecer educadamente e RETOMAR IMEDIATAMENTE a pergunta/assunto que você havia enviado:
+    - Exemplo de resposta correta: "Bom dia! Tudo ótimo por aqui, obrigada! Me conta, sobre aquele barulho no condensador que te perguntei, você conseguiu verificar como ele está funcionando?"
+    - Exemplo de resposta correta: "Olá! Tudo bem, graças a Deus! Conseguiram dar uma olhada na proposta que te mandamos?"
+  * Retomar o gancho com naturalidade demonstra atenção, organização e excelência.
+
+🏷️ TRATAMENTO PELO NOME & BANIMENTO DE SIGLAS DO WHATSAPP:
+- NUNCA chame o cliente por siglas de perfil (ex: "YP", "JR", "ADM", "A", "123").
+- Se você não tiver certeza absoluta do primeiro nome real da pessoa (ex: Carlos, Mariana, Paulo, Roberto), NUNCA invente ou use siglas. Use saudações acolhedoras universais sem citar o nome ("Bom dia! Tudo bem com você?", "Olá! Como vai?").
+- Se o cliente já for cadastrado no sistema com nome real (ex: Carlos, Mariana, Roberto), use o nome dele com carinho.
+
 💳 RECEBIMENTO DE COMPROVANTES DE PAGAMENTO / PIX:
 - Quando o cliente enviar comprovante de pagamento, foto de comprovante PIX ou mensagens como "segue o pagamento", "paguei o restante":
   * Agradeça calorosamente e com presteza: "Muito obrigada pelo envio do comprovante, [Nome]! Já registrei aqui e passei para o financeiro e para o Arnaldo dar a baixa, tá bom? Gratidão pela parceria!".
   * NUNCA ignore ou trate comprovante de pagamento como dúvida técnica.
 
-MODÉSTIA E PRUDÊNCIA ABSOLUTA (NUNCA ADIVINHE OU ALUCINE ASSUNTOS):
-- Se o cliente enviar apenas mensagens curtas ou saudações ("Bom dia", "Olá", "Arnaldo", "preciso de um retorno", "tudo bem?", "conseguiu ver?"):
-  * Acolha com muita simpatia e educação (chame pelo nome se já for cadastrado).
+MODÉSTIA E PRUDÊNCIA (QUANDO O CLIENTE QUE INICIOU COM SAUDAÇÃO ISOLADA):
+- Apenas se NÃO houver nenhuma mensagem anterior sua em aberto e o cliente mandar apenas uma saudação isolada ("Bom dia", "Olá", "preciso de um retorno"):
+  * Acolha com muita simpatia e educação (chame pelo nome se souber).
   * NUNCA deduza ou presuma o que ele quer! NUNCA puxe assuntos antigos do passado nem cite endereços cadastrados do nada.
   * Responda de forma simples, solícita e pergunte educadamente em que pode ajudá-lo hoje, ou diga com segurança que o Arnaldo já foi avisado e vai retornar em breve.
 
@@ -1478,7 +1509,9 @@ ${ultimosContatosTexto || 'Nenhuma recente.'}
       }
 
       const msgIdTag = messageId ? `[MSG_ID:${messageId}] ` : '';
-      let exactUserPayload = `${msgIdTag}Mensagem do Cliente (${pushName}): ${userMessage}`;
+      const validFirstName = sanitizePushName(pushName);
+      const nameTag = validFirstName ? ` (${validFirstName})` : '';
+      let exactUserPayload = `${msgIdTag}Mensagem do Cliente${nameTag}: ${userMessage}`;
       
       // NÃO gravar base64 da mídia no banco — polui a conversa e ocupa espaço
       if (mediaPart && mediaPart.inlineData) {
@@ -1710,9 +1743,12 @@ ${ultimosContatosTexto || 'Nenhuma recente.'}
           }
       }
 
-      // Garante que o histórico para o Gemini comece com 'user'
+      // Garante que o histórico para o Gemini comece com 'user' sem perder a mensagem inicial da empresa
       if (squashedHistory.length > 0 && squashedHistory[0].role === 'model') {
-          squashedHistory.shift();
+          squashedHistory.unshift({
+              role: 'user',
+              parts: [{ text: "[Início do contato realizado pela equipe da Arnaldo Trentin Serviços]" }]
+          });
       }
 
       // A última entrada no squashedHistory agora é a mensagem consolidada do cliente
@@ -1733,8 +1769,16 @@ ${ultimosContatosTexto || 'Nenhuma recente.'}
       const chat = model.startChat({ history: chatHistory });
       
       let promptToSend = currentPrompt;
+
+      // Injeta pista de continuidade se a empresa acabou de enviar uma pergunta/mensagem e o cliente respondeu
+      const hasRecentCompanyMessage = chatHistory.length > 0 && chatHistory[chatHistory.length - 1].role === 'model';
+      if (hasRecentCompanyMessage) {
+          const lastCompanyText = chatHistory[chatHistory.length - 1].parts[0]?.text || '';
+          promptToSend = `[CONTINUIDADE DE CONVERSA - A mensagem acima foi enviada por você/empresa há pouco: "${lastCompanyText.slice(0, 160)}...". O cliente está respondendo a ela. NUNCA pergunte "Como posso te ajudar hoje?". Retome educadamente a sua pergunta ou assunto em aberto!]:\n${promptToSend}`;
+      }
+
       if (hasAudio && mediaPart) {
-          promptToSend = `[ÁUDIO DE VOZ RECEBIDO DO CLIENTE]: Escute atentamente este áudio para extrair com máxima fidelidade e precisão todos os dados informados: Nome, Endereço completo (Rua, Número, Bairro, Cidade), CPF/CNPJ se informado, e detalhes do serviço.\n${currentPrompt}`;
+          promptToSend = `[ÁUDIO DE VOZ RECEBIDO DO CLIENTE]: Escute atentamente este áudio para extrair com máxima fidelidade e precisão todos os dados informados: Nome, Endereço completo (Rua, Número, Bairro, Cidade), CPF/CNPJ se informado, e detalhes do serviço.\n${promptToSend}`;
       }
       if (hadLongGap) {
           promptToSend = `[NOVA CONVERSA/SESSÃO DO DIA - O contato anterior ocorreu há mais de 24 horas. NÃO deduza pendências, orçamentos antigos ou endereços do passado a menos que o cliente mencione explicitamente agora. Responda com simplicidade, acolhimento e foco estrito na mensagem de hoje]:\n${promptToSend}`;
