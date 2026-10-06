@@ -139,6 +139,17 @@ FALANDO COM PARCEIROS E PRESTADORES DA EQUIPE (FRANCISCO, MAXWELL, SERGIO PASSAR
   * Colete recados, fotos de obra, relatórios ou atualizações de serviços que eles enviarem.
   * Confirme com simpatia que já anotou e passou tudo para o Arnaldo acompanhar!
 
+🚫 REGRA ABSOLUTA ANTI-REPETIÇÃO DE SAUDAÇÃO & REGRAS DE EXPEDIENTE:
+- Analise com atenção o histórico recente da conversa. Se você já trocou mensagens com este contato nos últimos minutos ou horas:
+  * NUNCA repita apresentações completas como "Boa noite/Bom dia! Aqui é a Maria Cecília da Arnaldo Trentin Serviços... nosso expediente encerrou às 20h...".
+  * NUNCA dê uma nova saudação formal de abertura se vocês já estão conversando em sequência!
+  * Responda de forma ágil, natural, empática e humana (ex: "Perfeito, Bruno! Já anotei aqui que na sexta o elevador estará liberado para a equipe.", "Combinado!", "Entendido perfeitamente!").
+
+💳 RECEBIMENTO DE COMPROVANTES DE PAGAMENTO / PIX:
+- Quando o cliente enviar comprovante de pagamento, foto de comprovante PIX ou mensagens como "segue o pagamento", "paguei o restante":
+  * Agradeça calorosamente e com presteza: "Muito obrigada pelo envio do comprovante, [Nome]! Já registrei aqui e passei para o financeiro e para o Arnaldo dar a baixa, tá bom? Gratidão pela parceria!".
+  * NUNCA ignore ou trate comprovante de pagamento como dúvida técnica.
+
 MODÉSTIA E PRUDÊNCIA ABSOLUTA (NUNCA ADIVINHE OU ALUCINE ASSUNTOS):
 - Se o cliente enviar apenas mensagens curtas ou saudações ("Bom dia", "Olá", "Arnaldo", "preciso de um retorno", "tudo bem?", "conseguiu ver?"):
   * Acolha com muita simpatia e educação (chame pelo nome se já for cadastrado).
@@ -257,11 +268,7 @@ serve(async (req) => {
           return new Response("Bad Request Payload", { status: 400, headers: corsHeaders });
       }
       
-      console.log("[PAYLOAD UAZAPI LIDO - COMPLETO]:", rawText);
-      if (payload?.action !== 'send_manual_text') {
-          const { error: insErr2 } = await supabase.from('agent_memory').insert({ phone: 'DEBUG_AUDIO', role: 'user', content: rawText });
-          if (insErr2) console.error("DEBUG INSERT ERROR 2:", insErr2);
-      }
+      console.log("[PAYLOAD UAZAPI LIDO - RESUMO]:", rawText.substring(0, 300));
   } catch (err) {
       console.error("[CRITICAL] Falha ao ler stream da Uazapi antes de liberar conexão:", err);
       await supabase.from('agent_memory').insert({ phone: 'DEBUG_AUDIO', role: 'user', content: 'STREAM READ ERROR: ' + String(err) });
@@ -398,11 +405,12 @@ DIRETRIZES DE RESPOSTA:
           if (fileBase64 || fileUrl) {
               try {
                   const mediaEndpoint = `${manualUazapiUrl}/send/media`;
-                  const mediaPayload = {
+                  const mediaPayload: Record<string, any> = {
                       number: targetPhone,
-                      media: fileBase64 || fileUrl,
+                      file: fileBase64 || fileUrl,
+                      text: generatedMsg,
                       caption: generatedMsg,
-                      fileName: fileName || 'orcamento.pdf',
+                      fileName: fileName || (fileType.includes('pdf') ? 'orcamento.pdf' : 'anexo.jpg'),
                       type: fileType.includes('pdf') ? 'document' : 'image'
                   };
                   const mediaResp = await fetch(mediaEndpoint, {
@@ -578,28 +586,18 @@ DIRETRIZES OBRIGATÓRIAS:
                   content: 'BOT_ATIVO'
               });
 
-              // 3. Registra na memória a mensagem enviada pela Maria
-              await supabase.from('agent_memory').insert({
-                  phone: targetPhone,
-                  role: 'model',
-                  content: generatedMsg
-              });
-
-              // 4. Envia via UaZAPI
+              // 3. Envia via UaZAPI
               let sendStatus = 200;
               if (fileBase64 || fileUrl) {
                   try {
                       const mediaPayload: Record<string, any> = {
                           number: targetPhone,
+                          file: fileBase64 || fileUrl,
+                          text: generatedMsg,
                           caption: generatedMsg,
-                          type: fileName.endsWith('.pdf') ? 'document' : 'image'
+                          fileName: fileName || (fileType.includes('pdf') ? 'documento.pdf' : 'anexo.jpg'),
+                          type: (fileName && fileName.endsWith('.pdf')) || (fileType && fileType.includes('pdf')) ? 'document' : 'image'
                       };
-                      if (fileBase64) {
-                          mediaPayload.file = fileBase64;
-                          mediaPayload.fileName = fileName || 'documento.pdf';
-                      } else {
-                          mediaPayload.url = fileUrl;
-                      }
 
                       const mediaResp = await fetch(`${manualUazapiUrl}/send/media`, {
                           method: 'POST',
@@ -608,6 +606,7 @@ DIRETRIZES OBRIGATÓRIAS:
                       });
                       sendStatus = mediaResp.status;
                       if (!mediaResp.ok) {
+                          console.warn(`[MEDIA SEND STATUS ${sendStatus}] Tentando fallback texto puro via UazAPI...`);
                           const txtResp = await fetch(`${manualUazapiUrl}/send/text`, {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json', 'token': manualToken },
@@ -634,12 +633,27 @@ DIRETRIZES OBRIGATÓRIAS:
               }
 
               const executedAt = new Date().toISOString();
+              const isSuccess = sendStatus >= 200 && sendStatus < 300;
+              const finalStatus = isSuccess ? 'concluida' : 'falha_envio';
+
+              // 4. Grava no histórico do chat apenas se foi enviado com sucesso
+              if (isSuccess) {
+                  const storedMsg = fileName ? `${generatedMsg}\n📎 _[Arquivo enviado: ${fileName}]_` : generatedMsg;
+                  await supabase.from('agent_memory').insert({
+                      phone: targetPhone,
+                      role: 'model',
+                      content: storedMsg
+                  });
+              } else {
+                  console.error(`[EXECUTE TASK FALHA] Status Uazapi: ${sendStatus} para ${targetPhone}. Tarefa marcada como falha_envio.`);
+              }
 
               const updatedTask = {
                   ...task,
-                  status: 'concluida',
+                  status: finalStatus,
                   executed_at: executedAt,
-                  ai_generated_message: generatedMsg
+                  ai_generated_message: generatedMsg,
+                  activity_report: isSuccess ? null : `Falha ao disparar no WhatsApp via UazAPI (Status HTTP ${sendStatus})`
               };
 
               // 5. Atualiza o registro da tarefa no banco
@@ -1061,19 +1075,53 @@ DIRETRIZES OBRIGATÓRIAS:
                   return;
               }
 
-              // 1. Grava a mensagem do Arnaldo para aparecer no histórico do chat no ecossistema
-              const formattedArnaldoMsg = `👨‍🔧 *Arnaldo Trentin:* ${userMessage.trim()}`;
+              // 0. VERIFICAÇÃO DE MENSAGEM AUTOMÁTICA DE SAUDAÇÃO DO WHATSAPP BUSINESS:
+              const isWppGreeting = userMessage.includes('Você entrou em contato com Arnaldo Trentin serviços') || 
+                                    userMessage.includes('será um prazer atendê-lo') || 
+                                    userMessage.includes('caso deseje facilitar o atendimento');
+
+              // 1. DEDUPLICAÇÃO DE ENVIO MANUAL VIA CRM:
+              // Se a mensagem já foi gravada pelo CRM nos últimos 60 segundos, ignora para não duplicar!
+              const rawMsgClean = userMessage.replace(/^👨‍🔧\s*\*Arnaldo Trentin:\*\s*/i, '').trim();
+              const sixtySecsAgo = new Date(Date.now() - 60000).toISOString();
+              const { data: recentModelMsgs } = await supabase
+                  .from('agent_memory')
+                  .select('id, content')
+                  .in('phone', phoneVariants)
+                  .eq('role', 'model')
+                  .gte('created_at', sixtySecsAgo)
+                  .limit(10);
+
+              const isDuplicateFromApi = (recentModelMsgs || []).some(m => {
+                  const cleanContent = (m.content || '').replace(/^👨‍🔧\s*\*Arnaldo Trentin:\*\s*/i, '').trim();
+                  return cleanContent === rawMsgClean;
+              });
+
+              if (isDuplicateFromApi) {
+                  console.log(`[DEDUPLICAÇÃO MANUAL] Mensagem de ${remoteJid} já registrada pelo CRM. Ignorando duplicação via webhook.`);
+                  return;
+              }
+
+              // 2. Grava a mensagem do Arnaldo para aparecer no histórico do chat no ecossistema
+              const formattedArnaldoMsg = userMessage.trim().startsWith('👨‍🔧 *Arnaldo Trentin:*')
+                  ? userMessage.trim()
+                  : `👨‍🔧 *Arnaldo Trentin:* ${userMessage.trim()}`;
+
               await supabase.from('agent_memory').insert({
                   phone: remoteJid,
                   role: 'model',
                   content: formattedArnaldoMsg
               });
 
-              // 2. Pausa a IA para que a Maria não responda por cima do atendimento humano
-              const { data: currentPause } = await supabase.from('agent_memory').select('content').in('phone', phoneVariants).in('content', ['BOT_PAUSADO', 'BOT_ATIVO']).order('created_at', { ascending: false }).limit(1);
-              if (!currentPause || currentPause.length === 0 || currentPause[0].content !== 'BOT_PAUSADO') {
-                  await supabase.from('agent_memory').insert({ phone: remoteJid, role: 'user', content: 'BOT_PAUSADO' });
-                  console.log(`[ATENDIMENTO HUMANO] Pausa Automática ativada no JID: ${remoteJid}`);
+              // 3. Pausa a IA apenas se NÃO for a saudação automática do WhatsApp Business!
+              if (!isWppGreeting) {
+                  const { data: currentPause } = await supabase.from('agent_memory').select('content').in('phone', phoneVariants).in('content', ['BOT_PAUSADO', 'BOT_ATIVO']).order('created_at', { ascending: false }).limit(1);
+                  if (!currentPause || currentPause.length === 0 || currentPause[0].content !== 'BOT_PAUSADO') {
+                      await supabase.from('agent_memory').insert({ phone: remoteJid, role: 'user', content: 'BOT_PAUSADO' });
+                      console.log(`[ATENDIMENTO HUMANO] Pausa Automática ativada no JID: ${remoteJid}`);
+                  }
+              } else {
+                  console.log(`[WHATSAPP BUSINESS] Saudação automática detectada no JID: ${remoteJid}. IA NÃO pausada.`);
               }
           }
           return;
@@ -1646,22 +1694,35 @@ DIRETRIZES OBRIGATÓRIAS:
                       created_at: new Date().toISOString()
                   };
 
-                  // 1. Tenta salvar na tabela dedicada tarefas_arnaldo
+                  // 1. DEDUPLICAÇÃO DE TAREFAS: Se já existe uma tarefa 'pendente' ou 'em_andamento' para este contato nas últimas 24h, apenas atualiza
                   try {
-                      const { error: taskDbErr } = await supabase.from('tarefas_arnaldo').insert(taskPayload);
-                      if (taskDbErr) console.warn('[TAREFA ARNALDO] Tabela tarefas_arnaldo indisponível:', taskDbErr.message);
-                      else console.log('[TAREFA ARNALDO] Salva com sucesso na tabela tarefas_arnaldo!');
+                      const oneDayAgo = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+                      const { data: existingTasks } = await supabase
+                          .from('tarefas_arnaldo')
+                          .select('id, titulo, descricao')
+                          .in('cliente_telefone', phoneVariants)
+                          .in('status', ['pendente', 'em_andamento'])
+                          .gte('created_at', oneDayAgo)
+                          .order('created_at', { ascending: false })
+                          .limit(1);
+
+                      if (existingTasks && existingTasks.length > 0) {
+                          const exist = existingTasks[0];
+                          const timeStr = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                          const appendedDesc = `${exist.descricao}\n\n[Atualização ${timeStr}]: ${taskPayload.descricao}`;
+                          await supabase.from('tarefas_arnaldo').update({
+                              descricao: appendedDesc,
+                              resposta_ia: taskPayload.resposta_ia
+                          }).eq('id', exist.id);
+                          console.log(`[TAREFA ARNALDO] Tarefa existente #${exist.id} atualizada com novos detalhes (sem duplicar).`);
+                      } else {
+                          const { error: taskDbErr } = await supabase.from('tarefas_arnaldo').insert(taskPayload);
+                          if (taskDbErr) console.warn('[TAREFA ARNALDO] Erro ao gravar em tarefas_arnaldo:', taskDbErr.message);
+                          else console.log('[TAREFA ARNALDO] Nova tarefa salva com sucesso na tabela tarefas_arnaldo!');
+                      }
                   } catch (dbErr) {
                       console.warn('[TAREFA ARNALDO] Erro ao gravar em tarefas_arnaldo:', dbErr);
                   }
-
-                  // 2. Grava como redundância garantida em agent_memory com identificador único
-                  const memoryTask = { id: `TASK_${Date.now()}`, ...taskPayload };
-                  await supabase.from('agent_memory').insert({
-                      phone: 'ARNALDO_TASK',
-                      role: 'system',
-                      content: JSON.stringify(memoryTask)
-                  });
 
                   // 3. Atualiza relato do cliente na tabela clientes
                   try {

@@ -2375,6 +2375,7 @@ ${materiaisTxt}${extrasTxt}
 
     function initRealtime() {
         let liveReloadTimeout = null;
+        let tarefasReloadTimeout = null;
         const channel = supabase.channel('realtime-overhaul')
             .on('postgres_changes', {
                 event: '*',
@@ -2390,6 +2391,19 @@ ${materiaisTxt}${extrasTxt}
                 table: 'fluxo_caixa'
             }, () => loadData(false))
             .on('postgres_changes', {
+                event: '*',
+                schema: 'public',
+                table: 'tarefas_arnaldo'
+            }, () => {
+                console.log('[Realtime] Mudança em tarefas_arnaldo detectada.');
+                if (tarefasReloadTimeout) clearTimeout(tarefasReloadTimeout);
+                tarefasReloadTimeout = setTimeout(() => {
+                    if (typeof window.loadTarefasArnaldo === 'function') {
+                        window.loadTarefasArnaldo(true);
+                    }
+                }, 200);
+            })
+            .on('postgres_changes', {
                 event: 'INSERT',
                 schema: 'public',
                 table: 'agent_memory'
@@ -2400,26 +2414,31 @@ ${materiaisTxt}${extrasTxt}
                 
                 console.log('[Realtime] Nova mensagem detectada:', newRow?.phone, newRow?.role);
                 
-                // Debounce de 800ms para não recarregar a cada insert rápido
+                // Debounce de 150ms para atualizar silenciosamente sem travamentos
                 if (liveReloadTimeout) clearTimeout(liveReloadTimeout);
                 liveReloadTimeout = setTimeout(() => {
-                    // Se a Central de Mensagens estiver visível, atualiza
-                    if (typeof window.loadLiveConversations === 'function') {
-                        window.loadLiveConversations();
-                    }
-                    // Se a conversa aberta é do mesmo phone, atualiza o chat
+                    // Se a conversa aberta é do mesmo phone, atualiza o stream silenciosamente (SEM SPINNER!)
                     const curClean = (typeof currentLivePhone !== 'undefined' && currentLivePhone) ? currentLivePhone.replace(/\D/g, '') : '';
                     const rowClean = (newRow?.phone) ? newRow.phone.replace(/\D/g, '') : '';
                     const isSamePhone = curClean && rowClean && (curClean === rowClean || curClean.endsWith(rowClean) || rowClean.endsWith(curClean));
                     
                     if (isSamePhone && typeof window.selectLiveConversation === 'function') {
-                        window.selectLiveConversation(currentLivePhone);
+                        window.selectLiveConversation(currentLivePhone, true);
                     }
-                }, 100);
-            })
-            .subscribe();
 
-        console.log('[Realtime] Escuta de mudanças ativada (OS + Caixa + Mensagens).');
+                    // Atualiza a lista lateral silenciosamente
+                    if (typeof window.loadLiveConversations === 'function') {
+                        window.loadLiveConversations(true);
+                    }
+                }, 150);
+            })
+            .subscribe((status) => {
+                if (status === 'SUBSCRIBED') {
+                    console.log('[Realtime] Conexão Realtime estabelecida com sucesso.');
+                }
+            });
+
+        console.log('[Realtime] Escuta de mudanças ativada (OS + Caixa + Mensagens + Tarefas Arnaldo).');
     }
 
     function renderCards(ordens) {
@@ -7670,6 +7689,23 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
         }
     };
 
+    function cleanMsgSnippet(rawText) {
+        if (!rawText) return 'Conversa iniciada';
+        let text = String(rawText)
+            .replace(/\[MSG_ID:[^\]]+\]\s*/g, '')
+            .replace(/^Mensagem do Cliente\s*\([^)]*\):\s*/i, '')
+            .replace(/\[MEDIA_AUDIO_B64:[^\]]+\]\s*/g, '🎙️ [Áudio de Voz]')
+            .replace(/\[MEDIA_IMAGE_B64:[^\]]+\]\s*/g, '📷 [Foto/Imagem]')
+            .replace(/\[MEDIA_AUDIO:[^\]]+\]\s*/g, '🎙️ [Áudio de Voz]')
+            .replace(/\[MEDIA_IMAGE:[^\]]+\]\s*/g, '📷 [Foto/Imagem]')
+            .replace(/\[LOCK:[^\]]+\]\s*/g, '')
+            .trim();
+        if (text.startsWith('👨‍🔧 *Arnaldo Trentin:*')) {
+            text = text.replace('👨‍🔧 *Arnaldo Trentin:*', 'Você:').trim();
+        }
+        return text || 'Conversa iniciada';
+    }
+
     function renderLiveConversationsList() {
         const container = document.getElementById('live-chat-conversations-list');
         if (!container) return;
@@ -7702,7 +7738,8 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
 
             const initial = (c.clientName || 'W').charAt(0).toUpperCase();
             const timeStr = c.lastTime ? new Date(c.lastTime).toLocaleTimeString('pt-BR', {hour: '2-digit', minute: '2-digit'}) : '';
-            const safeSnippet = (c.displayLastMsg || '').substring(0, 45) + ((c.displayLastMsg || '').length > 45 ? '...' : '');
+            const cleanText = cleanMsgSnippet(c.displayLastMsg);
+            const safeSnippet = cleanText.substring(0, 48) + (cleanText.length > 48 ? '...' : '');
 
             return `
                 <div onclick="window.selectLiveConversation('${c.phone}')" style="background: ${bg}; border: ${border}; border-radius: 10px; padding: 10px 12px; cursor: pointer; transition: all 0.2s; display: flex; gap: 10px; align-items: center;">
@@ -7857,18 +7894,50 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
     function renderLiveMessageStream(rawMessages, clientName, stream) {
         if (!stream || !rawMessages || rawMessages.length === 0) return;
 
-        // Filtra comandos de sistema consecutivos repetidos para não poluir o chat
+        // Filtra comandos de sistema e mensagens duplicadas consecutivas/por MSG_ID
         let lastStatusPill = null;
-        const messages = rawMessages.filter(msg => {
-            const isStatusCmd = ['BOT_PAUSADO', 'BOT_ATIVO', 'BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA'].includes(msg.content);
+        const seenMsgIds = new Set();
+        const messages = [];
+
+        for (let i = 0; i < rawMessages.length; i++) {
+            const msg = rawMessages[i];
+            const content = (msg.content || '').trim();
+
+            // 1. Extrai MSG_ID se houver para dedup
+            const msgIdMatch = content.match(/\[MSG_ID:([^\]]+)\]/);
+            if (msgIdMatch) {
+                const msgId = msgIdMatch[1];
+                if (seenMsgIds.has(msgId)) continue;
+                seenMsgIds.add(msgId);
+            }
+
+            // 2. Filtra status repetidos
+            const isStatusCmd = ['BOT_PAUSADO', 'BOT_ATIVO', 'BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA'].includes(content);
             if (isStatusCmd) {
-                if (lastStatusPill === msg.content) return false;
-                lastStatusPill = msg.content;
-                return true;
+                if (lastStatusPill === content) continue;
+                lastStatusPill = content;
+                messages.push(msg);
+                continue;
             }
             lastStatusPill = null;
-            return true;
-        });
+
+            // 3. Deduplicação por proximidade temporal e conteúdo idêntico (ex: eco do webhook em até 20s)
+            const prevMsg = messages[messages.length - 1];
+            if (prevMsg && prevMsg.role === msg.role) {
+                const cleanCurrent = content.replace(/\[MSG_ID:[^\]]+\]\s*/g, '').replace(/^Mensagem do Cliente\s*\([^)]*\):\s*/i, '').trim();
+                const cleanPrev = (prevMsg.content || '').replace(/\[MSG_ID:[^\]]+\]\s*/g, '').replace(/^Mensagem do Cliente\s*\([^)]*\):\s*/i, '').trim();
+                
+                const timeCurr = msg.created_at ? new Date(msg.created_at).getTime() : 0;
+                const timePrev = prevMsg.created_at ? new Date(prevMsg.created_at).getTime() : 0;
+                const diffSec = Math.abs(timeCurr - timePrev) / 1000;
+
+                if (cleanCurrent === cleanPrev && diffSec < 20) {
+                    continue; // Pula duplicata
+                }
+            }
+
+            messages.push(msg);
+        }
 
         stream.innerHTML = messages.map(msg => {
             const time = msg.created_at ? new Date(msg.created_at).toLocaleTimeString('pt-BR', {hour: '2-digit', minute: '2-digit'}) : '';
@@ -7902,12 +7971,14 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
                 }
 
                 cleanUserText = cleanUserText
+                    .replace(/^Mensagem do Cliente\s*\([^)]*\):\s*/i, '')
                     .replace(/\[MSG_ID:[^\]]+\]\s*/g, '')
                     .replace(/\[MEDIA_AUDIO_B64:[^\]]+\]\s*/g, '')
                     .replace(/\[MEDIA_IMAGE_B64:[^\]]+\]\s*/g, '')
                     .replace(/\[MEDIA_AUDIO:[^\]]+\]\s*/g, '🎙️ _[Áudio de voz recebido]_')
                     .replace(/\[MEDIA_IMAGE:[^\]]+\]\s*/g, '📷 _[Foto/Imagem recebida]_')
-                    .replace(/\[LOCK:[^\]]+\]\s*/g, '');
+                    .replace(/\[LOCK:[^\]]+\]\s*/g, '')
+                    .trim();
 
                 const isAudioMsg = base64Audio || cleanUserText.includes('Áudio') || cleanUserText.includes('audio') || cleanUserText.includes('🎙️') || cleanUserText.includes('voz');
                 const isPhotoMsg = base64Image || cleanUserText.includes('Foto') || cleanUserText.includes('📷') || cleanUserText.includes('imagem');
@@ -7954,7 +8025,12 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
                 .replace(/\[MEDIA_IMAGE_B64:[^\]]+\]\s*/g, '')
                 .replace(/\[LOCK:[^\]]+\]\s*/g, '');
 
-            const isArnaldo = cleanModelText && (cleanModelText.includes('👨‍🔧') || cleanModelText.toLowerCase().startsWith('arnaldo'));
+            if (cleanModelText.includes('👨‍🔧 *Arnaldo Trentin:*')) {
+                cleanModelText = cleanModelText.replace(/👨‍🔧\s*\*Arnaldo Trentin:\*\s*/g, '');
+            }
+            cleanModelText = cleanModelText.trim();
+
+            const isArnaldo = cleanModelText && (msg.content.includes('👨‍🔧') || cleanModelText.toLowerCase().startsWith('arnaldo'));
             const bubbleBg = isArnaldo ? 'rgba(41, 128, 185, 0.2)' : 'rgba(37, 211, 102, 0.12)';
             const bubbleBorder = isArnaldo ? '1px solid rgba(41, 128, 185, 0.4)' : '1px solid rgba(37, 211, 102, 0.3)';
             const tagColor = isArnaldo ? '#3498db' : '#25D366';
@@ -9260,15 +9336,31 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
                 console.warn('[TAREFAS] Erro ao consultar agent_memory ARNALDO_TASK:', e);
             }
 
+            // Deduplicação semântica: mantém apenas a mais recente por (cliente_telefone + status) se forem pendentes, ou id único
+            const uniqueTasks = [];
+            const seenTaskKeys = new Set();
+            for (const t of allTasks) {
+                const telClean = (t.cliente_telefone || '').replace(/\D/g, '').slice(-8);
+                const status = (t.status || 'pendente').toLowerCase();
+                // Chave composta para pendentes do mesmo cliente
+                const dedupeKey = status === 'pendente' && telClean 
+                    ? `pending_${telClean}_${(t.titulo || '').trim().toLowerCase().slice(0, 15)}`
+                    : `task_${t.id}`;
+                if (!seenTaskKeys.has(dedupeKey)) {
+                    seenTaskKeys.add(dedupeKey);
+                    uniqueTasks.push(t);
+                }
+            }
+
             // Ordena mais recentes no topo
-            allTasks.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
-            window.arnaldoTarefas = allTasks;
+            uniqueTasks.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+            window.arnaldoTarefas = uniqueTasks;
 
             // Atualiza contadores e KPIs
-            const pendentes = allTasks.filter(t => (t.status || 'pendente') === 'pendente').length;
-            const andamento = allTasks.filter(t => t.status === 'em_andamento').length;
-            const concluidas = allTasks.filter(t => t.status === 'concluido').length;
-            const orcamentos = allTasks.filter(t => t.tipo_solicitacao === 'ORCAMENTO').length;
+            const pendentes = uniqueTasks.filter(t => (t.status || 'pendente') === 'pendente').length;
+            const andamento = uniqueTasks.filter(t => t.status === 'em_andamento').length;
+            const concluidas = uniqueTasks.filter(t => t.status === 'concluido').length;
+            const orcamentos = uniqueTasks.filter(t => t.tipo_solicitacao === 'ORCAMENTO').length;
 
             const elPend = document.getElementById('metric-tarefas-pendentes');
             const elAnd = document.getElementById('metric-tarefas-andamento');
