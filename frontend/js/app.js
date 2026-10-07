@@ -7563,12 +7563,17 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
         }
     };
 
+    let _isLoadingLiveConversations = false;
+    let _lastClientsFetchTime = 0;
+
     // ==========================================================================
     // 💬 LIVE CRM: CONVERSAS AO VIVO (WHATSAPP INBOX)
     // ==========================================================================
     window.loadLiveConversations = async function(silent = false) {
         const container = document.getElementById('live-chat-conversations-list');
         if (!container) return;
+        if (_isLoadingLiveConversations) return;
+        _isLoadingLiveConversations = true;
 
         if (!silent && (!liveConversations || liveConversations.length === 0)) {
             container.innerHTML = '<div style="text-align:center; padding:30px 10px; color:var(--text-muted); font-size:0.85rem;"><i class="fa-solid fa-spinner fa-spin" style="font-size:1.5rem; margin-bottom:8px; display:block;"></i> Carregando conversas...</div>';
@@ -7577,22 +7582,25 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
         try {
             const supa = getSupa();
             
-            // 1. Carrega clientes para cruzar nomes
-            const { data: clientsData } = await supa.from('clientes').select('id, nome_cliente, whatsapp, endereco_completo');
-            liveClientsMap = {};
-            (clientsData || []).forEach(c => {
-                if (c.whatsapp) {
-                    const clean = c.whatsapp.replace(/\D/g, '');
-                    liveClientsMap[clean] = c;
-                    if (clean.startsWith('55')) liveClientsMap[clean.substring(2)] = c;
-                }
-            });
+            // 1. Carrega clientes para cruzar nomes (com cache de 60s)
+            if (!liveClientsMap || Date.now() - _lastClientsFetchTime > 60000) {
+                const { data: clientsData } = await supa.from('clientes').select('id, nome_cliente, whatsapp, endereco_completo');
+                liveClientsMap = {};
+                (clientsData || []).forEach(c => {
+                    if (c.whatsapp) {
+                        const clean = c.whatsapp.replace(/\D/g, '');
+                        liveClientsMap[clean] = c;
+                        if (clean.startsWith('55')) liveClientsMap[clean.substring(2)] = c;
+                    }
+                });
+                _lastClientsFetchTime = Date.now();
+            }
 
             // 2. Carrega mensagens de agent_memory
             const { data: memories, error } = await supa.from('agent_memory')
                 .select('phone, role, content, created_at')
                 .order('created_at', { ascending: false })
-                .limit(1000);
+                .limit(300);
 
             if (error) {
                 console.error('[LIVE CRM] Erro ao carregar memórias:', error);
@@ -7611,7 +7619,8 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
                 if (!m.phone || m.phone.startsWith('LOCK_') || m.phone.startsWith('LEADER_') || m.phone === 'GLOBAL_CONFIG' || m.phone === 'DEBUG_AUDIO' || m.phone === 'MARIA_TASK' || m.phone.includes('@g.us')) return;
                 let cleanPhone = m.phone.replace(/\D/g, '');
                 if (!cleanPhone || cleanPhone.length < 8) return;
-                if (!cleanPhone.startsWith('55') && cleanPhone.length >= 10 && cleanPhone.length <= 11) {
+                const isNorthAmerica = cleanPhone.startsWith('1') && cleanPhone.length === 11;
+                if (!isNorthAmerica && !cleanPhone.startsWith('55') && cleanPhone.length >= 10 && cleanPhone.length <= 11) {
                     cleanPhone = '55' + cleanPhone;
                 }
 
@@ -7686,6 +7695,8 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
 
         } catch (err) {
             console.error('[LIVE CRM] Erro geral:', err);
+        } finally {
+            _isLoadingLiveConversations = false;
         }
     };
 
@@ -7850,8 +7861,9 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
 
             // Normaliza variações de telefone (com 55, sem 55, com @s.whatsapp.net)
             const cleanDigits = phone.replace(/\D/g, '');
-            const without55 = cleanDigits.replace(/^55/, '');
-            const with55 = `55${without55}`;
+            const isNorthAmerica = cleanDigits.startsWith('1') && cleanDigits.length === 11;
+            const without55 = isNorthAmerica ? cleanDigits : cleanDigits.replace(/^55/, '');
+            const with55 = isNorthAmerica ? cleanDigits : `55${without55}`;
             const phoneVariants = [
                 phone,
                 cleanDigits,
@@ -7865,7 +7877,7 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
 
             // Busca as últimas 60 mensagens mais recentes no banco
             const { data: rawMessages, error } = await supa.from('agent_memory')
-                .select('*')
+                .select('id, phone, role, content, created_at')
                 .in('phone', uniquePhones)
                 .order('created_at', { ascending: false })
                 .limit(60);

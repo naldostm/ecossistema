@@ -893,42 +893,21 @@ DIRETRIZES OBRIGATÓRIAS:
       const last8Digits = remoteJid.slice(-8);
       const allPhoneVariants = getPhoneVariants(remoteJid);
 
-      // === 0. VERIFICAÇÃO ANTECIPADA E INFALÍVEL DE LISTA NEGRA (BLACKLIST) E SPAM ===
-      if (!isArnaldoAdmin) {
-          const { data: earlyBlacklist } = await supabase
-              .from('agent_memory')
-              .select('content, created_at')
-              .in('phone', allPhoneVariants)
-              .in('content', ['BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA', 'BOT_ATIVO', 'SPAM_ROBO'])
-              .order('created_at', { ascending: false })
-              .limit(1);
 
-          if (earlyBlacklist && earlyBlacklist.length > 0) {
-              const st = earlyBlacklist[0].content;
-              if (st === 'BOT_IGNORAR' || st === 'AMIGO_IGNORAR' || st === 'LISTA_NEGRA' || st === 'SPAM_ROBO') {
-                  console.log(`[LISTA NEGRA / SPAM - BLOQUEIO ANTECIPADO] Contato ${remoteJid} bloqueado/ignorado (status: ${st}).`);
-                  return;
-              }
-          }
 
-          if (last8Digits && last8Digits.length === 8) {
-              const { data: partialBlocked } = await supabase
-                  .from('agent_memory')
-                  .select('phone, created_at')
-                  .in('content', ['BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA', 'SPAM_ROBO'])
-                  .like('phone', `%${last8Digits}%`)
-                  .order('created_at', { ascending: false })
-                  .limit(1);
-              if (partialBlocked && partialBlocked.length > 0) {
-                  console.log(`[LISTA NEGRA - BLOQUEIO POR FINAL ${last8Digits}] Contato ${remoteJid} bloqueado.`);
-                  return;
-              }
-          }
-      }
+      // CONTROLE DE ORIGEM DA MENSAGEM (Arnaldo x Cliente)
+      const isMessageFromMe = payload?.message?.fromMe === true || 
+                              payload?.fromMe === true || 
+                              payload?.data?.key?.fromMe === true || 
+                              payload?.data?.fromMe === true || 
+                              payload?.data?.message?.key?.fromMe === true ||
+                              payload?.event?.fromMe === true ||
+                              msgNode?.fromMe === true;
+      const sentByApi = payload?.message?.wasSentByApi === true || payload?.data?.message?.wasSentByApi === true || payload?.wasSentByApi === true;
 
       // === 0.1 ESCUDO HEURÍSTICO ANTI-SPAM & ANTI-ROBÔ (BANCOS, OPERADORAS E OUTRAS IAS) ===
       const textToCheck = (userMessage || '').toLowerCase();
-      const isSpamOrBankBot = !isArnaldoAdmin && ((
+      const isSpamOrBankBot = !isArnaldoAdmin && !isMessageFromMe && !sentByApi && ((
           // Bancos e notificações automatizadas de OTP / faturas
           /(itau|itaú|bradesco|santander|banco do brasil|nubank|caixa econ[oô]mica|banco inter|c6 bank)/i.test(textToCheck) &&
           /(c[oó]digo de seguran[çc]a|chave pix|fatura fechada|fatura dispon[ií]vel|limite aprovado|cart[aã]o|token|n[aã]o compartilhe|transa[çc][aã]o suspeita|seguran[çc]a do banco|sua conta corrente)/i.test(textToCheck)
@@ -1166,16 +1145,7 @@ ${ultimosContatosTexto || 'Nenhuma recente.'}
 
       const phoneVariants = allPhoneVariants;
 
-      // CONTROLE DE PAUSA E COMANDOS DO GESTOR (Atendimento Humano Individual)
-      const isMessageFromMe = payload?.message?.fromMe === true || 
-                              payload?.fromMe === true || 
-                              payload?.data?.key?.fromMe === true || 
-                              payload?.data?.fromMe === true || 
-                              payload?.data?.message?.key?.fromMe === true ||
-                              payload?.event?.fromMe === true ||
-                              msgNode?.fromMe === true;
-      const sentByApi = payload?.message?.wasSentByApi === true || payload?.data?.message?.wasSentByApi === true || payload?.wasSentByApi === true;
-      
+
       if (isMessageFromMe || sentByApi) {
           console.log(`[FROM ME] Mensagem detectada. isFromMe: ${isMessageFromMe}, sentByApi: ${sentByApi}. JID: ${remoteJid}.`);
           
@@ -1236,10 +1206,18 @@ ${ultimosContatosTexto || 'Nenhuma recente.'}
                   content: formattedArnaldoMsg
               });
 
-              // 3. Pausa a IA apenas se NÃO for a saudação automática do WhatsApp Business!
+              // 3. Pausa a IA apenas se NÃO for a saudação automática do WhatsApp Business e NÃO for contato ignorado/amigo!
               if (!isWppGreeting) {
-                  const { data: currentPause } = await supabase.from('agent_memory').select('content').in('phone', phoneVariants).in('content', ['BOT_PAUSADO', 'BOT_ATIVO']).order('created_at', { ascending: false }).limit(1);
-                  if (!currentPause || currentPause.length === 0 || currentPause[0].content !== 'BOT_PAUSADO') {
+                  const { data: currentPause } = await supabase.from('agent_memory')
+                      .select('content')
+                      .in('phone', phoneVariants)
+                      .in('content', ['BOT_PAUSADO', 'BOT_ATIVO', 'BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA', 'SPAM_ROBO'])
+                      .order('created_at', { ascending: false })
+                      .limit(1);
+                  const currentStatus = currentPause?.[0]?.content;
+                  if (currentStatus === 'BOT_IGNORAR' || currentStatus === 'AMIGO_IGNORAR' || currentStatus === 'LISTA_NEGRA' || currentStatus === 'SPAM_ROBO') {
+                      console.log(`[ATENDIMENTO HUMANO] Contato ${remoteJid} já é ignorado/amigo (${currentStatus}). Mantendo status.`);
+                  } else if (currentStatus !== 'BOT_PAUSADO') {
                       await supabase.from('agent_memory').insert({ phone: remoteJid, role: 'user', content: 'BOT_PAUSADO' });
                       console.log(`[ATENDIMENTO HUMANO] Pausa Automática ativada no JID: ${remoteJid}`);
                   }
@@ -1555,7 +1533,7 @@ ${ultimosContatosTexto || 'Nenhuma recente.'}
               .from('agent_memory')
               .select('content, created_at')
               .in('phone', phoneVariants)
-              .in('content', ['BOT_PAUSADO', 'BOT_ATIVO', 'BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA'])
+              .in('content', ['BOT_PAUSADO', 'BOT_ATIVO', 'BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA', 'SPAM_ROBO'])
               .order('created_at', { ascending: false })
               .limit(1);
               
@@ -1564,8 +1542,8 @@ ${ultimosContatosTexto || 'Nenhuma recente.'}
               const createdAt = new Date(pauseState[0].created_at || 0).getTime();
               const isRecentlyPaused = (Date.now() - createdAt) < (45 * 60 * 1000); // 45 minutos
 
-              if (state === 'BOT_IGNORAR' || state === 'AMIGO_IGNORAR' || state === 'LISTA_NEGRA') {
-                  console.log(`[LISTA NEGRA] Mensagem registrada no chat, robô está permanentemente ignorado para ${remoteJid}.`);
+              if (state === 'BOT_IGNORAR' || state === 'AMIGO_IGNORAR' || state === 'LISTA_NEGRA' || state === 'SPAM_ROBO') {
+                  console.log(`[LISTA NEGRA / SPAM] Mensagem registrada no chat, robô está permanentemente ignorado para ${remoteJid}.`);
                   return;
               }
               if (state === 'BOT_PAUSADO') {
