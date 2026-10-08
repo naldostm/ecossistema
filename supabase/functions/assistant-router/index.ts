@@ -51,6 +51,146 @@ function sanitizePushName(rawName?: string): string {
   return "";
 }
 
+function cleanWhatsAppText(rawText: string | null | undefined): string {
+  if (!rawText || typeof rawText !== 'string') return '';
+
+  let cleaned = rawText;
+
+  // 1. Remove blocos completos de código markdown (```json ... ``` ou ``` ... ```)
+  cleaned = cleaned.replace(/```(?:json)?[\s\S]*?```/gi, '');
+
+  // 2. Remove cercas de código não fechadas no final (ex: ```json { "acao": ... truncado)
+  cleaned = cleaned.replace(/```(?:json)?[\s\S]*$/gi, '');
+
+  // 3. Remove blocos JSON completos que contêm "acao"
+  cleaned = cleaned.replace(/\{[\s\S]*?"acao"[\s\S]*?\}/gi, '');
+
+  // 4. Remove blocos JSON truncados/não fechados que contêm "acao"
+  cleaned = cleaned.replace(/\{[\s\S]*?"acao"[\s\S]*$/gi, '');
+
+  // 5. Filtra linhas residuais que se assemelham a propriedades JSON ou artefatos técnicos
+  cleaned = cleaned
+    .split('\n')
+    .filter(line => {
+      const trimmed = line.trim();
+      if (!trimmed) return true;
+      if (/^```/i.test(trimmed)) return false;
+      if (/^json$/i.test(trimmed)) return false;
+      if (/^\{+$/.test(trimmed)) return false;
+      if (/^\}+,??$/.test(trimmed)) return false;
+      if (/^\"acao\"\s*:/i.test(trimmed)) return false;
+      if (/^\"(?:nome_cliente|telefone_destino|mensagem_gerada|confirmacao_gestor|resposta_pro_cliente|resposta_ao_gestor|tipo_solicitacao|titulo|descricao|prioridade|endereco_completo|cpf_cnpj|relato)\"\s*:/i.test(trimmed)) return false;
+      return true;
+    })
+    .join('\n');
+
+  // 6. Limpa quebras de linha excessivas e espaços das bordas
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n').trim();
+
+  return cleaned;
+}
+
+function extractActionBlocks(rawText: string | null | undefined): any[] {
+  if (!rawText || typeof rawText !== 'string') return [];
+  const actions: any[] = [];
+
+  for (let i = 0; i < rawText.length; i++) {
+    if (rawText[i] === '{') {
+      let depth = 0;
+      let inString = false;
+      let escape = false;
+      let endIndex = -1;
+
+      for (let j = i; j < rawText.length; j++) {
+        const char = rawText[j];
+        if (escape) {
+          escape = false;
+          continue;
+        }
+        if (char === '\\') {
+          escape = true;
+          continue;
+        }
+        if (char === '"') {
+          inString = !inString;
+          continue;
+        }
+        if (!inString) {
+          if (char === '{') {
+            depth++;
+          } else if (char === '}') {
+            depth--;
+            if (depth === 0) {
+              endIndex = j;
+              break;
+            }
+          }
+        }
+      }
+
+      let candidate = '';
+      if (endIndex !== -1) {
+        candidate = rawText.slice(i, endIndex + 1);
+      } else {
+        // Truncado no final: tenta reparo de fechamento
+        let tr = rawText.slice(i);
+        if (inString) tr += '"';
+        while (depth > 0) {
+          tr += '}';
+          depth--;
+        }
+        candidate = tr;
+      }
+
+      if (candidate.includes('"acao"')) {
+        let parsed: any = null;
+        try {
+          parsed = JSON.parse(candidate);
+        } catch {
+          try {
+            const cleaned = candidate
+              .replace(/,\s*([\}\]])/g, '$1')
+              .replace(/[\u201C\u201D]/g, '"')
+              .replace(/[\u2018\u2019]/g, "'");
+            parsed = JSON.parse(cleaned);
+          } catch {
+            const acaoMatch = candidate.match(/"acao"\s*:\s*"([^"]+)"/);
+            if (acaoMatch) {
+              const getField = (name: string): string => {
+                const m = candidate.match(new RegExp(`"${name}"\\s*:\\s*"([^"\\\\]*(?:\\\\.[^"\\\\]*)*)"`));
+                return m ? m[1].replace(/\\"/g, '"').replace(/\\n/g, '\n') : '';
+              };
+              parsed = {
+                acao: acaoMatch[1],
+                nome_cliente: getField('nome_cliente'),
+                telefone_destino: getField('telefone_destino'),
+                mensagem_gerada: getField('mensagem_gerada'),
+                confirmacao_gestor: getField('confirmacao_gestor'),
+                tipo_solicitacao: getField('tipo_solicitacao'),
+                titulo: getField('titulo'),
+                descricao: getField('descricao'),
+                resposta_pro_cliente: getField('resposta_pro_cliente'),
+                mensagem_pro_cliente: getField('mensagem_pro_cliente')
+              };
+            }
+          }
+        }
+
+        if (parsed && parsed.acao) {
+          actions.push(parsed);
+          if (endIndex !== -1) {
+            i = endIndex;
+          } else {
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  return actions;
+}
+
 function buildTemporalContext(): { promptContext: string; saudacaoObrigatoria: string; isExpediente: boolean; spTimeStr: string } {
   // Horário oficial de Brasília (America/Sao_Paulo)
   const spNow = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
@@ -998,10 +1138,11 @@ DIRETRIZES OBRIGATÓRIAS:
 
 SUAS CAPACIDADES ATIVAS PARA O ARNALDO:
 1. ENVIAR MENSAGENS PARA CLIENTES (DISPARO ATIVO VIA WHATSAPP):
-   Se o Arnaldo pedir para você mandar mensagem para qualquer cliente (seja pelo nome ou pelo telefone), por exemplo:
-   "Maria, manda mensagem pro Dr. Carlos perguntando se ele aprovou os splits", ou
-   "Avisa o cliente no 11988887777 que a equipe chega às 14h":
-   -> Você DEVE responder com uma ação JSON:
+   Se o Arnaldo pedir para você mandar mensagem para qualquer cliente (seja pelo nome ou pelo telefone):
+   - Se for para 1 cliente, responda com o bloco JSON.
+   - Se for para MAIS DE UM cliente na mesma mensagem (ex: para o Artur E para a Fabiana), você DEVE retornar UM bloco JSON separado para CADA destinatário.
+   - Retorne ESTRITAMENTE os blocos JSON das ações.
+   Formato de cada bloco:
    {
      "acao": "DISPARAR_CONTATO_ATIVO",
      "nome_cliente": "Nome do Cliente",
@@ -1539,20 +1680,14 @@ ${ultimosContatosTexto || 'Nenhuma recente.'}
               
           if (pauseState && pauseState.length > 0) {
               const state = pauseState[0].content;
-              const createdAt = new Date(pauseState[0].created_at || 0).getTime();
-              const isRecentlyPaused = (Date.now() - createdAt) < (45 * 60 * 1000); // 45 minutos
 
               if (state === 'BOT_IGNORAR' || state === 'AMIGO_IGNORAR' || state === 'LISTA_NEGRA' || state === 'SPAM_ROBO') {
                   console.log(`[LISTA NEGRA / SPAM] Mensagem registrada no chat, robô está permanentemente ignorado para ${remoteJid}.`);
                   return;
               }
               if (state === 'BOT_PAUSADO') {
-                  if (isRecentlyPaused) {
-                      console.log(`[ATENDIMENTO HUMANO / PAUSADO RECENTE] Mensagem registrada no chat, atendimento humano em andamento para ${remoteJid}. Robô em silêncio.`);
-                      return;
-                  } else {
-                      console.log(`[PAUSA EXPIRADA] Pausa humana de ${remoteJid} foi há mais de 45m. Maria Cecília assumindo novo chamado.`);
-                  }
+                  console.log(`[ATENDIMENTO HUMANO / PAUSADO] Mensagem registrada no chat, atendimento humano em andamento para ${remoteJid}. Robô em silêncio absoluto (aguardando /retomar, /ativo ou reativação no CRM).`);
+                  return;
               }
           }
       }
@@ -1768,25 +1903,20 @@ ${ultimosContatosTexto || 'Nenhuma recente.'}
 
       const completion = await chat.sendMessage(geminiInput);
       let aiResponse = completion.response.text();
-      let whatsAppText = aiResponse;
+      let whatsAppText = "";
 
       console.log(`[${botNameRaw}] GEMINI GEROU: ${aiResponse}`);
 
-      // MULTI-ACTION ROUTER: Se o LLM Cuspiu um JSON para Banco de Dados
-      try {
-          if (aiResponse.includes('"acao"') || aiResponse.includes('"CRIAR_CADASTRO"') || aiResponse.includes('"LANCAR_CAIXA"') || aiResponse.includes('"IGNORAR_SPAM_ROBO"') || aiResponse.includes('"CRIAR_TAREFA_GESTOR"')) {
-              // Extrair JSON robusto (mesmo se misturado com texto ou markdown)
-              let jsonStr = aiResponse.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-              
-              // Se ainda tem texto antes/depois do JSON, tenta encontrar o JSON
-              const jsonMatch = jsonStr.match(/\{[\s\S]*"acao"[\s\S]*\}/);
-              if (jsonMatch) {
-                  jsonStr = jsonMatch[0];
-              }
-              
-              const actionData = JSON.parse(jsonStr);
-              console.log(`[ACTION] Ação detectada: ${actionData.acao}`);
+      // MULTI-ACTION ROUTER & ESCUDO ANTI-VAZAMENTO
+      const actions = extractActionBlocks(aiResponse);
+      const gestorConfirmations: string[] = [];
+      let clientResponseText = "";
+      let isSpamRobo = false;
 
+      if (actions.length > 0) {
+          console.log(`[MULTI-ACTION] ${actions.length} ação(ões) detectada(s) no retorno da IA.`);
+
+          for (const actionData of actions) {
               // 🛡️ AÇÃO ANTI-SPAM / ANTI-ROBÔ DA IA
               if (actionData.acao === "IGNORAR_SPAM_ROBO") {
                   console.log(`[SPAM / ROBÔ DETECTADO PELA IA] Contato ${remoteJid} classificado como SPAM_ROBO. Silêncio mantido.`);
@@ -1795,7 +1925,8 @@ ${ultimosContatosTexto || 'Nenhuma recente.'}
                       role: 'user',
                       content: 'SPAM_ROBO'
                   });
-                  return; // Silêncio absoluto, não envia WhatsApp e encerra
+                  isSpamRobo = true;
+                  break;
               }
 
               // 🎯 AÇÃO: CRIAR TAREFA PARA O ARNALDO (PEDIDOS / SOLICITAÇÕES)
@@ -1842,7 +1973,7 @@ ${ultimosContatosTexto || 'Nenhuma recente.'}
                       console.warn('[TAREFA ARNALDO] Erro ao gravar em tarefas_arnaldo:', dbErr);
                   }
 
-                  // 3. Atualiza relato do cliente na tabela clientes
+                  // 2. Atualiza relato do cliente na tabela clientes
                   try {
                       const { data: existClient } = await supabase.from('clientes')
                           .select('id, relato_necessidade')
@@ -1865,12 +1996,13 @@ ${ultimosContatosTexto || 'Nenhuma recente.'}
                   }
 
                   if (isArnaldoAdmin) {
-                      whatsAppText = actionData.resposta_ao_gestor || actionData.confirmacao_gestor || `✅ Anotado, Arnaldo! Registrei a tarefa "${taskPayload.titulo}" nas suas pendências do sistema.`;
+                      gestorConfirmations.push(actionData.resposta_ao_gestor || actionData.confirmacao_gestor || `✅ Anotado, Arnaldo! Registrei a tarefa "${taskPayload.titulo}" nas suas pendências do sistema.`);
                   } else {
-                      whatsAppText = actionData.resposta_pro_cliente || actionData.mensagem_pro_cliente || "Perfeito! Já registrei todos os detalhes da sua solicitação e passei diretamente para o Arnaldo avaliar. Ele retornará em breve!";
+                      clientResponseText = actionData.resposta_pro_cliente || actionData.mensagem_pro_cliente || clientResponseText;
                   }
               }
 
+              // 💰 AÇÃO: LANÇAR CAIXA
               else if (actionData.acao === "LANCAR_CAIXA") {
                   const { error: insertErr } = await supabase.from('fluxo_caixa').insert({
                       tipo_movimentacao: actionData.tipo_movimentacao,
@@ -1880,8 +2012,10 @@ ${ultimosContatosTexto || 'Nenhuma recente.'}
                   });
                   if (insertErr) console.error("[ACTION] Erro ao inserir fluxo_caixa:", insertErr);
                   else console.log("[ACTION] Fluxo de caixa inserido com sucesso!");
-                  whatsAppText = `✅ Pronto! Lançamento de ${actionData.tipo_movimentacao} (R$ ${actionData.valor}) registrado no Livro Caixa.`;
+                  gestorConfirmations.push(`✅ Pronto! Lançamento de ${actionData.tipo_movimentacao} (R$ ${actionData.valor}) registrado no Livro Caixa.`);
               } 
+
+              // ⚖️ AÇÃO: CRIAR PMOC
               else if (actionData.acao === "CRIAR_PMOC") {
                   const { error: insertErr } = await supabase.from('contratos_pmoc').insert({
                       tipo_contrato: actionData.tipo_contrato,
@@ -1891,8 +2025,10 @@ ${ultimosContatosTexto || 'Nenhuma recente.'}
                   });
                   if (insertErr) console.error("[ACTION] Erro ao inserir PMOC:", insertErr);
                   else console.log("[ACTION] PMOC inserido com sucesso!");
-                  whatsAppText = `⚖️ PMOC Minute gerada e contratada no sistema! Vigência: ${actionData.vigencia_meses} meses.`;
+                  gestorConfirmations.push(`⚖️ PMOC Minuta gerada e contratada no sistema! Vigência: ${actionData.vigencia_meses} meses.`);
               }
+
+              // 🔍 AÇÃO: NOTIFICAÇÃO
               else if (actionData.acao === "CRIAR_NOTIFICACAO") {
                   const { error: insertErr } = await supabase.from('notificacoes_internas').insert({
                       tipo: "Auditoria de Instalação (Ian)",
@@ -1901,42 +2037,54 @@ ${ultimosContatosTexto || 'Nenhuma recente.'}
                   });
                   if (insertErr) console.error("[ACTION] Erro ao inserir notificação:", insertErr);
                   else console.log("[ACTION] Notificação inserida com sucesso!");
-                  whatsAppText = `🔍 Laudo processado e salvo na base de notificações para auditoria futura.`;
+                  gestorConfirmations.push(`🔍 Laudo processado e salvo na base de notificações para auditoria futura.`);
               }
+
+              // 📋 AÇÃO: CRIAR CADASTRO
               else if (actionData.acao === "CRIAR_CADASTRO") {
-                  // Verificação Anti-Duplicação: Verifica se o WhatsApp ou final de 8 dígitos já existe em clientes
-                  const { data: existingClients } = await supabase
-                      .from('clientes')
-                      .select('id, nome_cliente, relato_necessidade, endereco_completo, documento_cpf_cnpj')
-                      .or(`whatsapp.ilike.%${last8Digits}%,whatsapp.eq.${cleanPhone},whatsapp.eq.${remoteJid}`)
-                      .limit(1);
+                  try {
+                      const { data: existingClients } = await supabase
+                          .from('clientes')
+                          .select('id, nome_cliente, relato_necessidade, endereco_completo, documento_cpf_cnpj')
+                          .or(`whatsapp.ilike.%${last8Digits}%,whatsapp.eq.${cleanPhone},whatsapp.eq.${remoteJid}`)
+                          .limit(1);
 
-                  if (existingClients && existingClients.length > 0) {
-                      const exist = existingClients[0];
-                      console.log(`[ANTI-DUPLICAÇÃO] Cliente já cadastrado no banco (ID: ${exist.id}, Nome: ${exist.nome_cliente}). Atualizando registro.`);
-                      const prevRelato = exist.relato_necessidade || '';
-                      const newRelato = actionData.relato ? `${prevRelato ? prevRelato + '\n' : ''}[Novo Chamado ${new Date().toLocaleDateString('pt-BR')}]: ${actionData.relato}` : prevRelato;
-                      
-                      const updatePayload: Record<string, any> = { relato_necessidade: newRelato };
-                      if (!exist.endereco_completo && actionData.endereco_completo) updatePayload.endereco_completo = actionData.endereco_completo;
-                      if (!exist.documento_cpf_cnpj && actionData.cpf_cnpj) updatePayload.documento_cpf_cnpj = actionData.cpf_cnpj;
+                      if (existingClients && existingClients.length > 0) {
+                          const exist = existingClients[0];
+                          console.log(`[ANTI-DUPLICAÇÃO] Cliente já cadastrado no banco (ID: ${exist.id}, Nome: ${exist.nome_cliente}). Atualizando registro.`);
+                          const prevRelato = exist.relato_necessidade || '';
+                          const newRelato = actionData.relato ? `${prevRelato ? prevRelato + '\n' : ''}[Novo Chamado ${new Date().toLocaleDateString('pt-BR')}]: ${actionData.relato}` : prevRelato;
+                          
+                          const updatePayload: Record<string, any> = { relato_necessidade: newRelato };
+                          if (!exist.endereco_completo && actionData.endereco_completo) updatePayload.endereco_completo = actionData.endereco_completo;
+                          if (!exist.documento_cpf_cnpj && actionData.cpf_cnpj) updatePayload.documento_cpf_cnpj = actionData.cpf_cnpj;
 
-                      const { error: updErr } = await supabase.from('clientes').update(updatePayload).eq('id', exist.id);
-                      if (updErr) console.error("[ANTI-DUPLICAÇÃO] Erro ao atualizar cliente existente:", updErr);
-                      else console.log(`[ANTI-DUPLICAÇÃO] ✅ CLIENTE ATUALIZADO: ${exist.nome_cliente} | ID: ${exist.id}`);
-                  } else {
-                      const { error: insertErr } = await supabase.from('clientes').insert({
-                          nome_cliente: actionData.nome_cliente,
-                          whatsapp: remoteJid,
-                          endereco_completo: actionData.endereco_completo,
-                          documento_cpf_cnpj: actionData.cpf_cnpj,
-                          relato_necessidade: actionData.relato
-                      });
-                      if (insertErr) console.error("[ACTION] Erro ao inserir novo cliente:", insertErr);
-                      else console.log(`[ACTION] ✅ NOVO CLIENTE SALVO: ${actionData.nome_cliente} | ${remoteJid}`);
+                          const { error: updErr } = await supabase.from('clientes').update(updatePayload).eq('id', exist.id);
+                          if (updErr) console.error("[ANTI-DUPLICAÇÃO] Erro ao atualizar cliente existente:", updErr);
+                          else console.log(`[ANTI-DUPLICAÇÃO] ✅ CLIENTE ATUALIZADO: ${exist.nome_cliente} | ID: ${exist.id}`);
+                      } else {
+                          const { error: insertErr } = await supabase.from('clientes').insert({
+                              nome_cliente: actionData.nome_cliente,
+                              whatsapp: remoteJid,
+                              endereco_completo: actionData.endereco_completo,
+                              documento_cpf_cnpj: actionData.cpf_cnpj,
+                              relato_necessidade: actionData.relato
+                          });
+                          if (insertErr) console.error("[ACTION] Erro ao inserir novo cliente:", insertErr);
+                          else console.log(`[ACTION] ✅ NOVO CLIENTE SALVO: ${actionData.nome_cliente} | ${remoteJid}`);
+                      }
+                  } catch (cErr) {
+                      console.error("[CRIAR_CADASTRO] Erro ao cadastrar cliente:", cErr);
                   }
-                  whatsAppText = actionData.mensagem_pro_cliente || "✅ Perfeito! Tudo registrado e encaminhado aos responsáveis. Retornaremos assim que possível!";
+
+                  if (isArnaldoAdmin) {
+                      gestorConfirmations.push(actionData.confirmacao_gestor || `✅ Cliente ${actionData.nome_cliente || ''} cadastrado com sucesso!`);
+                  } else {
+                      clientResponseText = actionData.mensagem_pro_cliente || actionData.resposta_pro_cliente || clientResponseText;
+                  }
               }
+
+              // 🚀 AÇÃO: DISPARAR CONTATO ATIVO
               else if (actionData.acao === "DISPARAR_CONTATO_ATIVO") {
                   let targetPhone = String(actionData.telefone_destino || '').replace(/\D/g, '');
                   
@@ -1969,36 +2117,77 @@ ${ultimosContatosTexto || 'Nenhuma recente.'}
                   if (targetPhone && targetPhone.length >= 8) {
                       if (!targetPhone.startsWith('55') && targetPhone.length <= 11) targetPhone = '55' + targetPhone;
                       
-                      // Salva a mensagem no histórico do cliente para a IA manter o contexto
-                      await supabase.from('agent_memory').insert({
-                          phone: targetPhone,
-                          role: 'model',
-                          content: actionData.mensagem_gerada
-                      });
+                      const cleanMsgToSend = cleanWhatsAppText(actionData.mensagem_gerada);
 
-                      // Dispara via UazAPI / WhatsApp
-                      if (uazapiUrl) {
-                          try {
-                              const endpoint = uazapiUrl.endsWith('/') ? `${uazapiUrl}send/text` : `${uazapiUrl}/send/text`;
-                              const activeToken = payload?.token || uazapiToken || '';
-                              await fetch(endpoint, {
-                                  method: 'POST',
-                                  headers: { 'Content-Type': 'application/json', 'token': activeToken },
-                                  body: JSON.stringify({ number: targetPhone, text: actionData.mensagem_gerada })
-                              });
-                              console.log(`[DISPARO ATIVO SUCESSO] Mensagem enviada para ${targetPhone}`);
-                          } catch (sendErr) {
-                              console.error("[DISPARO ATIVO ERRO] Falha ao enviar:", sendErr);
+                      if (cleanMsgToSend) {
+                          // Salva a mensagem no histórico do cliente para a IA manter o contexto
+                          await supabase.from('agent_memory').insert({
+                              phone: targetPhone,
+                              role: 'model',
+                              content: cleanMsgToSend
+                          });
+
+                          // Dispara via UazAPI / WhatsApp
+                          if (uazapiUrl) {
+                              try {
+                                  const endpoint = uazapiUrl.endsWith('/') ? `${uazapiUrl}send/text` : `${uazapiUrl}/send/text`;
+                                  const activeToken = payload?.token || uazapiToken || '';
+                                  await fetch(endpoint, {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json', 'token': activeToken },
+                                      body: JSON.stringify({ number: targetPhone, text: cleanMsgToSend })
+                                  });
+                                  console.log(`[DISPARO ATIVO SUCESSO] Mensagem enviada para ${targetPhone}`);
+                              } catch (sendErr) {
+                                  console.error("[DISPARO ATIVO ERRO] Falha ao enviar:", sendErr);
+                              }
                           }
+                          gestorConfirmations.push(actionData.confirmacao_gestor || `✅ Mensagem enviada para ${actionData.nome_cliente || targetPhone} no WhatsApp!`);
+                      } else {
+                          gestorConfirmations.push(`⚠️ Não foi possível enviar para ${actionData.nome_cliente || targetPhone}: mensagem gerada estava vazia.`);
                       }
-                      whatsAppText = actionData.confirmacao_gestor || `✅ Mensagem enviada para ${actionData.nome_cliente || targetPhone} no WhatsApp!`;
                   } else {
-                      whatsAppText = `Arnaldo, não consegui localizar o número de telefone de ${actionData.nome_cliente || 'deste cliente'}. Poderia me passar o número dele para eu disparar?`;
+                      gestorConfirmations.push(`Arnaldo, não consegui localizar o número de telefone de ${actionData.nome_cliente || 'deste cliente'}. Poderia me passar o número dele para eu disparar?`);
                   }
               }
           }
-      } catch(e) {
-          console.error("Falha ao tentar realizar JSON ACTION. Respondendo naturalmente.", e);
+      }
+
+      if (isSpamRobo) {
+          console.log(`[SPAM ROBÔ] Silêncio absoluto mantido.`);
+          return;
+      }
+
+      // ==========================================
+      // DEFINIÇÃO DO TEXTO QUE O INTERLOCUTOR VERÁ
+      // ==========================================
+      if (isArnaldoAdmin) {
+          if (gestorConfirmations.length > 0) {
+              whatsAppText = gestorConfirmations.join('\n\n');
+          } else {
+              whatsAppText = cleanWhatsAppText(aiResponse);
+              if (!whatsAppText) {
+                  whatsAppText = "Pronto, Arnaldo! Solicitação processada com sucesso.";
+              }
+          }
+      } else {
+          // Para clientes normais:
+          const cleanedPreamble = cleanWhatsAppText(aiResponse);
+          if (cleanedPreamble && cleanedPreamble.length > 20) {
+              whatsAppText = cleanedPreamble;
+          } else if (clientResponseText) {
+              whatsAppText = cleanWhatsAppText(clientResponseText);
+          } else if (cleanedPreamble) {
+              whatsAppText = cleanedPreamble;
+          } else {
+              whatsAppText = "Perfeito! Já registrei todos os detalhes da sua solicitação e passei diretamente para a equipe técnica da Arnaldo Trentin Serviços avaliar. Retornaremos em breve!";
+          }
+      }
+
+      // 🛡️ ESCUDO SUPREMO ANTI-VAZAMENTO: NENHUM RESÍDUO DE JSON PODE PASSAR
+      whatsAppText = cleanWhatsAppText(whatsAppText);
+      if (!whatsAppText) {
+          whatsAppText = isArnaldoAdmin ? "Certo, Arnaldo! Tudo anotado." : "Perfeito! Já registrei sua mensagem.";
       }
 
       await supabase.from('agent_memory').insert({
