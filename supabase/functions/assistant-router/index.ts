@@ -200,13 +200,13 @@ function buildTemporalContext(): { promptContext: string; saudacaoObrigatoria: s
   const spDateStr = spNow.toLocaleDateString('pt-BR');
   const spTimeStr = `${String(spHour).padStart(2, '0')}:${String(spMinute).padStart(2, '0')}`;
 
-  const isExpediente = spHour >= 7 && spHour < 20;
+  const isExpediente = spHour >= 8 && spHour < 20;
   let saudacaoObrigatoria = "";
   let periodoNome = "";
 
-  if (spHour >= 7 && spHour < 12) {
+  if (spHour >= 8 && spHour < 12) {
     saudacaoObrigatoria = "Bom dia";
-    periodoNome = "Manhã (07h às 12h)";
+    periodoNome = "Manhã (08h às 12h)";
   } else if (spHour >= 12 && spHour < 18) {
     saudacaoObrigatoria = "Boa tarde";
     periodoNome = "Tarde (12h às 18h)";
@@ -215,7 +215,7 @@ function buildTemporalContext(): { promptContext: string; saudacaoObrigatoria: s
     periodoNome = "Noite (18h às 20h - final de expediente)";
   } else {
     saudacaoObrigatoria = (spHour >= 20 || spHour < 5) ? "Boa noite" : "Bom dia";
-    periodoNome = "Fora do Horário de Expediente (Expediente: todos os dias das 07h às 20h)";
+    periodoNome = "Fora do Horário Comercial (Horário de Atendimento e Contato: 08h às 20h)";
   }
 
   const promptContext = `
@@ -226,11 +226,11 @@ function buildTemporalContext(): { promptContext: string; saudacaoObrigatoria: s
   * NUNCA diga "Boa tarde" após as 18:00! (Após as 18h é estritamente "Boa noite").
   * NUNCA diga "Bom dia" após as 12:00! (A partir das 12h é estritamente "Boa tarde").
   * NUNCA diga "Boa noite" antes das 18:00!
-- HORÁRIO DE ATENDIMENTO DA EMPRESA: Todos os dias das 07:00 às 20:00.
-${!isExpediente ? `- ⚠️ ATENÇÃO: ESTAMOS FORA DO HORÁRIO DE EXPEDIENTE (Agora são ${spTimeStr}).
-  * Acolha com muito carinho, simpatia e gentileza.
-  * Informe educadamente que o expediente de hoje encerrou às 20h e que a equipe técnica e atendimento retornarão a partir das 07h da manhã.
-  * Colete todos os detalhes do serviço/necessidade e tranquilize o cliente garantindo que a solicitação foi registrada com prioridade total para abertura do dia seguinte.` : '- ✅ DENTRO DO HORÁRIO DE EXPEDIENTE (07:00 às 20:00): Atendimento comercial a pleno vapor.'}
+- HORÁRIO DE ATENDIMENTO E CONTATO COM CLIENTES: Todos os dias das 08:00 às 20:00.
+${!isExpediente ? `- ⚠️ ATENÇÃO: ESTAMOS FORA DO HORÁRIO COMERCIAL (Agora são ${spTimeStr} em Brasília).
+  * É TERMINANTEMENTE PROIBIDO enviar mensagens ativas ou chamar clientes antes das 08:00 da manhã ou após as 20:00 da noite!
+  * Se o cliente entrar em contato fora de hora, acolha com muito carinho e informe educadamente que o atendimento comercial e técnico retorna a partir das 08h da manhã.
+  * Colete todos os detalhes da necessidade com presteza e tranquilize o cliente garantindo que a solicitação foi registrada com prioridade total.` : '- ✅ DENTRO DO HORÁRIO COMERCIAL (08:00 às 20:00): Atendimento comercial a pleno vapor.'}
 ========================================================
 `;
 
@@ -1129,20 +1129,28 @@ DIRETRIZES OBRIGATÓRIAS:
           }
 
           injectedContext = `
-=== MODO EXECUTIVO ATIVADO: VOCÊ ESTÁ FALANDO COM O SEU CHEFE E DIRETOR DA EMPRESA, ARNALDO TRENTIN! ===
-- O interlocutor atual é o próprio ARNALDO TRENTIN (dono e responsável técnico da Arnaldo Trentin Serviços).
-- Chame-o de "Arnaldo" com extremo respeito, afeto, agilidade e postura de secretária executiva de confiança.
-- NUNCA se apresente como se ele fosse um cliente ("Olá, sou Maria Cecília da Arnaldo Trentin..."). Ele já é seu chefe!
-- NUNCA cite horários de expediente ou regras de atendimento comercial para ele.
+=== MODO EXECUTIVO ATIVADO: VOCÊ É A SECRETÁRIA EXECUTIVA DO DIRETOR ARNALDO TRENTIN! ===
+- O interlocutor atual é o próprio ARNALDO TRENTIN (dono e diretor da empresa).
+- Chame-o de "Arnaldo" com postura de secretária executiva de confiança: muito educada, ágil, altamente organizada, discreta e inteligente.
+- NUNCA se apresente como se ele fosse um cliente ("Olá, sou Maria Cecília..."). Ele já é seu chefe!
 - NUNCA tente vender nada para ele.
 
-SUAS CAPACIDADES ATIVAS PARA O ARNALDO:
-1. ENVIAR MENSAGENS PARA CLIENTES (DISPARO ATIVO VIA WHATSAPP):
-   Se o Arnaldo pedir para você mandar mensagem para qualquer cliente (seja pelo nome ou pelo telefone):
-   - Se for para 1 cliente, responda com o bloco JSON.
-   - Se for para MAIS DE UM cliente na mesma mensagem (ex: para o Artur E para a Fabiana), você DEVE retornar UM bloco JSON separado para CADA destinatário.
-   - Retorne ESTRITAMENTE os blocos JSON das ações.
-   Formato de cada bloco:
+🛑 REGRA DE OURO DA SECRETÁRIA (NUNCA DISPARE SEM ORDEM EXPRESSA E CONFIRMAÇÃO DO ARNALDO):
+1. CONSULTA DE AGENDA / PENDÊNCIAS / TAREFAS:
+   - Se o Arnaldo perguntar sobre a agenda, compromissos, tarefas pendentes ou o que tem para fazer hoje:
+     * SEU PAPEL É APENAS INFORMAR E ORGANIZAR! Relate a ele o que consta nas pendências do sistema de forma clara, resumida e executiva.
+     * ⛔ É TERMINANTEMENTE PROIBIDO DISPARAR MENSAGENS PARA CLIENTES AO RESPONDER SOBRE A AGENDA! NUNCA GERE A AÇÃO "DISPARAR_CONTATO_ATIVO"!
+     * Se você achar conveniente contatar algum cliente da lista, apenas faça uma SUGESTÃO educada e PEÇA A APROVAÇÃO dele primeiro:
+       "Arnaldo, vi que o Artur está pendente de confirmar o PIX. Quer que eu mande uma mensagem para ele perguntando? Preparei esta sugestão: '...'".
+     * AGUARDE A ORDEM DELE antes de disparar qualquer coisa!
+
+2. ENVIAR MENSAGENS PARA CLIENTES (APENAS COM ORDEM DIRETA OU CONFIRMAÇÃO DO ARNALDO):
+   - Você SÓ PODE executar a ação JSON "DISPARAR_CONTATO_ATIVO" se o Arnaldo der a ORDEM EXPLÍCITA para enviar (ex: "Maria, manda mensagem pro Artur", "Pode enviar para a Fabiana", "Avisa o cliente X").
+   - ⏰ HORÁRIO COMERCIAL ESTRITO (08:00 às 20:00):
+     * NENHUMA mensagem pode ser enviada para clientes antes das 08:00 da manhã ou após as 20:00 da noite.
+     * Se o Arnaldo pedir um envio fora do horário comercial (ex: às 06h ou 07h da manhã), NÃO dispare imediatamente. Responda:
+       "Arnaldo, já deixei a mensagem para [Cliente] pronta, mas como ainda são [Horário] (fora do horário comercial das 08h às 20h), para não incomodar o cliente, posso agendar para disparar às 08:00 em ponto?".
+   - Formato do JSON (APENAS com ordem direta E dentro do horário das 08h às 20h):
    {
      "acao": "DISPARAR_CONTATO_ATIVO",
      "nome_cliente": "Nome do Cliente",
@@ -1150,10 +1158,6 @@ SUAS CAPACIDADES ATIVAS PARA O ARNALDO:
      "mensagem_gerada": "Texto profissional, acolhedor e simpático que você vai enviar para o cliente pelo WhatsApp da empresa",
      "confirmacao_gestor": "Arnaldo, já enviei a seguinte mensagem para o cliente: '...' Te aviso assim que ele responder!"
    }
-
-2. CONSULTA DE TAREFAS / AGENDA:
-   Se ele perguntar sobre pendências, o que tem para fazer hoje ou clientes aguardando:
-   -> Responda de forma direta, clara e organizada listando as pendências abaixo e ofereça ajuda para disparar mensagem para algum deles.
 
 3. ANOTAR LEMBRETES E TAREFAS:
    Se ele pedir para anotar algo ("Anota aí...", "Lembrar de comprar capacitor...", "Registra uma visita"):
@@ -1171,6 +1175,7 @@ ${tarefasGestorTexto}
 
 💬 ÚLTIMAS MENSAGENS RECEBIDAS NO CRM:
 ${ultimosContatosTexto || 'Nenhuma recente.'}
+
 `;
       } else if (cleanPhone.includes("5511954598321") || cleanPhone.includes("11954598321") || last8Digits.includes("54598321")) {
           injectedContext = "Status deste Número: Este é o Sr Francisco (Técnico e Prestador de Serviço da Equipe). NUNCA tente vender nada ou citar regras de expediente. Seja muito gentil, acolha o recado/relatório e confirme que já passou para o Arnaldo.";
@@ -2120,6 +2125,48 @@ ${ultimosContatosTexto || 'Nenhuma recente.'}
                       const cleanMsgToSend = cleanWhatsAppText(actionData.mensagem_gerada);
 
                       if (cleanMsgToSend) {
+                          const userTextNorm = (userMessage || '').toLowerCase();
+                          const isOnlyAskingAgenda = /(agenda|tarefas|pend[eê]ncias|o que tem|o que temos|quais s[aã]o|me passa as tarefas|status)/i.test(userTextNorm);
+                          const hasExplicitSendOrder = /(manda|mande|envia|envie|avis[ae]|dispara|fala com|chama|pode mandar|pode enviar|confirma com|cobra|escreve para|notifica)/i.test(userTextNorm);
+
+                          // GATE 1: Confirmação prévia obrigatória se o gestor apenas perguntou sobre a agenda
+                          if (isArnaldoAdmin && isOnlyAskingAgenda && !hasExplicitSendOrder) {
+                              console.log(`[BLOQUEIO DISPARO SEM ORDEM] Gestor apenas consultou a agenda/tarefas. Disparo para ${targetPhone} bloqueado e convertido em sugestão.`);
+                              gestorConfirmations.push(`📋 Sugestão para ${actionData.nome_cliente || targetPhone}: "${cleanMsgToSend}" (Aguardando sua confirmação para enviar).`);
+                              continue;
+                          }
+
+                          // GATE 2: Bloqueio estrito de horário comercial (08:00 às 20:00)
+                          const spNow = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+                          const spHour = spNow.getHours();
+                          const spMin = spNow.getMinutes();
+                          const isCommercialTime = spHour >= 8 && spHour < 20;
+
+                          if (!isCommercialTime) {
+                              console.log(`[BLOQUEIO HORÁRIO COMERCIAL] Disparo para ${targetPhone} impedido fora do horário comercial (${spHour}h:${spMin}m).`);
+                              gestorConfirmations.push(`⏰ Arnaldo, a mensagem para ${actionData.nome_cliente || targetPhone} foi preparada: "${cleanMsgToSend}", mas agora são ${String(spHour).padStart(2, '0')}:${String(spMin).padStart(2, '0')} (fora do horário comercial das 08h às 20h). NÃO enviei agora para não incomodar o cliente. Podemos enviar a partir das 08:00!`);
+                              continue;
+                          }
+
+                          // GATE 3: Trava anti-duplicação de mensagens recentes enviadas hoje (últimas 12h)
+                          const twelveHoursAgo = new Date(Date.now() - 12 * 3600 * 1000).toISOString();
+                          const { data: recentSentMsgs } = await supabase
+                              .from('agent_memory')
+                              .select('id, content, created_at')
+                              .eq('phone', targetPhone)
+                              .eq('role', 'model')
+                              .gte('created_at', twelveHoursAgo)
+                              .order('created_at', { ascending: false })
+                              .limit(1);
+
+                          const isExplicitResend = /(de novo|novamente|reenvia|refor[çc]a|insiste|outra vez|pode mandar|envia sim)/i.test(userTextNorm);
+                          if (recentSentMsgs && recentSentMsgs.length > 0 && !isExplicitResend) {
+                              const lastSentTime = new Date(recentSentMsgs[0].created_at).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
+                              console.log(`[BLOQUEIO MENSAGEM REPETIDA] Mensagem para ${targetPhone} já foi enviada hoje às ${lastSentTime}.`);
+                              gestorConfirmations.push(`⚠️ Arnaldo, já havíamos enviado mensagem para ${actionData.nome_cliente || targetPhone} hoje às ${lastSentTime}. Para evitar mensagens repetidas, não reenviei automaticamente. Se quiser reenviar mesmo assim, só me confirmar!`);
+                              continue;
+                          }
+
                           // Salva a mensagem no histórico do cliente para a IA manter o contexto
                           await supabase.from('agent_memory').insert({
                               phone: targetPhone,
