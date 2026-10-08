@@ -1109,6 +1109,48 @@ DIRETRIZES OBRIGATÓRIAS:
               console.warn("Erro ao buscar tarefas para gestor:", tErr);
           }
 
+          let propostasGestorTexto = "";
+          try {
+              const { data: recPropostas } = await supabase
+                  .from('propostas')
+                  .select('id, servico_tipo, valor_estimado, status, data_proposta, fornecimento_materiais, clientes(nome_cliente)')
+                  .order('created_at', { ascending: false })
+                  .limit(10);
+
+              if (recPropostas && recPropostas.length > 0) {
+                  propostasGestorTexto = recPropostas.map((p: any, idx: number) => {
+                      const cliente = p.clientes?.nome_cliente || 'Cliente';
+                      const dataStr = p.data_proposta ? new Date(p.data_proposta).toLocaleDateString('pt-BR') : '';
+                      return `${idx + 1}. Proposta #${p.id.slice(0, 8)} | ${cliente} | Serviço: "${p.servico_tipo || 'Geral'}" | Valor: R$ ${p.valor_estimado || 0} | Status: ${p.status || 'Pendente'}${dataStr ? ` | Data: ${dataStr}` : ''}`;
+                  }).join('\n');
+              } else {
+                  propostasGestorTexto = "Nenhuma proposta cadastrada recentemente.";
+              }
+          } catch (pErr) {
+              console.warn("Erro ao buscar propostas para gestor:", pErr);
+          }
+
+          let ordensGestorTexto = "";
+          try {
+              const { data: recOS } = await supabase
+                  .from('ordens_servico')
+                  .select('id_os, servico_tipo, status_ia, status_pagamento, data_hora, colaborador, clientes(nome_cliente)')
+                  .order('data_hora', { ascending: false })
+                  .limit(10);
+
+              if (recOS && recOS.length > 0) {
+                  ordensGestorTexto = recOS.map((o: any, idx: number) => {
+                      const cliente = o.clientes?.nome_cliente || 'Cliente';
+                      const dataStr = o.data_hora ? new Date(o.data_hora).toLocaleString('pt-BR') : 'A definir';
+                      return `${idx + 1}. OS #${o.id_os} | ${cliente} | Serviço: "${o.servico_tipo || 'Geral'}" | Status: ${o.status_ia || 'Aberta'} | Pagamento: ${o.status_pagamento || 'Pendente'} | Data: ${dataStr}`;
+                  }).join('\n');
+              } else {
+                  ordensGestorTexto = "Nenhuma Ordem de Serviço em aberto no momento.";
+              }
+          } catch (osErr) {
+              console.warn("Erro ao buscar ordens de serviço para gestor:", osErr);
+          }
+
           let ultimosContatosTexto = "";
           try {
               const { data: ultimosClientes } = await supabase
@@ -1136,15 +1178,34 @@ DIRETRIZES OBRIGATÓRIAS:
 - NUNCA tente vender nada para ele.
 
 🛑 REGRA DE OURO DA SECRETÁRIA (NUNCA DISPARE SEM ORDEM EXPRESSA E CONFIRMAÇÃO DO ARNALDO):
-1. CONSULTA DE AGENDA / PENDÊNCIAS / TAREFAS:
-   - Se o Arnaldo perguntar sobre a agenda, compromissos, tarefas pendentes ou o que tem para fazer hoje:
-     * SEU PAPEL É APENAS INFORMAR E ORGANIZAR! Relate a ele o que consta nas pendências do sistema de forma clara, resumida e executiva.
-     * ⛔ É TERMINANTEMENTE PROIBIDO DISPARAR MENSAGENS PARA CLIENTES AO RESPONDER SOBRE A AGENDA! NUNCA GERE A AÇÃO "DISPARAR_CONTATO_ATIVO"!
-     * Se você achar conveniente contatar algum cliente da lista, apenas faça uma SUGESTÃO educada e PEÇA A APROVAÇÃO dele primeiro:
-       "Arnaldo, vi que o Artur está pendente de confirmar o PIX. Quer que eu mande uma mensagem para ele perguntando? Preparei esta sugestão: '...'".
+1. CONSULTA DE AGENDA, TAREFAS, PROPOSTAS E ORDENS DE SERVIÇO:
+   - Se o Arnaldo perguntar sobre a agenda, compromissos, tarefas pendentes, propostas de orçamento ou ordens de serviço (OS):
+     * SEU PAPEL É APENAS INFORMAR E ORGANIZAR! Consulte os dados abaixo e relate a ele com clareza, concisão e ordem executiva.
+     * ⛔ É TERMINANTEMENTE PROIBIDO DISPARAR MENSAGENS PARA CLIENTES AO RESPONDER SOBRE A AGENDA/PROPOSTAS/OS! NUNCA GERE A AÇÃO "DISPARAR_CONTATO_ATIVO"!
+     * Se você achar conveniente contatar algum cliente, faça apenas uma SUGESTÃO educada e PEÇA A APROVAÇÃO dele primeiro:
+       "Arnaldo, na sua agenda temos o Artur pendente de confirmar o PIX. Quer que eu mande uma mensagem para ele perguntando? Preparei esta sugestão: '...'".
      * AGUARDE A ORDEM DELE antes de disparar qualquer coisa!
 
-2. ENVIAR MENSAGENS PARA CLIENTES (APENAS COM ORDEM DIRETA OU CONFIRMAÇÃO DO ARNALDO):
+2. CONCLUIR / FINALIZAR TAREFA OU PENDÊNCIA:
+   - Se o Arnaldo informar que uma pendência foi resolvida ("Conclui a tarefa do Artur", "Já resolvemos o PIX", "Marca a tarefa de fulano como concluída", "Artur já pagou", "Finaliza a pendência"):
+   -> Você DEVE responder com uma ação JSON:
+   {
+     "acao": "CONCLUIR_TAREFA",
+     "termo_busca": "Nome do cliente ou termo da tarefa (ex: Artur)",
+     "observacao": "Motivo da conclusão informado pelo Arnaldo"
+   }
+
+3. ATUALIZAR STATUS DE PROPOSTA / ORÇAMENTO:
+   - Se o Arnaldo disser que um orçamento/proposta foi aprovado ou alterado ("O serviço da Vila Madalena foi aprovado", "Aprova o orçamento da Fabiana", "Muda proposta para Aprovado"):
+   -> Você DEVE responder com uma ação JSON:
+   {
+     "acao": "ATUALIZAR_PROPOSTA",
+     "termo_busca": "Palavra-chave do serviço ou cliente (ex: Vila Madalena ou Fabiana)",
+     "novo_status": "Aprovado",
+     "observacao": "Aprovado pelo Arnaldo via WhatsApp"
+   }
+
+4. ENVIAR MENSAGENS PARA CLIENTES (APENAS COM ORDEM DIRETA OU CONFIRMAÇÃO DO ARNALDO):
    - Você SÓ PODE executar a ação JSON "DISPARAR_CONTATO_ATIVO" se o Arnaldo der a ORDEM EXPLÍCITA para enviar (ex: "Maria, manda mensagem pro Artur", "Pode enviar para a Fabiana", "Avisa o cliente X").
    - ⏰ HORÁRIO COMERCIAL ESTRITO (08:00 às 20:00):
      * NENHUMA mensagem pode ser enviada para clientes antes das 08:00 da manhã ou após as 20:00 da noite.
@@ -1159,7 +1220,7 @@ DIRETRIZES OBRIGATÓRIAS:
      "confirmacao_gestor": "Arnaldo, já enviei a seguinte mensagem para o cliente: '...' Te aviso assim que ele responder!"
    }
 
-3. ANOTAR LEMBRETES E TAREFAS:
+5. ANOTAR LEMBRETES E TAREFAS:
    Se ele pedir para anotar algo ("Anota aí...", "Lembrar de comprar capacitor...", "Registra uma visita"):
    -> Você DEVE responder com uma ação JSON:
    {
@@ -1172,6 +1233,12 @@ DIRETRIZES OBRIGATÓRIAS:
 
 📋 TAREFAS ATUAIS DO ARNALDO NO SISTEMA:
 ${tarefasGestorTexto}
+
+📑 PROPOSTAS E ORÇAMENTOS RECENTES NO SISTEMA:
+${propostasGestorTexto}
+
+🛠️ ORDENS DE SERVIÇO (OS) RECENTES NO SISTEMA:
+${ordensGestorTexto}
 
 💬 ÚLTIMAS MENSAGENS RECEBIDAS NO CRM:
 ${ultimosContatosTexto || 'Nenhuma recente.'}
@@ -2195,6 +2262,115 @@ ${ultimosContatosTexto || 'Nenhuma recente.'}
                       }
                   } else {
                       gestorConfirmations.push(`Arnaldo, não consegui localizar o número de telefone de ${actionData.nome_cliente || 'deste cliente'}. Poderia me passar o número dele para eu disparar?`);
+                  }
+              }
+
+              // ✅ AÇÃO: CONCLUIR / FINALIZAR TAREFA DO GESTOR
+              else if (actionData.acao === "CONCLUIR_TAREFA") {
+                  let targetTaskId = actionData.id_tarefa || null;
+                  let taskTitle = "";
+                  let taskClient = "";
+
+                  if (!targetTaskId && actionData.termo_busca) {
+                      const term = String(actionData.termo_busca).trim();
+                      const { data: foundTasks } = await supabase
+                          .from('tarefas_arnaldo')
+                          .select('id, titulo, cliente_nome')
+                          .in('status', ['pendente', 'em_andamento'])
+                          .or(`cliente_nome.ilike.%${term}%,titulo.ilike.%${term}%,descricao.ilike.%${term}%`)
+                          .order('created_at', { ascending: false })
+                          .limit(1);
+
+                      if (foundTasks && foundTasks.length > 0) {
+                          targetTaskId = foundTasks[0].id;
+                          taskTitle = foundTasks[0].titulo;
+                          taskClient = foundTasks[0].cliente_nome;
+                      }
+                  }
+
+                  if (targetTaskId) {
+                      const { error: updErr } = await supabase
+                          .from('tarefas_arnaldo')
+                          .update({
+                              status: 'concluida',
+                              concluido_em: new Date().toISOString(),
+                              observacoes_arnaldo: actionData.observacao || 'Concluída pelo Arnaldo via WhatsApp'
+                          })
+                          .eq('id', targetTaskId);
+
+                      if (updErr) {
+                          console.error("[CONCLUIR_TAREFA] Erro ao atualizar tarefa:", updErr);
+                          gestorConfirmations.push(`⚠️ Tive um problema ao marcar a tarefa como concluída no banco: ${updErr.message}`);
+                      } else {
+                          console.log(`[CONCLUIR_TAREFA] Tarefa #${targetTaskId} marcada como concluída.`);
+                          gestorConfirmations.push(`✅ Perfeito, Arnaldo! A tarefa "${taskTitle || 'selecionada'}"${taskClient ? ` (${taskClient})` : ''} foi marcada como CONCLUÍDA com sucesso nas suas pendências!`);
+                      }
+                  } else {
+                      gestorConfirmations.push(`Arnaldo, procurei nas suas pendências em aberto mas não encontrei nenhuma tarefa com o termo "${actionData.termo_busca || ''}". Poderia me dizer qual é a tarefa para eu dar baixa?`);
+                  }
+              }
+
+              // 📑 AÇÃO: ATUALIZAR STATUS DE PROPOSTA
+              else if (actionData.acao === "ATUALIZAR_PROPOSTA") {
+                  const term = String(actionData.termo_busca || '').trim();
+                  let foundPropId = actionData.id_proposta || null;
+                  let propService = "";
+                  let propClient = "";
+
+                  if (!foundPropId && term) {
+                      const { data: foundProps } = await supabase
+                          .from('propostas')
+                          .select('id, servico_tipo, clientes(nome_cliente)')
+                          .or(`servico_tipo.ilike.%${term}%,observacoes.ilike.%${term}%`)
+                          .order('created_at', { ascending: false })
+                          .limit(1);
+
+                      if (foundProps && foundProps.length > 0) {
+                          foundPropId = foundProps[0].id;
+                          propService = foundProps[0].servico_tipo;
+                          propClient = (foundProps[0] as any).clientes?.nome_cliente || '';
+                      } else {
+                          const { data: foundClient } = await supabase
+                              .from('clientes')
+                              .select('id, nome_cliente')
+                              .ilike('nome_cliente', `%${term}%`)
+                              .limit(1);
+
+                          if (foundClient && foundClient.length > 0) {
+                              const { data: clientProps } = await supabase
+                                  .from('propostas')
+                                  .select('id, servico_tipo')
+                                  .eq('cliente_id', foundClient[0].id)
+                                  .order('created_at', { ascending: false })
+                                  .limit(1);
+
+                              if (clientProps && clientProps.length > 0) {
+                                  foundPropId = clientProps[0].id;
+                                  propService = clientProps[0].servico_tipo;
+                                  propClient = foundClient[0].nome_cliente;
+                              }
+                          }
+                      }
+                  }
+
+                  if (foundPropId) {
+                      const newStatus = actionData.novo_status || 'Aprovado';
+                      const { error: propUpdErr } = await supabase
+                          .from('propostas')
+                          .update({
+                              status: newStatus,
+                              observacoes: actionData.observacao ? `[${new Date().toLocaleDateString('pt-BR')}]: ${actionData.observacao}` : undefined
+                          })
+                          .eq('id', foundPropId);
+
+                      if (propUpdErr) {
+                          console.error("[ATUALIZAR_PROPOSTA] Erro:", propUpdErr);
+                          gestorConfirmations.push(`⚠️ Tive um problema ao atualizar a proposta: ${propUpdErr.message}`);
+                      } else {
+                          gestorConfirmations.push(`✅ Excelente, Arnaldo! A proposta "${propService || 'selecionada'}"${propClient ? ` do cliente ${propClient}` : ''} foi atualizada para o status "${newStatus}" com sucesso no sistema!`);
+                      }
+                  } else {
+                      gestorConfirmations.push(`Arnaldo, não localizei no sistema uma proposta com o termo "${term}". Você saberia me dizer o nome exato do cliente ou o código da proposta?`);
                   }
               }
           }
