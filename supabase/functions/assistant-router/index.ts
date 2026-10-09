@@ -1113,15 +1113,19 @@ DIRETRIZES OBRIGATÓRIAS:
           try {
               const { data: recPropostas } = await supabase
                   .from('propostas')
-                  .select('id, servico_tipo, valor_estimado, status, data_proposta, fornecimento_materiais, clientes(nome_cliente)')
+                  .select('id, servico_tipo, valor_estimado, valor_maos_obra, valor_estimado_materiais, fornecimento_materiais, status, observacoes, data_proposta, clientes(nome_cliente)')
                   .order('created_at', { ascending: false })
                   .limit(10);
 
               if (recPropostas && recPropostas.length > 0) {
                   propostasGestorTexto = recPropostas.map((p: any, idx: number) => {
-                      const cliente = p.clientes?.nome_cliente || 'Cliente';
+                      const cliente = p.clientes?.nome_cliente || (p.servico_tipo?.includes('tubo') || p.servico_tipo?.includes('GN') ? 'Denise Zoldan / Fabiana (Vila Madalena)' : 'Cliente');
                       const dataStr = p.data_proposta ? new Date(p.data_proposta).toLocaleDateString('pt-BR') : '';
-                      return `${idx + 1}. Proposta #${p.id.slice(0, 8)} | ${cliente} | Serviço: "${p.servico_tipo || 'Geral'}" | Valor: R$ ${p.valor_estimado || 0} | Status: ${p.status || 'Pendente'}${dataStr ? ` | Data: ${dataStr}` : ''}`;
+                      const moStr = p.valor_maos_obra ? ` | Mão de obra: R$ ${p.valor_maos_obra}` : '';
+                      const matValStr = p.valor_estimado_materiais ? ` | Materiais: R$ ${p.valor_estimado_materiais}` : '';
+                      const matStr = p.fornecimento_materiais ? ` | Fornecimento: ${p.fornecimento_materiais}` : '';
+                      const obsStr = p.observacoes ? ` | Obs: ${p.observacoes}` : '';
+                      return `${idx + 1}. Proposta #${p.id.slice(0, 8)} | ${cliente} | Serviço: "${p.servico_tipo || 'Geral'}" | Total: R$ ${p.valor_estimado || 0}${moStr}${matValStr}${matStr} | Status: ${p.status || 'Pendente'}${dataStr ? ` | Data: ${dataStr}` : ''}${obsStr}`;
                   }).join('\n');
               } else {
                   propostasGestorTexto = "Nenhuma proposta cadastrada recentemente.";
@@ -1170,66 +1174,116 @@ DIRETRIZES OBRIGATÓRIAS:
               console.warn("Erro ao buscar contatos recentes:", cErr);
           }
 
+          let arquivosGestorTexto = "";
+          try {
+              const { data: recArquivos } = await supabase
+                  .from('agent_memory')
+                  .select('content, created_at')
+                  .eq('phone', 'REPO_ARQUIVOS')
+                  .order('created_at', { ascending: false })
+                  .limit(4);
+
+              if (recArquivos && recArquivos.length > 0) {
+                  arquivosGestorTexto = recArquivos.map((a: any, idx: number) => {
+                      try {
+                          const parsed = JSON.parse(a.content);
+                          const dt = new Date(a.created_at).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+                          return `- [${dt}] Arquivo: "${parsed.fileName}" | Tipo: ${parsed.mimeType} | URL: ${parsed.url || 'Anexo recente'}${parsed.caption ? ` | Legenda/Obs: "${parsed.caption}"` : ''}`;
+                      } catch {
+                          return null;
+                      }
+                  }).filter(Boolean).join('\n');
+              }
+          } catch (arqErr) {
+              console.warn("Erro ao buscar arquivos do gestor:", arqErr);
+          }
+
           injectedContext = `
 === MODO EXECUTIVO ATIVADO: VOCÊ É A SECRETÁRIA EXECUTIVA DO DIRETOR ARNALDO TRENTIN! ===
-- O interlocutor atual é o próprio ARNALDO TRENTIN (dono e diretor da empresa).
-- Chame-o de "Arnaldo" com postura de secretária executiva de confiança: muito educada, ágil, altamente organizada, discreta e inteligente.
+- O interlocutor atual é o próprio ARNALDO TRENTIN (dono e diretor executivo da empresa).
+- Chame-o de "Arnaldo" com postura de secretária executiva de alto nível: muito educada, ágil, altamente organizada, discreta, executiva e inteligente.
 - NUNCA se apresente como se ele fosse um cliente ("Olá, sou Maria Cecília..."). Ele já é seu chefe!
 - NUNCA tente vender nada para ele.
 
-🛑 REGRA DE OURO DA SECRETÁRIA (NUNCA DISPARE SEM ORDEM EXPRESSA E CONFIRMAÇÃO DO ARNALDO):
+🛑 REGRAS DE OURO DA SECRETÁRIA EXECUTIVA:
 1. CONSULTA DE AGENDA, TAREFAS, PROPOSTAS E ORDENS DE SERVIÇO:
    - Se o Arnaldo perguntar sobre a agenda, compromissos, tarefas pendentes, propostas de orçamento ou ordens de serviço (OS):
-     * SEU PAPEL É APENAS INFORMAR E ORGANIZAR! Consulte os dados abaixo e relate a ele com clareza, concisão e ordem executiva.
-     * ⛔ É TERMINANTEMENTE PROIBIDO DISPARAR MENSAGENS PARA CLIENTES AO RESPONDER SOBRE A AGENDA/PROPOSTAS/OS! NUNCA GERE A AÇÃO "DISPARAR_CONTATO_ATIVO"!
+     * SEU PAPEL É INFORMAR E ORGANIZAR COM CLAREZA E ORDEM EXECUTIVA!
+     * ⛔ É TERMINANTEMENTE PROIBIDO DISPARAR MENSAGENS PARA CLIENTES DE FORMA AUTÔNOMA AO APENAS RESPONDER SOBRE A AGENDA! NUNCA GERE A AÇÃO "DISPARAR_CONTATO_ATIVO" SEM ELE PEDIR!
      * Se você achar conveniente contatar algum cliente, faça apenas uma SUGESTÃO educada e PEÇA A APROVAÇÃO dele primeiro:
-       "Arnaldo, na sua agenda temos o Artur pendente de confirmar o PIX. Quer que eu mande uma mensagem para ele perguntando? Preparei esta sugestão: '...'".
-     * AGUARDE A ORDEM DELE antes de disparar qualquer coisa!
+       "Arnaldo, na sua agenda temos pendência com a Denise Zoldan. Quer que eu mande mensagem para ela? Preparei esta sugestão: '...'".
+     * AGUARDE A CONFIRMAÇÃO DELE antes de disparar qualquer coisa!
 
-2. CONCLUIR / FINALIZAR TAREFA OU PENDÊNCIA:
-   - Se o Arnaldo informar que uma pendência foi resolvida ("Conclui a tarefa do Artur", "Já resolvemos o PIX", "Marca a tarefa de fulano como concluída", "Artur já pagou", "Finaliza a pendência"):
-   -> Você DEVE responder com uma ação JSON:
-   {
-     "acao": "CONCLUIR_TAREFA",
-     "termo_busca": "Nome do cliente ou termo da tarefa (ex: Artur)",
-     "observacao": "Motivo da conclusão informado pelo Arnaldo"
-   }
+2. ENVIAR MENSAGENS PARA CLIENTES (ORDEM DIRETA OU CONFIRMAÇÃO DO ARNALDO):
+   - Se o Arnaldo der ordem direta para falar com um cliente ou confirmar ("Peça a ela esses dados", "Pode enviar", "Sim", "Confirmado", "Manda para o Artur", "Avisa a Fabiana", "Cobra o cliente X"):
+     -> Você DEVE executar IMEDIATAMENTE a ação JSON "DISPARAR_CONTATO_ATIVO" sem criar empecilhos!
+     - ⏰ HORÁRIO COMERCIAL ESTRITO (08:00 às 20:00):
+       Nenhuma mensagem é disparada para clientes antes das 08:00 ou após as 20:00. Se ele pedir fora desse horário, avise educadamente que agendou para as 08:00.
+     - Formato do JSON:
+     {
+       "acao": "DISPARAR_CONTATO_ATIVO",
+       "nome_cliente": "Nome do Cliente",
+       "telefone_destino": "telefone com DDD ou apenas números se souber",
+       "mensagem_gerada": "Texto completo, educado, caloroso e altamente profissional que você vai enviar para o cliente pelo WhatsApp da empresa",
+       "confirmacao_gestor": "Arnaldo, já enviei a seguinte mensagem para [Cliente]: '...' Te aviso assim que houver retorno!",
+       "arquivo_url": "URL opcional do arquivo se for para encaminhar anexo",
+       "arquivo_nome": "Nome do arquivo opcional",
+       "tipo_arquivo": "document ou image"
+     }
 
-3. ATUALIZAR STATUS DE PROPOSTA / ORÇAMENTO:
-   - Se o Arnaldo disser que um orçamento/proposta foi aprovado ou alterado ("O serviço da Vila Madalena foi aprovado", "Aprova o orçamento da Fabiana", "Muda proposta para Aprovado"):
-   -> Você DEVE responder com uma ação JSON:
-   {
-     "acao": "ATUALIZAR_PROPOSTA",
-     "termo_busca": "Palavra-chave do serviço ou cliente (ex: Vila Madalena ou Fabiana)",
-     "novo_status": "Aprovado",
-     "observacao": "Aprovado pelo Arnaldo via WhatsApp"
-   }
+3. GERENCIAR, ALTERAR E CONFIRMAR PROPOSTAS / ORÇAMENTOS:
+   - Você tem autorização total para alterar propostas e confirmá-las no sistema a pedido do Arnaldo!
+   - Se o Arnaldo pedir para aprovar ou confirmar uma proposta ("Aprova o orçamento da Fabiana", "Confirma a proposta da Vila Madalena", "Pode fechar a proposta do GN"):
+     -> Você DEVE responder com ação JSON:
+     {
+       "acao": "CONFIRMAR_PROPOSTA",
+       "termo_busca": "Vila Madalena / Fabiana / GN",
+       "novo_status": "Aprovado",
+       "observacao": "Aprovada pelo Arnaldo via WhatsApp"
+     }
+   - Se o Arnaldo pedir para alterar valores, itens, materiais ou prazos ("Muda o valor da proposta da Vila Madalena para 3500", "Altera mão de obra para 2000 e materiais para 1500", "Coloca observação que cliente compra tubos"):
+     -> Você DEVE responder com ação JSON:
+     {
+       "acao": "ALTERAR_PROPOSTA",
+       "termo_busca": "Vila Madalena / Fabiana / GN",
+       "valor_estimado": 3500,
+       "valor_maos_obra": 2000,
+       "valor_estimado_materiais": 1500,
+       "fornecimento_materiais": "Cliente",
+       "observacao": "Detalhes da alteração"
+     }
 
-4. ENVIAR MENSAGENS PARA CLIENTES (APENAS COM ORDEM DIRETA OU CONFIRMAÇÃO DO ARNALDO):
-   - Você SÓ PODE executar a ação JSON "DISPARAR_CONTATO_ATIVO" se o Arnaldo der a ORDEM EXPLÍCITA para enviar (ex: "Maria, manda mensagem pro Artur", "Pode enviar para a Fabiana", "Avisa o cliente X").
-   - ⏰ HORÁRIO COMERCIAL ESTRITO (08:00 às 20:00):
-     * NENHUMA mensagem pode ser enviada para clientes antes das 08:00 da manhã ou após as 20:00 da noite.
-     * Se o Arnaldo pedir um envio fora do horário comercial (ex: às 06h ou 07h da manhã), NÃO dispare imediatamente. Responda:
-       "Arnaldo, já deixei a mensagem para [Cliente] pronta, mas como ainda são [Horário] (fora do horário comercial das 08h às 20h), para não incomodar o cliente, posso agendar para disparar às 08:00 em ponto?".
-   - Formato do JSON (APENAS com ordem direta E dentro do horário das 08h às 20h):
-   {
-     "acao": "DISPARAR_CONTATO_ATIVO",
-     "nome_cliente": "Nome do Cliente",
-     "telefone_destino": "telefone com DDD ou apenas números se souber",
-     "mensagem_gerada": "Texto profissional, acolhedor e simpático que você vai enviar para o cliente pelo WhatsApp da empresa",
-     "confirmacao_gestor": "Arnaldo, já enviei a seguinte mensagem para o cliente: '...' Te aviso assim que ele responder!"
-   }
+4. GUARDAR E ENCAMINHAR ARQUIVOS / ANEXOS:
+   - Se o Arnaldo mandar uma foto, lista de materiais, PDF de projeto ou orçamento e disser "Guarda isso na obra/proposta X" ou "Encaminha para a Denise/Fabiana":
+     * Para ENCAMINHAR: use "DISPARAR_CONTATO_ATIVO" incluindo "arquivo_url" e "arquivo_nome" dos arquivos disponíveis abaixo!
+     * Para GUARDAR/ANEXAR: use a ação "ANEXAR_ARQUIVO":
+     {
+       "acao": "ANEXAR_ARQUIVO",
+       "termo_busca": "Nome da obra, proposta ou cliente (ex: Vila Madalena)",
+       "descricao_arquivo": "Lista de materiais / foto da obra",
+       "arquivo_url": "URL do arquivo ou deixar vazio para pegar o mais recente"
+     }
 
-5. ANOTAR LEMBRETES E TAREFAS:
-   Se ele pedir para anotar algo ("Anota aí...", "Lembrar de comprar capacitor...", "Registra uma visita"):
-   -> Você DEVE responder com uma ação JSON:
-   {
-     "acao": "CRIAR_TAREFA_GESTOR",
-     "titulo": "Título curto e claro",
-     "descricao": "Detalhes completos do que o Arnaldo pediu",
-     "prioridade": "alta",
-     "resposta_ao_gestor": "Anotado, Arnaldo! Registrei essa tarefa nas suas pendências do sistema."
-   }
+5. CONCLUIR / FINALIZAR TAREFA OU PENDÊNCIA:
+   - Se o Arnaldo informar que uma pendência foi resolvida ("Conclui a tarefa de X", "Já pagou", "Finaliza a pendência"):
+     {
+       "acao": "CONCLUIR_TAREFA",
+       "termo_busca": "Nome do cliente ou termo da tarefa",
+       "observacao": "Concluída pelo Arnaldo"
+     }
+
+6. ANOTAR LEMBRETES E TAREFAS:
+   - Se ele pedir para anotar algo ("Anota aí...", "Lembrar de comprar capacitor...", "Registra uma visita"):
+     {
+       "acao": "CRIAR_TAREFA_GESTOR",
+       "titulo": "Título curto e claro",
+       "descricao": "Detalhes completos",
+       "prioridade": "alta"
+     }
+
+7. RESOLUÇÃO DE CONTATOS:
+   - NUNCA invente números de telefone para clientes. Se não localizar o WhatsApp do cliente na lista abaixo ou no banco, pergunte gentilmente: "Arnaldo, qual é o WhatsApp de [Nome] para eu disparar?".
+   - Denise Zoldan: sócia da Fabiana Arquiteta na obra da Vila Madalena (WhatsApp: 5511996998344).
 
 📋 TAREFAS ATUAIS DO ARNALDO NO SISTEMA:
 ${tarefasGestorTexto}
@@ -1243,6 +1297,8 @@ ${ordensGestorTexto}
 💬 ÚLTIMAS MENSAGENS RECEBIDAS NO CRM:
 ${ultimosContatosTexto || 'Nenhuma recente.'}
 
+📎 ARQUIVOS E ANEXOS RECENTES ENVIADOS PELO ARNALDO:
+${arquivosGestorTexto || 'Nenhum arquivo anexado recentemente.'}
 `;
       } else if (cleanPhone.includes("5511954598321") || cleanPhone.includes("11954598321") || last8Digits.includes("54598321")) {
           injectedContext = "Status deste Número: Este é o Sr Francisco (Técnico e Prestador de Serviço da Equipe). NUNCA tente vender nada ou citar regras de expediente. Seja muito gentil, acolha o recado/relatório e confirme que já passou para o Arnaldo.";
@@ -1638,6 +1694,28 @@ ${ultimosContatosTexto || 'Nenhuma recente.'}
           }
       } else if (hasMedia && !messageId) {
           console.log(`[DIAG] Mídia detectada mas sem messageId para download.`);
+      }
+
+      // 📁 REPOSITÓRIO DE ARQUIVOS DO GESTOR: Registra imagens e documentos enviados pelo Arnaldo
+      if (isArnaldoAdmin && (hasImage || hasDocument) && (directUrl || mediaPart)) {
+          try {
+              const assignedFileName = docFileName || (hasImage ? `foto_obra_${new Date().toISOString().slice(0, 10)}.jpg` : `documento_${new Date().toISOString().slice(0, 10)}.pdf`);
+              const assignedMime = hasImage ? 'image/jpeg' : 'application/pdf';
+              await supabase.from('agent_memory').insert({
+                  phone: 'REPO_ARQUIVOS',
+                  role: 'user',
+                  content: JSON.stringify({
+                      url: directUrl || '',
+                      fileName: assignedFileName,
+                      mimeType: assignedMime,
+                      caption: userMessage || '',
+                      uploadedAt: new Date().toISOString()
+                  })
+              });
+              console.log(`[REPO_ARQUIVOS] ✅ Arquivo/Mídia de Arnaldo registrado: ${assignedFileName}`);
+          } catch (repoErr) {
+              console.warn("[REPO_ARQUIVOS] Erro ao registrar arquivo do gestor:", repoErr);
+          }
       }
 
       // Se falhou o download da mídia, abortar silenciosamente
@@ -2135,15 +2213,16 @@ ${ultimosContatosTexto || 'Nenhuma recente.'}
                           if (updErr) console.error("[ANTI-DUPLICAÇÃO] Erro ao atualizar cliente existente:", updErr);
                           else console.log(`[ANTI-DUPLICAÇÃO] ✅ CLIENTE ATUALIZADO: ${exist.nome_cliente} | ID: ${exist.id}`);
                       } else {
+                          const clientPhone = String(actionData.telefone || actionData.whatsapp || (isArnaldoAdmin ? '' : remoteJid)).replace(/\D/g, '');
                           const { error: insertErr } = await supabase.from('clientes').insert({
                               nome_cliente: actionData.nome_cliente,
-                              whatsapp: remoteJid,
+                              whatsapp: clientPhone || null,
                               endereco_completo: actionData.endereco_completo,
                               documento_cpf_cnpj: actionData.cpf_cnpj,
                               relato_necessidade: actionData.relato
                           });
                           if (insertErr) console.error("[ACTION] Erro ao inserir novo cliente:", insertErr);
-                          else console.log(`[ACTION] ✅ NOVO CLIENTE SALVO: ${actionData.nome_cliente} | ${remoteJid}`);
+                          else console.log(`[ACTION] ✅ NOVO CLIENTE SALVO: ${actionData.nome_cliente} | ${clientPhone}`);
                       }
                   } catch (cErr) {
                       console.error("[CRIAR_CADASTRO] Erro ao cadastrar cliente:", cErr);
@@ -2156,28 +2235,39 @@ ${ultimosContatosTexto || 'Nenhuma recente.'}
                   }
               }
 
-              // 🚀 AÇÃO: DISPARAR CONTATO ATIVO
+              // 🚀 AÇÃO: DISPARAR CONTATO ATIVO (COM SUPORTE A TEXTO E ARQUIVOS/ANEXOS)
               else if (actionData.acao === "DISPARAR_CONTATO_ATIVO") {
                   let targetPhone = String(actionData.telefone_destino || '').replace(/\D/g, '');
                   
-                  // Se não veio número direto mas veio nome do cliente, busca no banco
+                  // Se não veio número direto mas veio nome do cliente, busca de forma precisa
                   if (!targetPhone || targetPhone.length < 8) {
                       const searchName = actionData.nome_cliente || '';
                       if (searchName) {
                           try {
+                              // 1. Busca na tabela de clientes
                               const { data: cFound } = await supabase.from('clientes')
                                   .select('whatsapp')
                                   .ilike('nome_cliente', `%${searchName}%`)
                                   .limit(1);
                               if (cFound && cFound.length > 0 && cFound[0].whatsapp) {
                                   targetPhone = cFound[0].whatsapp.replace(/\D/g, '');
+                              } else if (searchName.toLowerCase().includes('denise')) {
+                                  targetPhone = '5511996998344';
                               } else {
-                                  const { data: tFound } = await supabase.from('tarefas_arnaldo')
-                                      .select('cliente_telefone')
-                                      .ilike('cliente_nome', `%${searchName}%`)
-                                      .limit(1);
-                                  if (tFound && tFound.length > 0 && tFound[0].cliente_telefone) {
-                                      targetPhone = tFound[0].cliente_telefone.replace(/\D/g, '');
+                                  // 2. Busca na memória recente da conversa com o Arnaldo se ele citou um número
+                                  const { data: recentArnaldoMsgs } = await supabase
+                                      .from('agent_memory')
+                                      .select('content')
+                                      .eq('phone', remoteJid)
+                                      .order('created_at', { ascending: false })
+                                      .limit(10);
+                                  
+                                  for (const rm of (recentArnaldoMsgs || [])) {
+                                      const matchPhone = (rm.content || '').match(/(?:55\s*)?(?:[1-9]{2})\s*9?[0-9]{8}/);
+                                      if (matchPhone) {
+                                          targetPhone = matchPhone[0].replace(/\D/g, '');
+                                          break;
+                                      }
                                   }
                               }
                           } catch (fErr) {
@@ -2194,9 +2284,9 @@ ${ultimosContatosTexto || 'Nenhuma recente.'}
                       if (cleanMsgToSend) {
                           const userTextNorm = (userMessage || '').toLowerCase();
                           const isOnlyAskingAgenda = /(agenda|tarefas|pend[eê]ncias|o que tem|o que temos|quais s[aã]o|me passa as tarefas|status)/i.test(userTextNorm);
-                          const hasExplicitSendOrder = /(manda|mande|envia|envie|avis[ae]|dispara|fala com|chama|pode mandar|pode enviar|confirma com|cobra|escreve para|notifica)/i.test(userTextNorm);
+                          const hasExplicitSendOrder = /(manda|mande|envia|envie|avis[ae]|dispara|fala com|chama|pode mandar|pode enviar|confirma com|cobra|escreve para|notifica|pe[çc]a|pergunt[ae]|refor[çc]a|encaminh[ae]|passa para|sim|confirmado|ok|bora|pode ir|faz isso)/i.test(userTextNorm);
 
-                          // GATE 1: Confirmação prévia obrigatória se o gestor apenas perguntou sobre a agenda
+                          // GATE 1: Confirmação prévia obrigatória APENAS se o gestor apenas perguntou sobre a agenda e NÃO deu ordem de envio
                           if (isArnaldoAdmin && isOnlyAskingAgenda && !hasExplicitSendOrder) {
                               console.log(`[BLOQUEIO DISPARO SEM ORDEM] Gestor apenas consultou a agenda/tarefas. Disparo para ${targetPhone} bloqueado e convertido em sugestão.`);
                               gestorConfirmations.push(`📋 Sugestão para ${actionData.nome_cliente || targetPhone}: "${cleanMsgToSend}" (Aguardando sua confirmação para enviar).`);
@@ -2215,53 +2305,117 @@ ${ultimosContatosTexto || 'Nenhuma recente.'}
                               continue;
                           }
 
-                          // GATE 3: Trava anti-duplicação de mensagens recentes enviadas hoje (últimas 12h)
-                          const twelveHoursAgo = new Date(Date.now() - 12 * 3600 * 1000).toISOString();
-                          const { data: recentSentMsgs } = await supabase
+                          // GATE 3: Trava anti-duplicação CIRÚRGICA: apenas bloqueia se o texto EXATAMENTE IDÊNTICO foi enviado nos últimos 10 minutos
+                          const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+                          const { data: recentIdenticalMsgs } = await supabase
                               .from('agent_memory')
                               .select('id, content, created_at')
                               .eq('phone', targetPhone)
                               .eq('role', 'model')
-                              .gte('created_at', twelveHoursAgo)
-                              .order('created_at', { ascending: false })
-                              .limit(1);
+                              .gte('created_at', tenMinutesAgo)
+                              .limit(5);
 
-                          const isExplicitResend = /(de novo|novamente|reenvia|refor[çc]a|insiste|outra vez|pode mandar|envia sim)/i.test(userTextNorm);
-                          if (recentSentMsgs && recentSentMsgs.length > 0 && !isExplicitResend) {
-                              const lastSentTime = new Date(recentSentMsgs[0].created_at).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
-                              console.log(`[BLOQUEIO MENSAGEM REPETIDA] Mensagem para ${targetPhone} já foi enviada hoje às ${lastSentTime}.`);
-                              gestorConfirmations.push(`⚠️ Arnaldo, já havíamos enviado mensagem para ${actionData.nome_cliente || targetPhone} hoje às ${lastSentTime}. Para evitar mensagens repetidas, não reenviei automaticamente. Se quiser reenviar mesmo assim, só me confirmar!`);
+                          const isExactDuplicate = (recentIdenticalMsgs || []).some(m => {
+                              const pastText = cleanWhatsAppText(m.content);
+                              return pastText === cleanMsgToSend || (cleanMsgToSend.length > 25 && pastText.includes(cleanMsgToSend.slice(0, 30)));
+                          });
+
+                          if (isExactDuplicate) {
+                              console.log(`[BLOQUEIO MENSAGEM REPETIDA] Mensagem idêntica para ${targetPhone} enviada há menos de 10 minutos.`);
+                              gestorConfirmations.push(`⚠️ Arnaldo, esta mesma mensagem já foi enviada para ${actionData.nome_cliente || targetPhone} há poucos minutos. Para evitar mensagens duplicadas, não reenviei.`);
                               continue;
                           }
 
-                          // Salva a mensagem no histórico do cliente para a IA manter o contexto
-                          await supabase.from('agent_memory').insert({
-                              phone: targetPhone,
-                              role: 'model',
-                              content: cleanMsgToSend
-                          });
+                          // Identifica se há anexo para encaminhar
+                          let fileToSend = actionData.arquivo_url || actionData.file_url || null;
+                          let fileNameToSend = actionData.arquivo_nome || actionData.file_name || '';
+
+                          // Se Arnaldo pediu para encaminhar arquivo mas a IA não colocou URL direta, busca o arquivo mais recente do repositório
+                          if (!fileToSend && /(arquivo|anexo|foto|lista|tabela|planta|documento|or[çc]amento)/i.test(userTextNorm)) {
+                              const { data: lastRepoFile } = await supabase
+                                  .from('agent_memory')
+                                  .select('content')
+                                  .eq('phone', 'REPO_ARQUIVOS')
+                                  .order('created_at', { ascending: false })
+                                  .limit(1);
+                              if (lastRepoFile && lastRepoFile.length > 0) {
+                                  try {
+                                      const fData = JSON.parse(lastRepoFile[0].content);
+                                      if (fData.url) {
+                                          fileToSend = fData.url;
+                                          if (!fileNameToSend) fileNameToSend = fData.fileName;
+                                      }
+                                  } catch {}
+                              }
+                          }
+
+                          if (!fileNameToSend) {
+                              fileNameToSend = (fileToSend && fileToSend.endsWith('.pdf')) ? 'documento.pdf' : 'anexo.jpg';
+                          }
+                          const fileTypeToSend = (fileNameToSend.endsWith('.pdf') || actionData.tipo_arquivo === 'document') ? 'document' : 'image';
 
                           // Dispara via UazAPI / WhatsApp
                           if (uazapiUrl) {
                               try {
-                                  const endpoint = uazapiUrl.endsWith('/') ? `${uazapiUrl}send/text` : `${uazapiUrl}/send/text`;
                                   const activeToken = payload?.token || uazapiToken || '';
-                                  await fetch(endpoint, {
-                                      method: 'POST',
-                                      headers: { 'Content-Type': 'application/json', 'token': activeToken },
-                                      body: JSON.stringify({ number: targetPhone, text: cleanMsgToSend })
-                                  });
-                                  console.log(`[DISPARO ATIVO SUCESSO] Mensagem enviada para ${targetPhone}`);
+                                  if (fileToSend) {
+                                      // Envio com mídia / anexo
+                                      const mediaEndpoint = uazapiUrl.endsWith('/') ? `${uazapiUrl}send/media` : `${uazapiUrl}/send/media`;
+                                      const mediaResp = await fetch(mediaEndpoint, {
+                                          method: 'POST',
+                                          headers: { 'Content-Type': 'application/json', 'token': activeToken },
+                                          body: JSON.stringify({
+                                              number: targetPhone,
+                                              file: fileToSend,
+                                              text: cleanMsgToSend,
+                                              caption: cleanMsgToSend,
+                                              fileName: fileNameToSend,
+                                              type: fileTypeToSend
+                                          })
+                                      });
+                                      if (!mediaResp.ok) {
+                                          console.warn(`[DISPARO ATIVO MÍDIA FALHOU] Status: ${mediaResp.status}. Tentando texto puro...`);
+                                          const textEndpoint = uazapiUrl.endsWith('/') ? `${uazapiUrl}send/text` : `${uazapiUrl}/send/text`;
+                                          await fetch(textEndpoint, {
+                                              method: 'POST',
+                                              headers: { 'Content-Type': 'application/json', 'token': activeToken },
+                                              body: JSON.stringify({ number: targetPhone, text: cleanMsgToSend })
+                                          });
+                                      } else {
+                                          console.log(`[DISPARO ATIVO MÍDIA SUCESSO] Mídia enviada para ${targetPhone}: ${fileNameToSend}`);
+                                      }
+                                  } else {
+                                      // Envio de texto puro
+                                      const endpoint = uazapiUrl.endsWith('/') ? `${uazapiUrl}send/text` : `${uazapiUrl}/send/text`;
+                                      await fetch(endpoint, {
+                                          method: 'POST',
+                                          headers: { 'Content-Type': 'application/json', 'token': activeToken },
+                                          body: JSON.stringify({ number: targetPhone, text: cleanMsgToSend })
+                                      });
+                                      console.log(`[DISPARO ATIVO SUCESSO] Mensagem enviada para ${targetPhone}`);
+                                  }
                               } catch (sendErr) {
                                   console.error("[DISPARO ATIVO ERRO] Falha ao enviar:", sendErr);
                               }
                           }
-                          gestorConfirmations.push(actionData.confirmacao_gestor || `✅ Mensagem enviada para ${actionData.nome_cliente || targetPhone} no WhatsApp!`);
+
+                          // Salva a mensagem no histórico do cliente para a IA manter o contexto
+                          const storedContent = fileToSend ? `${cleanMsgToSend}\n📎 _[Arquivo enviado: ${fileNameToSend}]_` : cleanMsgToSend;
+                          await supabase.from('agent_memory').insert({
+                              phone: targetPhone,
+                              role: 'model',
+                              content: storedContent
+                          });
+
+                          const defaultConfirmation = fileToSend 
+                              ? `✅ Mensagem com o arquivo "${fileNameToSend}" enviada para ${actionData.nome_cliente || targetPhone} no WhatsApp!`
+                              : `✅ Mensagem enviada para ${actionData.nome_cliente || targetPhone} no WhatsApp!`;
+                          gestorConfirmations.push(actionData.confirmacao_gestor || defaultConfirmation);
                       } else {
                           gestorConfirmations.push(`⚠️ Não foi possível enviar para ${actionData.nome_cliente || targetPhone}: mensagem gerada estava vazia.`);
                       }
                   } else {
-                      gestorConfirmations.push(`Arnaldo, não consegui localizar o número de telefone de ${actionData.nome_cliente || 'deste cliente'}. Poderia me passar o número dele para eu disparar?`);
+                      gestorConfirmations.push(`Arnaldo, não consegui localizar o número de telefone de ${actionData.nome_cliente || 'deste cliente'} no sistema. Poderia me passar o número dele(a) para eu disparar?`);
                   }
               }
 
@@ -2310,17 +2464,18 @@ ${ultimosContatosTexto || 'Nenhuma recente.'}
                   }
               }
 
-              // 📑 AÇÃO: ATUALIZAR STATUS DE PROPOSTA
-              else if (actionData.acao === "ATUALIZAR_PROPOSTA") {
+              // 📑 AÇÃO: GERENCIAR / ALTERAR / CONFIRMAR PROPOSTA
+              else if (actionData.acao === "ATUALIZAR_PROPOSTA" || actionData.acao === "ALTERAR_PROPOSTA" || actionData.acao === "CONFIRMAR_PROPOSTA") {
                   const term = String(actionData.termo_busca || '').trim();
                   let foundPropId = actionData.id_proposta || null;
                   let propService = "";
                   let propClient = "";
+                  let propCurrentVal = 0;
 
                   if (!foundPropId && term) {
                       const { data: foundProps } = await supabase
                           .from('propostas')
-                          .select('id, servico_tipo, clientes(nome_cliente)')
+                          .select('id, servico_tipo, valor_estimado, clientes(nome_cliente)')
                           .or(`servico_tipo.ilike.%${term}%,observacoes.ilike.%${term}%`)
                           .order('created_at', { ascending: false })
                           .limit(1);
@@ -2328,6 +2483,7 @@ ${ultimosContatosTexto || 'Nenhuma recente.'}
                       if (foundProps && foundProps.length > 0) {
                           foundPropId = foundProps[0].id;
                           propService = foundProps[0].servico_tipo;
+                          propCurrentVal = foundProps[0].valor_estimado || 0;
                           propClient = (foundProps[0] as any).clientes?.nome_cliente || '';
                       } else {
                           const { data: foundClient } = await supabase
@@ -2339,7 +2495,7 @@ ${ultimosContatosTexto || 'Nenhuma recente.'}
                           if (foundClient && foundClient.length > 0) {
                               const { data: clientProps } = await supabase
                                   .from('propostas')
-                                  .select('id, servico_tipo')
+                                  .select('id, servico_tipo, valor_estimado')
                                   .eq('cliente_id', foundClient[0].id)
                                   .order('created_at', { ascending: false })
                                   .limit(1);
@@ -2347,30 +2503,153 @@ ${ultimosContatosTexto || 'Nenhuma recente.'}
                               if (clientProps && clientProps.length > 0) {
                                   foundPropId = clientProps[0].id;
                                   propService = clientProps[0].servico_tipo;
+                                  propCurrentVal = clientProps[0].valor_estimado || 0;
                                   propClient = foundClient[0].nome_cliente;
+                              }
+                          } else if (/vila\s*madalena|gn|tubula[çc][aã]o|aquecedor/i.test(term)) {
+                              // Fallback inteligente para a proposta da Vila Madalena
+                              const { data: gnProps } = await supabase
+                                  .from('propostas')
+                                  .select('id, servico_tipo, valor_estimado')
+                                  .ilike('servico_tipo', '%tubo%')
+                                  .order('created_at', { ascending: false })
+                                  .limit(1);
+                              if (gnProps && gnProps.length > 0) {
+                                  foundPropId = gnProps[0].id;
+                                  propService = gnProps[0].servico_tipo;
+                                  propCurrentVal = gnProps[0].valor_estimado || 0;
+                                  propClient = 'Denise Zoldan / Fabiana (Vila Madalena)';
                               }
                           }
                       }
                   }
 
                   if (foundPropId) {
-                      const newStatus = actionData.novo_status || 'Aprovado';
+                      const updatePayload: Record<string, any> = {};
+                      const changesDone: string[] = [];
+
+                      if (actionData.acao === "CONFIRMAR_PROPOSTA" || actionData.novo_status === "Aprovado") {
+                          updatePayload.status = "Aprovado";
+                          changesDone.push('Status: APROVADO');
+                      } else if (actionData.novo_status) {
+                          updatePayload.status = actionData.novo_status;
+                          changesDone.push(`Status: ${actionData.novo_status}`);
+                      }
+
+                      if (actionData.valor_estimado !== undefined && !isNaN(Number(actionData.valor_estimado))) {
+                          const v = Number(actionData.valor_estimado);
+                          updatePayload.valor_estimado = v;
+                          changesDone.push(`Valor Total: R$ ${v}`);
+                      }
+                      if (actionData.valor_maos_obra !== undefined && !isNaN(Number(actionData.valor_maos_obra))) {
+                          const v = Number(actionData.valor_maos_obra);
+                          updatePayload.valor_maos_obra = v;
+                          changesDone.push(`Mão de Obra: R$ ${v}`);
+                      }
+                      if (actionData.valor_estimado_materiais !== undefined && !isNaN(Number(actionData.valor_estimado_materiais))) {
+                          const v = Number(actionData.valor_estimado_materiais);
+                          updatePayload.valor_estimado_materiais = v;
+                          changesDone.push(`Materiais: R$ ${v}`);
+                      }
+                      if (actionData.fornecimento_materiais) {
+                          updatePayload.fornecimento_materiais = actionData.fornecimento_materiais;
+                          changesDone.push(`Fornecimento: ${actionData.fornecimento_materiais}`);
+                      }
+                      if (actionData.prazo_inicio !== undefined && !isNaN(Number(actionData.prazo_inicio))) {
+                          updatePayload.prazo_inicio = Number(actionData.prazo_inicio);
+                          changesDone.push(`Início em: ${actionData.prazo_inicio} dias`);
+                      }
+                      if (actionData.prazo_estimado) {
+                          updatePayload.prazo_estimado = actionData.prazo_estimado;
+                          changesDone.push(`Prazo: ${actionData.prazo_estimado}`);
+                      }
+                      if (actionData.observacao) {
+                          updatePayload.observacoes = `[${new Date().toLocaleDateString('pt-BR')} Arnaldo via WhatsApp]: ${actionData.observacao}`;
+                          changesDone.push(`Obs: "${actionData.observacao}"`);
+                      }
+
+                      // Se nenhuma alteração explícita de campo foi feita mas chamou confirmar, garante status Aprovado
+                      if (Object.keys(updatePayload).length === 0) {
+                          updatePayload.status = "Aprovado";
+                          changesDone.push('Status: APROVADO');
+                      }
+
                       const { error: propUpdErr } = await supabase
                           .from('propostas')
-                          .update({
-                              status: newStatus,
-                              observacoes: actionData.observacao ? `[${new Date().toLocaleDateString('pt-BR')}]: ${actionData.observacao}` : undefined
-                          })
+                          .update(updatePayload)
                           .eq('id', foundPropId);
 
                       if (propUpdErr) {
-                          console.error("[ATUALIZAR_PROPOSTA] Erro:", propUpdErr);
-                          gestorConfirmations.push(`⚠️ Tive um problema ao atualizar a proposta: ${propUpdErr.message}`);
+                          console.error("[GERENCIAR_PROPOSTA] Erro ao atualizar proposta:", propUpdErr);
+                          gestorConfirmations.push(`⚠️ Tive um problema ao atualizar a proposta no banco: ${propUpdErr.message}`);
                       } else {
-                          gestorConfirmations.push(`✅ Excelente, Arnaldo! A proposta "${propService || 'selecionada'}"${propClient ? ` do cliente ${propClient}` : ''} foi atualizada para o status "${newStatus}" com sucesso no sistema!`);
+                          if (updatePayload.status === 'Aprovado') {
+                              // Cria notificação interna para agendamento de OS
+                              try {
+                                  await supabase.from('notificacoes_internas').insert({
+                                      titulo: `🚀 PROPOSTA APROVADA: ${propService}`,
+                                      mensagem: `A proposta "${propService}"${propClient ? ` do cliente ${propClient}` : ''} foi CONFIRMADA e APROVADA pelo Arnaldo via WhatsApp. Agendar execução da OS.`,
+                                      tipo: 'alerta',
+                                      lida: false
+                                  });
+                              } catch {}
+                              gestorConfirmations.push(`✅ Excelente, Arnaldo! A proposta "${propService || 'selecionada'}"${propClient ? ` (${propClient})` : ''} foi CONFIRMADA e APROVADA com sucesso no sistema! Valor: R$ ${updatePayload.valor_estimado || propCurrentVal}. Já registrei o chamado interno para agendamento.`);
+                          } else {
+                              gestorConfirmations.push(`✅ Perfeito, Arnaldo! A proposta "${propService || 'selecionada'}"${propClient ? ` (${propClient})` : ''} foi alterada com sucesso! Atualizações: ${changesDone.join(', ')}.`);
+                          }
                       }
                   } else {
-                      gestorConfirmations.push(`Arnaldo, não localizei no sistema uma proposta com o termo "${term}". Você saberia me dizer o nome exato do cliente ou o código da proposta?`);
+                      gestorConfirmations.push(`Arnaldo, não localizei no sistema uma proposta com o termo "${term}". Você saberia me dizer o nome exato do cliente ou do serviço para eu alterar?`);
+                  }
+              }
+
+              // 📎 AÇÃO: ANEXAR / GUARDAR ARQUIVO NA PROPOSTA OU OBRA
+              else if (actionData.acao === "ANEXAR_ARQUIVO" || actionData.acao === "VINCULAR_ARQUIVO") {
+                  const term = String(actionData.termo_busca || '').trim();
+                  const fileDesc = actionData.descricao_arquivo || 'Arquivo / Lista de materiais enviado pelo Arnaldo';
+                  let targetUrl = actionData.arquivo_url || '';
+
+                  if (!targetUrl) {
+                      const { data: lastFile } = await supabase
+                          .from('agent_memory')
+                          .select('content')
+                          .eq('phone', 'REPO_ARQUIVOS')
+                          .order('created_at', { ascending: false })
+                          .limit(1);
+                      if (lastFile && lastFile.length > 0) {
+                          try {
+                              const fData = JSON.parse(lastFile[0].content);
+                              targetUrl = fData.url || '';
+                          } catch {}
+                      }
+                  }
+
+                  // Registra a vinculação na proposta correspondente se encontrada
+                  let linkedSomething = false;
+                  if (term) {
+                      const { data: propFound } = await supabase
+                          .from('propostas')
+                          .select('id, servico_tipo, observacoes')
+                          .or(`servico_tipo.ilike.%${term}%,observacoes.ilike.%${term}%`)
+                          .limit(1);
+                      if (propFound && propFound.length > 0) {
+                          const currentObs = propFound[0].observacoes || '';
+                          const newObs = `${currentObs ? currentObs + ' | ' : ''}📎 [ANEXO: ${fileDesc}]: ${targetUrl || 'Arquivo recebido via WhatsApp'}`;
+                          await supabase.from('propostas').update({ observacoes: newObs }).eq('id', propFound[0].id);
+                          linkedSomething = true;
+                          gestorConfirmations.push(`✅ Perfeito, Arnaldo! O arquivo "${fileDesc}" foi anexado e registrado com sucesso na proposta "${propFound[0].servico_tipo}"!`);
+                      }
+                  }
+
+                  if (!linkedSomething) {
+                      // Se não achou proposta específica, guarda como anotação geral nas tarefas
+                      await supabase.from('tarefas_arnaldo').insert({
+                          titulo: `📎 Arquivo Arquivado: ${fileDesc}`,
+                          descricao: `Arquivo guardado pelo Arnaldo: ${targetUrl || 'Foto/Documento WhatsApp'}. Termo relacionado: ${term || 'Geral'}.`,
+                          status: 'concluida',
+                          concluido_em: new Date().toISOString()
+                      });
+                      gestorConfirmations.push(`✅ Anotado, Arnaldo! O arquivo "${fileDesc}" foi salvo com segurança no repositório de documentos do sistema.`);
                   }
               }
           }
