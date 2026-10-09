@@ -1198,6 +1198,26 @@ DIRETRIZES OBRIGATÓRIAS:
               console.warn("Erro ao buscar arquivos do gestor:", arqErr);
           }
 
+          let higienizacoesTexto = "";
+          try {
+              const { data: recHigi } = await supabase
+                  .from('sistema_configuracoes')
+                  .select('valor')
+                  .eq('chave', 'higienizacoes_ar')
+                  .single();
+
+              if (recHigi && Array.isArray(recHigi.valor) && recHigi.valor.length > 0) {
+                  higienizacoesTexto = recHigi.valor.slice(0, 10).map((h: any, idx: number) => {
+                      const eqs = (h.equipamentos || []).map((e: any) => `${e.qtd || 1}x ${e.tipo || 'Split'} ${e.marca || ''} ${e.btu || ''} (${e.ambiente || 'Geral'})`).join(', ');
+                      return `${idx + 1}. ${h.cliente_nome || 'Cliente'} (${h.cliente_whatsapp || 'Sem tel'}) | Aparelhos: ${eqs || 'N/A'} | Última Limpeza: ${h.data_ultima || 'N/D'} | Reagendamento: ${h.data_reagendamento || 'N/D'}`;
+                  }).join('\n');
+              } else {
+                  higienizacoesTexto = "Nenhuma higienização cadastrada no momento.";
+              }
+          } catch (hErr) {
+              console.warn("Erro ao buscar higienizacoes para gestor:", hErr);
+          }
+
           injectedContext = `
 === MODO EXECUTIVO ATIVADO: VOCÊ É A SECRETÁRIA EXECUTIVA DO DIRETOR ARNALDO TRENTIN! ===
 - O interlocutor atual é o próprio ARNALDO TRENTIN (dono e diretor executivo da empresa).
@@ -1299,6 +1319,9 @@ ${ultimosContatosTexto || 'Nenhuma recente.'}
 
 📎 ARQUIVOS E ANEXOS RECENTES ENVIADOS PELO ARNALDO:
 ${arquivosGestorTexto || 'Nenhum arquivo anexado recentemente.'}
+
+❄️ CRONOGRAMA DE HIGIENIZAÇÃO DE AR CONDICIONADO & REAGENDAMENTOS:
+${higienizacoesTexto || 'Nenhuma higienização cadastrada.'}
 `;
       } else if (cleanPhone.includes("5511954598321") || cleanPhone.includes("11954598321") || last8Digits.includes("54598321")) {
           injectedContext = "Status deste Número: Este é o Sr Francisco (Técnico e Prestador de Serviço da Equipe). NUNCA tente vender nada ou citar regras de expediente. Seja muito gentil, acolha o recado/relatório e confirme que já passou para o Arnaldo.";

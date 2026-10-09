@@ -304,6 +304,12 @@
                         </li>
                         <li><a href="#" class="nav-link" data-target="view-clientes"><i class="fa-solid fa-users"></i> Clientes</a></li>
                         <li><a href="#" class="nav-link" data-target="view-propostas"><i class="fa-solid fa-file-invoice-dollar"></i> Propostas & Orçamentos</a></li>
+                        <li>
+                            <a href="#" class="nav-link" data-target="view-higienizacao" id="nav-item-higienizacao">
+                                <i class="fa-solid fa-snowflake" style="color: #00d2d3;"></i> Higienização de Ar
+                                <span class="badge-count" id="badge-higi-vencidas" style="background: #e74c3c; color: #fff; border-radius: 10px; padding: 2px 7px; font-size: 0.72rem; margin-left: 6px; font-weight: 800; display: none; box-shadow: 0 0 10px rgba(231,76,60,0.5);">0</span>
+                            </a>
+                        </li>
                         <li><a href="#" class="nav-link" data-target="view-mensagens"><i class="fa-brands fa-whatsapp" style="color: #25D366;"></i> Central de Mensagens</a></li>
                     </ul>
                 </div>
@@ -1065,6 +1071,93 @@
                                     <th>Valor (R$)</th>
                                     <th>Status</th>
                                     <th style="width: 220px;">Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody><!-- Carregado via JS --></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- VIEW: HIGIENIZAÇÃO & PREVENTIVA DE AR CONDICIONADO -->
+                <div id="view-higienizacao" class="view-page" style="display:none; flex-direction:column; gap:20px; width:100%;">
+                    <!-- HEADER & ACTION -->
+                    <div class="glass-panel" style="padding: 20px 24px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px; border-left: 4px solid #00d2d3;">
+                        <div>
+                            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                                <h2 style="color: #00d2d3; margin: 0; font-size: 1.4rem;"><i class="fa-solid fa-snowflake"></i> Higienização & Preventiva de Ar Condicionado</h2>
+                                <span class="agent-tag" style="background: rgba(0, 210, 211, 0.15); color: #00d2d3; border: 1px solid rgba(0, 210, 211, 0.3); padding: 3px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 700;">Reagendamento Semestral</span>
+                            </div>
+                            <p style="color: var(--text-muted); font-size: 0.85rem; margin: 6px 0 0 0;">Controle de clientes cadastrados, equipamentos instalados, histórico de limpezas e reagendamentos preventivos.</p>
+                        </div>
+                        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                            <button class="action-btn" id="btn-sync-higi" onclick="window.loadHigienizacoes()" style="background: var(--surface-light); color: var(--text-primary); border: 1px solid var(--border-color);"><i class="fa-solid fa-rotate"></i> Atualizar</button>
+                            <button class="action-btn" id="btn-nova-higienizacao" style="background: #00d2d3; color: #0f172a; font-weight: 800; box-shadow: 0 4px 15px rgba(0, 210, 211, 0.3);" onclick="window.openModalHigienizacao()"><i class="fa-solid fa-plus"></i> Nova Higienização</button>
+                        </div>
+                    </div>
+
+                    <!-- METRIC CARDS -->
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 15px;">
+                        <div class="glass-panel" style="padding: 16px 20px; border-radius: 10px; display: flex; align-items: center; justify-content: space-between;">
+                            <div>
+                                <span style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px;">Clientes / Registros</span>
+                                <div style="font-size: 1.8rem; font-weight: 800; color: var(--text-primary); margin-top: 4px;" id="kpi-higi-total">0</div>
+                            </div>
+                            <div style="width: 44px; height: 44px; border-radius: 10px; background: rgba(0, 210, 211, 0.15); display: flex; align-items: center; justify-content: center; color: #00d2d3; font-size: 1.2rem;">
+                                <i class="fa-solid fa-wind"></i>
+                            </div>
+                        </div>
+                        <div class="glass-panel" style="padding: 16px 20px; border-radius: 10px; display: flex; align-items: center; justify-content: space-between; border-left: 3px solid #2ecc71;">
+                            <div>
+                                <span style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px;">Em Dia</span>
+                                <div style="font-size: 1.8rem; font-weight: 800; color: #2ecc71; margin-top: 4px;" id="kpi-higi-em-dia">0</div>
+                            </div>
+                            <div style="width: 44px; height: 44px; border-radius: 10px; background: rgba(46, 204, 113, 0.15); display: flex; align-items: center; justify-content: center; color: #2ecc71; font-size: 1.2rem;">
+                                <i class="fa-solid fa-circle-check"></i>
+                            </div>
+                        </div>
+                        <div class="glass-panel" style="padding: 16px 20px; border-radius: 10px; display: flex; align-items: center; justify-content: space-between; border-left: 3px solid #f1c40f;">
+                            <div>
+                                <span style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px;">A Vencer (Próx. 30d)</span>
+                                <div style="font-size: 1.8rem; font-weight: 800; color: #f1c40f; margin-top: 4px;" id="kpi-higi-a-vencer">0</div>
+                            </div>
+                            <div style="width: 44px; height: 44px; border-radius: 10px; background: rgba(241, 196, 15, 0.15); display: flex; align-items: center; justify-content: center; color: #f1c40f; font-size: 1.2rem;">
+                                <i class="fa-solid fa-clock"></i>
+                            </div>
+                        </div>
+                        <div class="glass-panel" style="padding: 16px 20px; border-radius: 10px; display: flex; align-items: center; justify-content: space-between; border-left: 3px solid #e74c3c;">
+                            <div>
+                                <span style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px;">Vencidas (Reagendar)</span>
+                                <div style="font-size: 1.8rem; font-weight: 800; color: #e74c3c; margin-top: 4px;" id="kpi-higi-vencidas">0</div>
+                            </div>
+                            <div style="width: 44px; height: 44px; border-radius: 10px; background: rgba(231, 76, 60, 0.15); display: flex; align-items: center; justify-content: center; color: #e74c3c; font-size: 1.2rem;">
+                                <i class="fa-solid fa-triangle-exclamation"></i>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- FILTER BAR & TABLE -->
+                    <div class="glass-panel table-container" style="padding: 20px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px;">
+                            <div style="display: flex; gap: 8px; flex-wrap: wrap;" id="higi-filter-pills">
+                                <button class="action-btn cat-pill active" style="padding: 6px 16px; font-size: 0.85rem;" data-status="" onclick="window.setFilterHigi(this, '')">Todos</button>
+                                <button class="action-btn cat-pill" style="padding: 6px 16px; font-size: 0.85rem; background: var(--surface-light);" data-status="EM_DIA" onclick="window.setFilterHigi(this, 'EM_DIA')"><i class="fa-solid fa-circle-check" style="color: #2ecc71;"></i> Em Dia</button>
+                                <button class="action-btn cat-pill" style="padding: 6px 16px; font-size: 0.85rem; background: var(--surface-light);" data-status="A_VENCER" onclick="window.setFilterHigi(this, 'A_VENCER')"><i class="fa-solid fa-clock" style="color: #f1c40f;"></i> A Vencer</button>
+                                <button class="action-btn cat-pill" style="padding: 6px 16px; font-size: 0.85rem; background: var(--surface-light);" data-status="VENCIDA" onclick="window.setFilterHigi(this, 'VENCIDA')"><i class="fa-solid fa-triangle-exclamation" style="color: #e74c3c;"></i> Vencidas</button>
+                            </div>
+                            <div style="min-width: 280px; flex: 1; max-width: 450px;">
+                                <input type="text" id="filtro-higi-busca" class="modal-input" placeholder="🔍 Buscar cliente, telefone, endereço, aparelho..." style="width: 100%; border: 1px solid rgba(0, 210, 211, 0.4); background: rgba(0,0,0,0.3); color: #fff;" onkeyup="window.renderHigienizacoes()">
+                            </div>
+                        </div>
+
+                        <table class="data-table" id="table-higienizacao">
+                            <thead>
+                                <tr>
+                                    <th style="width: 25%;">Cliente & Local</th>
+                                    <th style="width: 32%;">Equipamentos Descritos</th>
+                                    <th style="width: 13%;">Última Limpeza</th>
+                                    <th style="width: 13%;">Reagendamento</th>
+                                    <th style="width: 9%; text-align: center;">Status</th>
+                                    <th style="width: 8%; text-align: right;">Ações</th>
                                 </tr>
                             </thead>
                             <tbody><!-- Carregado via JS --></tbody>
@@ -3033,6 +3126,216 @@
                 <div id="prop-controls-reactivate" style="display: none; gap: 10px; margin-top: 10px;">
                     <button type="button" class="action-btn auth-btn" style="background: var(--accent-blue); flex: 1;" onclick="window.reativarProposta()">
                         <i class="fa-solid fa-rotate-left"></i> Reativar Orçamento (Voltar para Pendente)
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL: HIGIENIZAÇÃO & PREVENTIVA DE AR CONDICIONADO -->
+    <div class="modal-overlay" id="modal-higienizacao">
+        <div class="modal-content glass-panel-dark" style="width: 95%; max-width: 1150px; max-height: 92vh; overflow-y: auto;">
+            <div class="modal-header">
+                <h2><i class="fa-solid fa-snowflake" style="color: #00d2d3;"></i> Higienização & Reagendamento de Ar Condicionado</h2>
+                <button class="modal-close" onclick="closeModal('modal-higienizacao')"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form id="form-higienizacao" autocomplete="off">
+                <input type="hidden" id="higi-edit-id">
+
+                <!-- 1. SELEÇÃO DO CLIENTE CADASTRADO -->
+                <div class="form-row" style="display: flex; gap: 15px; margin-bottom: 12px; flex-wrap: wrap;">
+                    <div class="input-group" style="flex: 2; min-width: 280px;">
+                        <label style="color: #00d2d3; font-weight: 700;"><i class="fa-solid fa-user-check"></i> Cliente Cadastrado *</label>
+                        <select id="higi-cliente" class="auth-select" required onchange="window.onHigiClienteChange()">
+                            <option value="">Selecione o Cliente...</option>
+                        </select>
+                    </div>
+                    <div class="input-group" style="flex: 1; min-width: 200px;">
+                        <label><i class="fa-brands fa-whatsapp" style="color: #25D366;"></i> WhatsApp do Cliente</label>
+                        <input type="text" id="higi-cliente-whatsapp" class="modal-input" readonly placeholder="Telefone do cliente..." style="background: rgba(0,0,0,0.3); color: #fff;">
+                    </div>
+                </div>
+
+                <!-- 2. LOCAL DE EXECUÇÃO / ENDEREÇO DA INSTALAÇÃO -->
+                <div class="glass-panel" style="background: rgba(255,255,255,0.03); padding: 12px 15px; border-radius: 8px; margin-bottom: 15px; border: 1px solid rgba(0, 210, 211, 0.2);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 8px;">
+                        <label style="margin: 0; font-size: 0.85rem; font-weight: 700; color: #00d2d3;">
+                            <i class="fa-solid fa-location-dot"></i> Local de Instalação dos Aparelhos
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 6px; font-size: 0.8rem; cursor: pointer; color: var(--text-primary); margin: 0; user-select: none;">
+                            <input type="checkbox" id="higi-mesmo-endereco" checked onchange="window.toggleHigiEndereco(this.checked)" style="width: 16px; height: 16px; cursor: pointer; accent-color: #00d2d3;">
+                            <span>Mesmo endereço de cadastro</span>
+                        </label>
+                    </div>
+                    <input type="text" id="higi-endereco-obra" class="modal-input" placeholder="Endereço onde os aparelhos estão instalados..." style="width: 100%; font-size: 0.88rem;" readonly>
+                </div>
+
+                <!-- 3. DESCRIÇÃO DOS EQUIPAMENTOS (BUILDER DINÂMICO) -->
+                <div class="glass-panel" style="background: rgba(255,255,255,0.04); padding: 15px; border-radius: 8px; margin-bottom: 15px; border: 1px solid rgba(255,255,255,0.08);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <h4 style="color: #00d2d3; font-size: 0.95rem; margin: 0;"><i class="fa-solid fa-wind"></i> Equipamentos / Aparelhos de Ar Condicionado</h4>
+                        <span style="font-size: 0.75rem; color: var(--text-muted);">Adicione 1 ou mais aparelhos do cliente</span>
+                    </div>
+
+                    <!-- Linha de inserção rápida -->
+                    <div class="form-row" style="display: flex; gap: 10px; align-items: flex-end; margin-bottom: 12px; flex-wrap: wrap;">
+                        <div class="input-group" style="flex: 1.2; min-width: 150px;">
+                            <label style="font-size: 0.75rem;">Tipo de Aparelho</label>
+                            <select id="higi-item-tipo" class="auth-select" style="font-size: 0.85rem;">
+                                <option value="Split High Wall">Split High Wall</option>
+                                <option value="Multi Split">Multi Split</option>
+                                <option value="Cassete">Cassete</option>
+                                <option value="Piso Teto">Piso Teto</option>
+                                <option value="AC Janela">AC Janela</option>
+                                <option value="Duto / Central">Duto / Central</option>
+                                <option value="Chiller / VRF">Chiller / VRF</option>
+                                <option value="Outro">Outro</option>
+                            </select>
+                        </div>
+                        <div class="input-group" style="flex: 1.1; min-width: 130px;">
+                            <label style="font-size: 0.75rem;">Marca</label>
+                            <select id="higi-item-marca" class="auth-select" style="font-size: 0.85rem;">
+                                <option value="LG">LG</option>
+                                <option value="Daikin">Daikin</option>
+                                <option value="Gree">Gree</option>
+                                <option value="Midea">Midea</option>
+                                <option value="Carrier">Carrier</option>
+                                <option value="Samsung">Samsung</option>
+                                <option value="Elgin">Elgin</option>
+                                <option value="Fujitsu">Fujitsu</option>
+                                <option value="Springer">Springer</option>
+                                <option value="Consul">Consul</option>
+                                <option value="Outra">Outra</option>
+                            </select>
+                        </div>
+                        <div class="input-group" style="flex: 1; min-width: 110px;">
+                            <label style="font-size: 0.75rem;">Capacidade</label>
+                            <select id="higi-item-btu" class="auth-select" style="font-size: 0.85rem;">
+                                <option value="9.000 BTU">9.000 BTU</option>
+                                <option value="12.000 BTU" selected>12.000 BTU</option>
+                                <option value="18.000 BTU">18.000 BTU</option>
+                                <option value="24.000 BTU">24.000 BTU</option>
+                                <option value="30.000 BTU">30.000 BTU</option>
+                                <option value="36.000 BTU">36.000 BTU</option>
+                                <option value="48.000 BTU">48.000 BTU</option>
+                                <option value="60.000 BTU">60.000 BTU</option>
+                            </select>
+                        </div>
+                        <div class="input-group" style="flex: 1.5; min-width: 150px;">
+                            <label style="font-size: 0.75rem;">Ambiente / Cômodo</label>
+                            <input type="text" id="higi-item-ambiente" class="modal-input" placeholder="Ex: Quarto Casal, Sala, Recepção..." style="font-size: 0.85rem;">
+                        </div>
+                        <div class="input-group" style="flex: 0.5; min-width: 60px;">
+                            <label style="font-size: 0.75rem;">Qtd</label>
+                            <input type="number" id="higi-item-qtd" class="modal-input" value="1" min="1" style="font-size: 0.85rem; text-align: center;">
+                        </div>
+                        <button type="button" class="action-btn" style="background: #00d2d3; color: #0f172a; height: 38px; margin-bottom: 4px; font-weight: 700; padding: 0 16px;" onclick="window.addHigiEquipamento()">
+                            <i class="fa-solid fa-plus"></i> Adicionar
+                        </button>
+                    </div>
+
+                    <!-- Tabela de Itens Adicionados -->
+                    <div style="border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; overflow: hidden; background: rgba(0,0,0,0.2);">
+                        <table class="data-table" id="table-higi-items" style="font-size: 0.82rem; margin: 0;">
+                            <thead>
+                                <tr style="background: rgba(0,0,0,0.4);">
+                                    <th>Equipamento</th>
+                                    <th>Capacidade</th>
+                                    <th>Ambiente / Local</th>
+                                    <th style="text-align: center;">Qtd</th>
+                                    <th style="width: 50px;"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 15px;">Nenhum aparelho adicionado ainda. Preencha acima e clique em "Adicionar".</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 4. CRONOGRAMA: ÚLTIMA LIMPEZA E REAGENDAMENTO -->
+                <div class="glass-panel" style="background: rgba(255,255,255,0.04); padding: 15px; border-radius: 8px; margin-bottom: 15px; border-left: 4px solid #f1c40f;">
+                    <h4 style="color: #f1c40f; font-size: 0.95rem; margin: 0 0 12px 0;"><i class="fa-solid fa-calendar-days"></i> Datas de Limpeza & Reagendamento Preventivo</h4>
+                    
+                    <div class="form-row" style="display: flex; gap: 15px; flex-wrap: wrap;">
+                        <div class="input-group" style="flex: 1; min-width: 180px;">
+                            <label style="color: #fff; font-weight: 700;"><i class="fa-solid fa-calendar-check" style="color: #2ecc71;"></i> Data da Última Limpeza *</label>
+                            <input type="date" id="higi-data-ultima" class="modal-input" required onchange="window.calcHigiProximaData()" style="color: #fff; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color);">
+                        </div>
+                        <div class="input-group" style="flex: 1; min-width: 180px;">
+                            <label><i class="fa-solid fa-clock-rotate-left"></i> Periodicidade</label>
+                            <select id="higi-periodicidade" class="auth-select" onchange="window.calcHigiProximaData()">
+                                <option value="6" selected>6 Meses (Padrão Recomendado / Residencial)</option>
+                                <option value="3">3 Meses (Comercial / Clínicas / Alto Fluxo)</option>
+                                <option value="12">12 Meses (Uso Ocasional / Anual)</option>
+                                <option value="custom">Personalizada (Escolha Livre)</option>
+                            </select>
+                        </div>
+                        <div class="input-group" style="flex: 1; min-width: 180px;">
+                            <label style="color: #f1c40f; font-weight: 700;"><i class="fa-solid fa-bell" style="color: #f1c40f;"></i> Data do Reagendamento (Próxima) *</label>
+                            <input type="date" id="higi-data-proxima" class="modal-input" required style="color: #f1c40f; font-weight: 700; background: rgba(0,0,0,0.4); border: 1px solid rgba(241, 196, 15, 0.5);">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 5. CHECKLIST TÉCNICO & PROCEDIMENTOS -->
+                <div class="glass-panel" style="background: rgba(255,255,255,0.03); padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                    <h4 style="color: #2ecc71; font-size: 0.9rem; margin: 0 0 10px 0;"><i class="fa-solid fa-list-check"></i> Procedimentos Realizados na Higienização</h4>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; font-size: 0.82rem;">
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="chk-proc-evap" checked style="accent-color: #2ecc71; width: 16px; height: 16px;">
+                            <span>Lavagem com bactericida na serpentina</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="chk-proc-turbina" checked style="accent-color: #2ecc71; width: 16px; height: 16px;">
+                            <span>Higienização da turbina e ventilação</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="chk-proc-filtros" checked style="accent-color: #2ecc71; width: 16px; height: 16px;">
+                            <span>Limpeza / troca de filtros de ar</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="chk-proc-dreno" checked style="accent-color: #2ecc71; width: 16px; height: 16px;">
+                            <span>Desobstrução de bandeja e dreno</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="chk-proc-condensadora" checked style="accent-color: #2ecc71; width: 16px; height: 16px;">
+                            <span>Limpeza das aletas da condensadora</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="chk-proc-gas" checked style="accent-color: #2ecc71; width: 16px; height: 16px;">
+                            <span>Aferição de pressão de gás e temp.</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- 6. VALOR COBRADO & OBSERVAÇÕES TÉCNICAS -->
+                <div class="form-row" style="display: flex; gap: 15px; flex-wrap: wrap; margin-bottom: 20px;">
+                    <div class="input-group" style="flex: 1; min-width: 180px;">
+                        <label>Valor Cobrado / Orçado (R$)</label>
+                        <input type="number" id="higi-valor" class="modal-input" placeholder="Ex: 350.00" step="0.01" style="font-weight: 700; color: #2ecc71;">
+                    </div>
+                    <div class="input-group" style="flex: 2; min-width: 280px;">
+                        <label>Observações Técnicas / Recomendações</label>
+                        <textarea id="higi-obs" class="modal-input" rows="2" placeholder="Ex: Aparelho do quarto com serpentina de cobre ok. Condensadora do telhado revisada."></textarea>
+                    </div>
+                </div>
+
+                <!-- 7. BOTÕES DE AÇÃO -->
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button type="submit" class="action-btn" style="flex: 2; min-width: 180px; background: #00d2d3; color: #0f172a; height: 44px; font-weight: 800; font-size: 0.95rem;">
+                        <i class="fa-solid fa-floppy-disk"></i> Salvar Higienização
+                    </button>
+                    <button type="button" class="action-btn" style="flex: 1.5; min-width: 160px; background: var(--accent-orange); height: 44px; font-weight: 700;" onclick="window.gerarPropostaFromHigiModal()">
+                        <i class="fa-solid fa-file-invoice-dollar"></i> Gerar Orçamento Formal
+                    </button>
+                    <button type="button" class="action-btn" style="flex: 1.5; min-width: 160px; background: #25D366; color: #fff; height: 44px; font-weight: 700;" onclick="window.lembrarWhatsAppFromModal()">
+                        <i class="fa-brands fa-whatsapp"></i> Lembrar no WhatsApp
+                    </button>
+                    <button type="button" class="action-btn" style="flex: 1; min-width: 100px; background: var(--surface-light); height: 44px;" onclick="closeModal('modal-higienizacao')">
+                        Cancelar
                     </button>
                 </div>
             </form>

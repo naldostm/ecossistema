@@ -274,6 +274,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (targetId === 'view-tarefas' && typeof window.loadTarefasArnaldo === 'function') {
             window.loadTarefasArnaldo();
         }
+
+        // Se for Higienização de Ar Condicionado, carrega e renderiza o inventário e reagendamentos
+        if (targetId === 'view-higienizacao' && typeof window.loadHigienizacoes === 'function') {
+            window.loadHigienizacoes();
+        }
     };
 
     document.querySelectorAll('.nav-link').forEach(link => {
@@ -1628,6 +1633,9 @@ ${materiaisTxt}${extrasTxt}
                     }
                 }
             }
+
+            // 7.1.B Traz Higienizações e Preventivas de Ar Condicionado
+            if (typeof window.loadHigienizacoes === 'function') await window.loadHigienizacoes();
 
             // ==========================================
             // 7.2 Traz Faturamentos B2B
@@ -6195,6 +6203,759 @@ ${materiaisTxt}${extrasTxt}
         loadData();
     });
 
+    // ==========================================
+    // MÓDULO: HIGIENIZAÇÃO & PREVENTIVA DE AR CONDICIONADO (REAGENDAMENTO INTELIGENTE)
+    // ==========================================
+    window.higienizacoesCache = [];
+    window.currentHigiEquipamentos = [];
+    window.filtroHigiStatus = '';
+
+    // 1. CARREGAMENTO E SINCRONIZAÇÃO
+    window.loadHigienizacoes = async function () {
+        try {
+            const tbody = document.querySelector('#table-higienizacao tbody');
+            if (tbody && (!window.higienizacoesCache || window.higienizacoesCache.length === 0)) {
+                tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:25px; color:var(--text-muted);"><i class="fa-solid fa-spinner fa-spin"></i> Carregando registros de higienização...</td></tr>`;
+            }
+
+            // Tenta buscar do Supabase (sistema_configuracoes chave: higienizacoes_ar)
+            let loaded = [];
+            const { data, error } = await supabase
+                .from('sistema_configuracoes')
+                .select('*')
+                .eq('chave', 'higienizacoes_ar')
+                .single();
+
+            if (!error && data && Array.isArray(data.valor)) {
+                loaded = data.valor;
+            } else {
+                // Fallback para cache local se ainda não existir no banco
+                const local = localStorage.getItem('higienizacoes_ar_cache');
+                if (local) {
+                    try { loaded = JSON.parse(local); } catch(e){}
+                }
+            }
+
+            window.higienizacoesCache = loaded || [];
+
+            // Salva cópia de segurança no localStorage
+            localStorage.setItem('higienizacoes_ar_cache', JSON.stringify(window.higienizacoesCache));
+
+            // Atualiza KPIs e renderiza tabela
+            window.updateHigiKPIs();
+            window.renderHigienizacoes();
+        } catch (err) {
+            console.error('[Higienizacao] Erro ao carregar:', err);
+        }
+    };
+
+    // 2. ATUALIZAÇÃO DE KPIS & BADGES
+    window.updateHigiKPIs = function () {
+        const list = window.higienizacoesCache || [];
+        let countEmDia = 0;
+        let countAVencer = 0;
+        let countVencidas = 0;
+
+        list.forEach(item => {
+            const statusInfo = window.getHigiStatus(item.data_reagendamento);
+            if (statusInfo.code === 'VENCIDA') countVencidas++;
+            else if (statusInfo.code === 'A_VENCER') countAVencer++;
+            else countEmDia++;
+        });
+
+        const kTotal = document.getElementById('kpi-higi-total');
+        const kEmDia = document.getElementById('kpi-higi-em-dia');
+        const kAVencer = document.getElementById('kpi-higi-a-vencer');
+        const kVencidas = document.getElementById('kpi-higi-vencidas');
+        const badgeSidebar = document.getElementById('badge-higi-vencidas');
+
+        if (kTotal) kTotal.innerText = list.length;
+        if (kEmDia) kEmDia.innerText = countEmDia;
+        if (kAVencer) kAVencer.innerText = countAVencer;
+        if (kVencidas) kVencidas.innerText = countVencidas;
+
+        if (badgeSidebar) {
+            if (countVencidas > 0) {
+                badgeSidebar.innerText = countVencidas;
+                badgeSidebar.style.background = '#e74c3c';
+                badgeSidebar.style.color = '#fff';
+                badgeSidebar.style.display = 'inline-block';
+            } else if (countAVencer > 0) {
+                badgeSidebar.innerText = countAVencer;
+                badgeSidebar.style.background = '#f1c40f';
+                badgeSidebar.style.color = '#000';
+                badgeSidebar.style.display = 'inline-block';
+            } else {
+                badgeSidebar.style.display = 'none';
+            }
+        }
+    };
+
+    // Helper: Determina o status da higienização com base na data do reagendamento
+    window.getHigiStatus = function (dataReagendamentoStr) {
+        if (!dataReagendamentoStr) return { code: 'EM_DIA', label: 'Em Dia', badgeStyle: 'background: rgba(46, 204, 113, 0.2); color: #2ecc71; border: 1px solid rgba(46, 204, 113, 0.4);', icon: 'fa-circle-check', textDias: '-' };
+        
+        const partes = dataReagendamentoStr.split('-');
+        const dataReag = new Date(parseInt(partes[0]), parseInt(partes[1]) - 1, parseInt(partes[2]));
+        dataReag.setHours(0, 0, 0, 0);
+
+        const hoje = new Date();
+        hoje.setHours(0, 0, 0, 0);
+
+        const diffTime = dataReag.getTime() - hoje.getTime();
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+        if (diffDays < 0) {
+            const atraso = Math.abs(diffDays);
+            return {
+                code: 'VENCIDA',
+                label: 'Vencida',
+                badgeStyle: 'background: rgba(231, 76, 60, 0.2); color: #e74c3c; border: 1px solid rgba(231, 76, 60, 0.4);',
+                icon: 'fa-triangle-exclamation',
+                textDias: `Venceu há ${atraso} dia${atraso > 1 ? 's' : ''}`
+            };
+        } else if (diffDays <= 30) {
+            return {
+                code: 'A_VENCER',
+                label: 'A Vencer',
+                badgeStyle: 'background: rgba(241, 196, 15, 0.2); color: #f1c40f; border: 1px solid rgba(241, 196, 15, 0.4);',
+                icon: 'fa-clock',
+                textDias: diffDays === 0 ? 'Vence HOJE' : `Vence em ${diffDays} dia${diffDays > 1 ? 's' : ''}`
+            };
+        } else {
+            const meses = Math.round(diffDays / 30);
+            return {
+                code: 'EM_DIA',
+                label: 'Em Dia',
+                badgeStyle: 'background: rgba(46, 204, 113, 0.2); color: #2ecc71; border: 1px solid rgba(46, 204, 113, 0.4);',
+                icon: 'fa-circle-check',
+                textDias: `Próxima em ~${meses} mês(es)`
+            };
+        }
+    };
+
+    // 3. RENDERIZAÇÃO DA TABELA
+    window.setFilterHigi = function (btn, statusCode) {
+        document.querySelectorAll('#higi-filter-pills .cat-pill').forEach(b => {
+            b.classList.remove('active');
+            b.style.background = 'var(--surface-light)';
+            b.style.color = 'var(--text-primary)';
+        });
+        btn.classList.add('active');
+        btn.style.background = '#00d2d3';
+        btn.style.color = '#0f172a';
+        window.filtroHigiStatus = statusCode;
+        window.renderHigienizacoes();
+    };
+
+    window.renderHigienizacoes = function () {
+        const tbody = document.querySelector('#table-higienizacao tbody');
+        if (!tbody) return;
+
+        let list = window.higienizacoesCache || [];
+        const busca = (document.getElementById('filtro-higi-busca')?.value || '').trim().toLowerCase();
+
+        // Filtro por Status
+        if (window.filtroHigiStatus) {
+            list = list.filter(item => {
+                const st = window.getHigiStatus(item.data_reagendamento);
+                return st.code === window.filtroHigiStatus;
+            });
+        }
+
+        // Filtro por Texto de Busca
+        if (busca) {
+            list = list.filter(item => {
+                const cliObj = (window.clientesCache || []).find(c => String(c.id) === String(item.cliente_id));
+                const nomeCli = (cliObj?.nome_cliente || item.cliente_nome || '').toLowerCase();
+                const telCli = (cliObj?.whatsapp || item.cliente_whatsapp || '').toLowerCase();
+                const endCli = (item.endereco_obra || cliObj?.endereco_completo || '').toLowerCase();
+                const eqStr = (item.equipamentos || []).map(e => `${e.tipo} ${e.marca} ${e.btu} ${e.ambiente}`).join(' ').toLowerCase();
+                const obsStr = (item.observacoes || '').toLowerCase();
+
+                return nomeCli.includes(busca) || telCli.includes(busca) || endCli.includes(busca) || eqStr.includes(busca) || obsStr.includes(busca);
+            });
+        }
+
+        if (list.length === 0) {
+            tbody.innerHTML = `<tr>
+                <td colspan="6" style="text-align:center; padding:35px 20px; color:var(--text-muted);">
+                    <i class="fa-solid fa-snowflake" style="font-size:2rem; color:rgba(0,210,211,0.3); margin-bottom:10px; display:block;"></i>
+                    Nenhum registro de higienização encontrado.<br>
+                    <small style="opacity:0.7;">Clique no botão "+ Nova Higienização" para cadastrar o primeiro cliente e seus aparelhos.</small>
+                </td>
+            </tr>`;
+            return;
+        }
+
+        tbody.innerHTML = list.map(item => {
+            const cliObj = (window.clientesCache || []).find(c => String(c.id) === String(item.cliente_id));
+            const nomeCli = cliObj?.nome_cliente || item.cliente_nome || 'Cliente não identificado';
+            const telCli = cliObj?.whatsapp || item.cliente_whatsapp || '';
+            const endCli = item.endereco_obra || cliObj?.endereco_completo || 'Endereço não informado';
+
+            const st = window.getHigiStatus(item.data_reagendamento);
+
+            // Formatação de Datas
+            const dataUltimaFmt = item.data_ultima ? item.data_ultima.split('-').reverse().join('/') : '-';
+            const dataReagFmt = item.data_reagendamento ? item.data_reagendamento.split('-').reverse().join('/') : '-';
+
+            // Resumo dos Equipamentos
+            const eqs = item.equipamentos || [];
+            let totalAparelhos = 0;
+            eqs.forEach(e => totalAparelhos += parseInt(e.qtd || 1));
+
+            const eqBadges = eqs.map(e => {
+                return `<div style="display:inline-flex; align-items:center; gap:5px; background:rgba(255,255,255,0.06); padding:3px 8px; border-radius:6px; margin:2px; font-size:0.75rem; border:1px solid rgba(255,255,255,0.08);">
+                    <strong style="color:#00d2d3;">${e.qtd || 1}x</strong>
+                    <span>${e.tipo || 'Split'} ${e.marca || ''} ${e.btu || ''}</span>
+                    ${e.ambiente ? `<span style="color:var(--text-muted); font-size:0.70rem;">(${e.ambiente})</span>` : ''}
+                </div>`;
+            }).join('');
+
+            const cleanPhone = telCli.replace(/\D/g, '');
+            const whatsLink = cleanPhone ? `https://wa.me/55${cleanPhone}` : '#';
+
+            return `<tr style="cursor: pointer;" onclick="window.openModalHigienizacao('${item.id}')">
+                <td>
+                    <div style="font-weight: 700; color: #fff; font-size: 0.95rem; margin-bottom: 2px;">
+                        <i class="fa-solid fa-user" style="color: #00d2d3; margin-right: 5px; font-size: 0.8rem;"></i> ${nomeCli}
+                    </div>
+                    ${telCli ? `<div style="font-size: 0.8rem; color: #25D366; margin-bottom: 2px;" onclick="event.stopPropagation()">
+                        <a href="${whatsLink}" target="_blank" style="color:#25D366; text-decoration:none;"><i class="fa-brands fa-whatsapp"></i> ${telCli}</a>
+                    </div>` : ''}
+                    <div style="font-size: 0.75rem; color: var(--text-muted); max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${endCli}">
+                        <i class="fa-solid fa-location-dot" style="font-size: 0.7rem;"></i> ${endCli}
+                    </div>
+                </td>
+                <td>
+                    <div style="margin-bottom: 4px;">
+                        <span class="badge" style="background: rgba(0, 210, 211, 0.15); color: #00d2d3; border: 1px solid rgba(0, 210, 211, 0.3); font-size: 0.72rem; padding: 2px 7px;">
+                            ${totalAparelhos} aparelho${totalAparelhos > 1 ? 's' : ''}
+                        </span>
+                    </div>
+                    <div>${eqBadges || '<span style="color:var(--text-muted); font-size:0.75rem;">Nenhum aparelho especificado</span>'}</div>
+                </td>
+                <td>
+                    <div style="font-weight: 700; color: #fff; font-size: 0.9rem;">
+                        <i class="fa-solid fa-calendar-check" style="color: #2ecc71; margin-right: 4px;"></i> ${dataUltimaFmt}
+                    </div>
+                    <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 2px;">
+                        Periodicidade: ${item.periodicidade_meses || 6} meses
+                    </div>
+                </td>
+                <td>
+                    <div style="font-weight: 700; color: #fff; font-size: 0.9rem;">
+                        <i class="fa-solid fa-calendar-days" style="color: #f1c40f; margin-right: 4px;"></i> ${dataReagFmt}
+                    </div>
+                    <div style="font-size: 0.75rem; font-weight: 600; margin-top: 2px; color: ${st.code === 'VENCIDA' ? '#e74c3c' : (st.code === 'A_VENCER' ? '#f1c40f' : '#2ecc71')};">
+                        ${st.textDias}
+                    </div>
+                </td>
+                <td style="text-align: center;">
+                    <span class="badge" style="${st.badgeStyle}; font-size: 0.75rem; padding: 4px 10px; font-weight: 700; display: inline-flex; align-items: center; gap: 5px;">
+                        <i class="fa-solid ${st.icon}"></i> ${st.label}
+                    </span>
+                </td>
+                <td style="text-align: right;" onclick="event.stopPropagation()">
+                    <div style="display: flex; justify-content: flex-end; gap: 6px; align-items: center;">
+                        <button type="button" class="action-btn" style="background: #25D366; color: #fff; padding: 6px 10px; font-size: 0.8rem; border-radius: 6px;" title="Lembrar Cliente no WhatsApp" onclick="window.lembrarClienteWhatsApp('${item.id}')">
+                            <i class="fa-brands fa-whatsapp"></i>
+                        </button>
+                        <button type="button" class="action-btn" style="background: var(--accent-orange); color: #fff; padding: 6px 10px; font-size: 0.8rem; border-radius: 6px;" title="Gerar Orçamento / Proposta" onclick="window.gerarPropostaFromHigi('${item.id}')">
+                            <i class="fa-solid fa-file-invoice-dollar"></i>
+                        </button>
+                        <button type="button" class="action-btn" style="background: var(--surface-light); color: #fff; padding: 6px 10px; font-size: 0.8rem; border-radius: 6px;" title="Editar Registro" onclick="window.openModalHigienizacao('${item.id}')">
+                            <i class="fa-solid fa-pen-to-square"></i>
+                        </button>
+                        <button type="button" class="action-btn" style="background: rgba(231,76,60,0.2); color: #e74c3c; border: 1px solid rgba(231,76,60,0.3); padding: 6px 10px; font-size: 0.8rem; border-radius: 6px;" title="Excluir Registro" onclick="window.deleteHigienizacao('${item.id}')">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    </div>
+                </td>
+            </tr>`;
+        }).join('');
+    };
+
+    // 4. ABERTURA E PREENCHIMENTO DO MODAL
+    window.openModalHigienizacao = function (editId = null) {
+        // Popula o select de clientes cadastrados
+        const selCli = document.getElementById('higi-cliente');
+        if (selCli) {
+            const clientes = window.clientesCache || [];
+            selCli.innerHTML = '<option value="">Selecione o Cliente...</option>' +
+                clientes.map(c => `<option value="${c.id}">${c.nome_cliente}</option>`).join('');
+        }
+
+        const form = document.getElementById('form-higienizacao');
+        if (form) form.reset();
+
+        document.getElementById('higi-edit-id').value = editId || '';
+        window.currentHigiEquipamentos = [];
+
+        if (editId) {
+            // Modo Edição
+            const item = (window.higienizacoesCache || []).find(h => String(h.id) === String(editId));
+            if (item) {
+                if (selCli) selCli.value = item.cliente_id || '';
+                window.onHigiClienteChange();
+
+                if (item.endereco_obra) {
+                    const inptEnd = document.getElementById('higi-endereco-obra');
+                    if (inptEnd) inptEnd.value = item.endereco_obra;
+                    const chkMesmo = document.getElementById('higi-mesmo-endereco');
+                    if (chkMesmo) {
+                        chkMesmo.checked = item.mesmo_endereco !== false;
+                        window.toggleHigiEndereco(chkMesmo.checked);
+                    }
+                }
+
+                window.currentHigiEquipamentos = JSON.parse(JSON.stringify(item.equipamentos || []));
+
+                const inptUltima = document.getElementById('higi-data-ultima');
+                if (inptUltima) inptUltima.value = item.data_ultima || '';
+
+                const selPer = document.getElementById('higi-periodicidade');
+                if (selPer) selPer.value = String(item.periodicidade_meses || 6);
+
+                const inptProx = document.getElementById('higi-data-proxima');
+                if (inptProx) inptProx.value = item.data_reagendamento || '';
+
+                const inptVal = document.getElementById('higi-valor');
+                if (inptVal) inptVal.value = item.valor || '';
+
+                const inptObs = document.getElementById('higi-obs');
+                if (inptObs) inptObs.value = item.observacoes || '';
+
+                // Procedimentos
+                if (item.procedimentos) {
+                    if (document.getElementById('chk-proc-evap')) document.getElementById('chk-proc-evap').checked = !!item.procedimentos.evaporadora;
+                    if (document.getElementById('chk-proc-turbina')) document.getElementById('chk-proc-turbina').checked = !!item.procedimentos.turbina;
+                    if (document.getElementById('chk-proc-filtros')) document.getElementById('chk-proc-filtros').checked = !!item.procedimentos.filtros;
+                    if (document.getElementById('chk-proc-dreno')) document.getElementById('chk-proc-dreno').checked = !!item.procedimentos.dreno;
+                    if (document.getElementById('chk-proc-condensadora')) document.getElementById('chk-proc-condensadora').checked = !!item.procedimentos.condensadora;
+                    if (document.getElementById('chk-proc-gas')) document.getElementById('chk-proc-gas').checked = !!item.procedimentos.gas;
+                }
+            }
+        } else {
+            // Novo Registro: Preenche datas com padrão inteligente (hoje + 6 meses)
+            const hojeStr = new Date().toISOString().split('T')[0];
+            const inptUltima = document.getElementById('higi-data-ultima');
+            if (inptUltima) inptUltima.value = hojeStr;
+
+            const selPer = document.getElementById('higi-periodicidade');
+            if (selPer) selPer.value = '6';
+
+            window.calcHigiProximaData();
+        }
+
+        window.renderHigiItemsTable();
+        openModal('modal-higienizacao');
+    };
+
+    window.onHigiClienteChange = function () {
+        const selCli = document.getElementById('higi-cliente');
+        const inptTel = document.getElementById('higi-cliente-whatsapp');
+        const inptEnd = document.getElementById('higi-endereco-obra');
+        const chkMesmo = document.getElementById('higi-mesmo-endereco');
+
+        if (!selCli) return;
+        const cliId = selCli.value;
+        const cliObj = (window.clientesCache || []).find(c => String(c.id) === String(cliId));
+
+        if (inptTel) inptTel.value = cliObj?.whatsapp || '';
+        if (inptEnd && (!chkMesmo || chkMesmo.checked)) {
+            inptEnd.value = cliObj?.endereco_completo || '';
+        }
+    };
+
+    window.toggleHigiEndereco = function (isMesmo) {
+        const inptEnd = document.getElementById('higi-endereco-obra');
+        const selCli = document.getElementById('higi-cliente');
+        if (!inptEnd) return;
+
+        if (isMesmo) {
+            const cliId = selCli?.value;
+            const cliObj = (window.clientesCache || []).find(c => String(c.id) === String(cliId));
+            inptEnd.value = cliObj?.endereco_completo || '';
+            inptEnd.readOnly = true;
+        } else {
+            inptEnd.readOnly = false;
+            inptEnd.placeholder = 'Digite o endereço de instalação (ex: Condomínio, Filial, Loja)...';
+            inptEnd.focus();
+        }
+    };
+
+    // 5. CÁLCULO AUTOMÁTICO DA PRÓXIMA LIMPEZA (REAGENDAMENTO)
+    window.calcHigiProximaData = function () {
+        const inptUltima = document.getElementById('higi-data-ultima');
+        const selPer = document.getElementById('higi-periodicidade');
+        const inptProx = document.getElementById('higi-data-proxima');
+
+        if (!inptUltima || !selPer || !inptProx) return;
+        const valUltima = inptUltima.value;
+        if (!valUltima) return;
+
+        const per = selPer.value;
+        if (per === 'custom') return; // Arnaldo escolhe manualmente
+
+        const meses = parseInt(per) || 6;
+        const partes = valUltima.split('-');
+        const dt = new Date(parseInt(partes[0]), parseInt(partes[1]) - 1 + meses, parseInt(partes[2]));
+
+        const yyyy = dt.getFullYear();
+        const mm = String(dt.getMonth() + 1).padStart(2, '0');
+        const dd = String(dt.getDate()).padStart(2, '0');
+
+        inptProx.value = `${yyyy}-${mm}-${dd}`;
+    };
+
+    // 6. ADICIONAR E REMOVER APARELHOS
+    window.addHigiEquipamento = function () {
+        const tipo = document.getElementById('higi-item-tipo')?.value || 'Split High Wall';
+        const marca = document.getElementById('higi-item-marca')?.value || 'LG';
+        const btu = document.getElementById('higi-item-btu')?.value || '12.000 BTU';
+        const ambiente = document.getElementById('higi-item-ambiente')?.value || '';
+        const qtd = parseInt(document.getElementById('higi-item-qtd')?.value || 1) || 1;
+
+        window.currentHigiEquipamentos.push({
+            id: 'eq-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+            tipo,
+            marca,
+            btu,
+            ambiente,
+            qtd
+        });
+
+        // Limpa campo de ambiente e reseta quantidade
+        const inptAmb = document.getElementById('higi-item-ambiente');
+        if (inptAmb) { inptAmb.value = ''; inptAmb.focus(); }
+        const inptQtd = document.getElementById('higi-item-qtd');
+        if (inptQtd) inptQtd.value = '1';
+
+        window.renderHigiItemsTable();
+    };
+
+    window.removeHigiEquipamento = function (index) {
+        window.currentHigiEquipamentos.splice(index, 1);
+        window.renderHigiItemsTable();
+    };
+
+    window.renderHigiItemsTable = function () {
+        const tbody = document.querySelector('#table-higi-items tbody');
+        if (!tbody) return;
+
+        const items = window.currentHigiEquipamentos || [];
+        if (items.length === 0) {
+            tbody.innerHTML = `<tr>
+                <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 15px;">
+                    Nenhum aparelho adicionado ainda. Preencha acima e clique em "Adicionar".
+                </td>
+            </tr>`;
+            return;
+        }
+
+        tbody.innerHTML = items.map((it, idx) => {
+            return `<tr>
+                <td><strong>${it.tipo}</strong> <span style="color:#00d2d3;">${it.marca}</span></td>
+                <td><span class="badge" style="background:rgba(255,255,255,0.06); font-size:0.75rem;">${it.btu}</span></td>
+                <td>${it.ambiente || '<span style="color:var(--text-muted); font-size:0.75rem;">Geral</span>'}</td>
+                <td style="text-align: center; font-weight: 700;">${it.qtd}</td>
+                <td style="text-align: right;">
+                    <button type="button" style="background: transparent; color: var(--accent-red); border: none; cursor: pointer; padding: 4px;" onclick="window.removeHigiEquipamento(${idx})" title="Remover">
+                        <i class="fa-solid fa-trash"></i>
+                    </button>
+                </td>
+            </tr>`;
+        }).join('');
+    };
+
+    // 7. SALVAR HIGIENIZAÇÃO (SUPABASE + LOCALSTORAGE)
+    document.getElementById('form-higienizacao')?.addEventListener('submit', async function (e) {
+        e.preventDefault();
+
+        const editId = document.getElementById('higi-edit-id')?.value;
+        const cliId = document.getElementById('higi-cliente')?.value;
+        if (!cliId) {
+            alert('Por favor, selecione o cliente cadastrado.');
+            return;
+        }
+
+        if (!window.currentHigiEquipamentos || window.currentHigiEquipamentos.length === 0) {
+            alert('Por favor, adicione pelo menos um equipamento na lista de aparelhos.');
+            return;
+        }
+
+        const dataUltima = document.getElementById('higi-data-ultima')?.value;
+        const dataProxima = document.getElementById('higi-data-proxima')?.value;
+        if (!dataUltima || !dataProxima) {
+            alert('Por favor, informe a data da última limpeza e a data do reagendamento.');
+            return;
+        }
+
+        const cliObj = (window.clientesCache || []).find(c => String(c.id) === String(cliId));
+        const enderecoObra = document.getElementById('higi-endereco-obra')?.value || cliObj?.endereco_completo || '';
+        const mesmoEndereco = document.getElementById('higi-mesmo-endereco')?.checked ?? true;
+        const periodicidade = parseInt(document.getElementById('higi-periodicidade')?.value || 6) || 6;
+        const valor = parseFloat(document.getElementById('higi-valor')?.value) || 0;
+        const obs = document.getElementById('higi-obs')?.value || '';
+
+        const procedimentos = {
+            evaporadora: document.getElementById('chk-proc-evap')?.checked ?? true,
+            turbina: document.getElementById('chk-proc-turbina')?.checked ?? true,
+            filtros: document.getElementById('chk-proc-filtros')?.checked ?? true,
+            dreno: document.getElementById('chk-proc-dreno')?.checked ?? true,
+            condensadora: document.getElementById('chk-proc-condensadora')?.checked ?? true,
+            gas: document.getElementById('chk-proc-gas')?.checked ?? true
+        };
+
+        const payload = {
+            id: editId || ('higi-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7)),
+            cliente_id: cliId,
+            cliente_nome: cliObj?.nome_cliente || '',
+            cliente_whatsapp: cliObj?.whatsapp || '',
+            endereco_obra: enderecoObra,
+            mesmo_endereco: mesmoEndereco,
+            equipamentos: window.currentHigiEquipamentos,
+            data_ultima: dataUltima,
+            periodicidade_meses: periodicidade,
+            data_reagendamento: dataProxima,
+            procedimentos: procedimentos,
+            valor: valor,
+            observacoes: obs,
+            updated_at: new Date().toISOString()
+        };
+
+        triggerAutoSave('Salvando Higienização...');
+
+        try {
+            let list = window.higienizacoesCache || [];
+            if (editId) {
+                const idx = list.findIndex(h => String(h.id) === String(editId));
+                if (idx >= 0) list[idx] = payload;
+                else list.unshift(payload);
+            } else {
+                list.unshift(payload);
+            }
+
+            window.higienizacoesCache = list;
+            localStorage.setItem('higienizacoes_ar_cache', JSON.stringify(list));
+
+            // Salva no Supabase (sistema_configuracoes chave: higienizacoes_ar)
+            const { error: sbErr } = await supabase
+                .from('sistema_configuracoes')
+                .update({ valor: list })
+                .eq('chave', 'higienizacoes_ar');
+
+            if (sbErr) {
+                console.warn('[Higienizacao] Aviso ao persistir no Supabase:', sbErr.message);
+            }
+
+            triggerSaveSuccess(editId ? 'Higienização Atualizada!' : 'Higienização Salva com Sucesso!');
+            closeModal('modal-higienizacao');
+            window.updateHigiKPIs();
+            window.renderHigienizacoes();
+        } catch (err) {
+            console.error('[Higienizacao] Erro ao salvar:', err);
+            triggerSaveError('Erro ao salvar registro.');
+        }
+    });
+
+    // 8. EXCLUSÃO DE REGISTRO
+    window.deleteHigienizacao = async function (id) {
+        if (!confirm('Deseja realmente remover este registro de higienização?')) return;
+
+        triggerAutoSave('Removendo registro...');
+        let list = (window.higienizacoesCache || []).filter(h => String(h.id) !== String(id));
+        window.higienizacoesCache = list;
+        localStorage.setItem('higienizacoes_ar_cache', JSON.stringify(list));
+
+        try {
+            await supabase.from('sistema_configuracoes').update({ valor: list }).eq('chave', 'higienizacoes_ar');
+            triggerSaveSuccess('Registro Removido!');
+        } catch(e){}
+
+        window.updateHigiKPIs();
+        window.renderHigienizacoes();
+    };
+
+    // 9. DISPARO / LEMBRETE NO WHATSAPP
+    window.lembrarClienteWhatsApp = function (id) {
+        const item = (window.higienizacoesCache || []).find(h => String(h.id) === String(id));
+        if (!item) return;
+
+        const cliObj = (window.clientesCache || []).find(c => String(c.id) === String(item.cliente_id));
+        const telCli = cliObj?.whatsapp || item.cliente_whatsapp || '';
+        const nomeCli = cliObj?.nome_cliente || item.cliente_nome || 'Cliente';
+
+        const cleanPhone = telCli.replace(/\D/g, '');
+        if (!cleanPhone) {
+            alert(`O cliente ${nomeCli} não possui número de WhatsApp cadastrado.`);
+            return;
+        }
+
+        const dataUltimaFmt = item.data_ultima ? item.data_ultima.split('-').reverse().join('/') : '';
+        const dataReagFmt = item.data_reagendamento ? item.data_reagendamento.split('-').reverse().join('/') : '';
+
+        const eqsSummary = (item.equipamentos || []).map(e => `${e.qtd}x ${e.tipo} ${e.marca} ${e.btu} (${e.ambiente || 'Ambiente'})`).join(', ');
+
+        const mensagem = `Olá, *${nomeCli}*! Tudo bem?\n\n` +
+            `Aqui é da *Arnaldo Trentin Engenharia & Climatização* ❄️\n\n` +
+            `Constatamos em nosso cronograma que a última higienização preventiva dos seus aparelhos de ar condicionado:\n` +
+            `📌 *${eqsSummary || 'Aparelhos de Ar Condicionado'}*\n` +
+            `foi realizada em *${dataUltimaFmt}*.\n\n` +
+            `O prazo semestral recomendado para renovação da limpeza antibacteriana e manutenção preventiva vence em *${dataReagFmt}*.\n\n` +
+            `A limpeza periódica garante:\n` +
+            `✅ Economia de até 30% na conta de energia\n` +
+            `✅ Prevenção contra vazamentos de água e queima de compressor\n` +
+            `✅ Ar puro e livre de fungos, ácaros e bactérias para sua família ou empresa\n\n` +
+            `Gostaria de verificar nossa disponibilidade nesta semana para agendarmos o serviço?`;
+
+        const encodedMsg = encodeURIComponent(mensagem);
+        const urlWhats = `https://wa.me/55${cleanPhone}?text=${encodedMsg}`;
+        window.open(urlWhats, '_blank');
+    };
+
+    window.lembrarWhatsAppFromModal = function () {
+        const cliId = document.getElementById('higi-cliente')?.value;
+        if (!cliId) {
+            alert('Selecione um cliente primeiro.');
+            return;
+        }
+
+        const cliObj = (window.clientesCache || []).find(c => String(c.id) === String(cliId));
+        const telCli = cliObj?.whatsapp || document.getElementById('higi-cliente-whatsapp')?.value || '';
+        const nomeCli = cliObj?.nome_cliente || 'Cliente';
+
+        const cleanPhone = telCli.replace(/\D/g, '');
+        if (!cleanPhone) {
+            alert(`O cliente ${nomeCli} não possui telefone cadastrado.`);
+            return;
+        }
+
+        const dataUltima = document.getElementById('higi-data-ultima')?.value || '';
+        const dataProx = document.getElementById('higi-data-proxima')?.value || '';
+        const dataUltimaFmt = dataUltima ? dataUltima.split('-').reverse().join('/') : '';
+        const dataProxFmt = dataProx ? dataProx.split('-').reverse().join('/') : '';
+
+        const eqsSummary = (window.currentHigiEquipamentos || []).map(e => `${e.qtd}x ${e.tipo} ${e.marca} ${e.btu} (${e.ambiente || 'Ambiente'})`).join(', ');
+
+        const mensagem = `Olá, *${nomeCli}*! Tudo bem?\n\n` +
+            `Aqui é da *Arnaldo Trentin Engenharia & Climatização* ❄️\n\n` +
+            `Constatamos em nosso cronograma que a última higienização preventiva dos seus aparelhos de ar condicionado:\n` +
+            `📌 *${eqsSummary || 'Aparelhos de Ar Condicionado'}*\n` +
+            `foi realizada em *${dataUltimaFmt}*.\n\n` +
+            `O prazo semestral recomendado para renovação da limpeza antibacteriana e manutenção preventiva vence em *${dataProxFmt}*.\n\n` +
+            `Gostaria de agendarmos uma data nesta semana para realizar a manutenção?`;
+
+        window.open(`https://wa.me/55${cleanPhone}?text=${encodeURIComponent(mensagem)}`, '_blank');
+    };
+
+    // 10. GERAR PROPOSTA / ORÇAMENTO FORMAL A PARTIR DA HIGIENIZAÇÃO
+    window.gerarPropostaFromHigi = function (id) {
+        const item = (window.higienizacoesCache || []).find(h => String(h.id) === String(id));
+        if (!item) return;
+
+        closeModal('modal-higienizacao');
+        if (typeof openModal === 'function') openModal('modal-proposta');
+
+        const sCli = document.getElementById('prop-cliente');
+        if (sCli) {
+            sCli.value = item.cliente_id;
+            if (typeof window.onPropClienteChange === 'function') window.onPropClienteChange();
+        }
+
+        const inptEnd = document.getElementById('prop-endereco-obra');
+        if (inptEnd && item.endereco_obra) {
+            inptEnd.value = item.endereco_obra;
+            const chkEnd = document.getElementById('prop-mesmo-endereco');
+            if (chkEnd) chkEnd.checked = item.mesmo_endereco !== false;
+        }
+
+        const inptServico = document.getElementById('prop-servico');
+        const eqsCount = (item.equipamentos || []).length || 1;
+        if (inptServico) {
+            inptServico.value = `Higienização e Manutenção Preventiva de Ar Condicionado (${eqsCount} aparelho${eqsCount > 1 ? 's' : ''})`;
+        }
+
+        window.currentPropItems = [];
+        (item.equipamentos || []).forEach(e => {
+            const unitPrice = item.valor ? (parseFloat(item.valor) / eqsCount) : 250.00;
+            const q = parseInt(e.qtd || 1);
+            window.currentPropItems.push({
+                type: 'service',
+                name: `Higienização Antibacteriana - ${e.tipo} ${e.marca} ${e.btu} (${e.ambiente || 'Ambiente'})`,
+                qtd: q,
+                price: unitPrice,
+                subtotal: unitPrice * q
+            });
+        });
+
+        if (typeof window.renderPropItemsTable === 'function') window.renderPropItemsTable();
+        if (typeof window.calcPropTotal === 'function') window.calcPropTotal();
+
+        const inptObs = document.getElementById('prop-obs');
+        if (inptObs) {
+            inptObs.value = `Higienização semestral preventiva recomendada. ${item.observacoes || ''}`;
+        }
+    };
+
+    window.gerarPropostaFromHigiModal = function () {
+        const cliId = document.getElementById('higi-cliente')?.value;
+        if (!cliId) {
+            alert('Selecione um cliente primeiro.');
+            return;
+        }
+
+        const eqs = window.currentHigiEquipamentos || [];
+        if (eqs.length === 0) {
+            alert('Adicione pelo menos um equipamento.');
+            return;
+        }
+
+        const tempItem = {
+            cliente_id: cliId,
+            endereco_obra: document.getElementById('higi-endereco-obra')?.value || '',
+            mesmo_endereco: document.getElementById('higi-mesmo-endereco')?.checked ?? true,
+            equipamentos: eqs,
+            valor: parseFloat(document.getElementById('higi-valor')?.value) || 0,
+            observacoes: document.getElementById('higi-obs')?.value || ''
+        };
+
+        closeModal('modal-higienizacao');
+        openModal('modal-proposta');
+
+        const sCli = document.getElementById('prop-cliente');
+        if (sCli) {
+            sCli.value = tempItem.cliente_id;
+            if (typeof window.onPropClienteChange === 'function') window.onPropClienteChange();
+        }
+
+        const inptEnd = document.getElementById('prop-endereco-obra');
+        if (inptEnd && tempItem.endereco_obra) inptEnd.value = tempItem.endereco_obra;
+
+        const inptServico = document.getElementById('prop-servico');
+        const eqsCount = tempItem.equipamentos.length;
+        if (inptServico) {
+            inptServico.value = `Higienização Preventiva de Ar Condicionado (${eqsCount} aparelho${eqsCount > 1 ? 's' : ''})`;
+        }
+
+        window.currentPropItems = [];
+        tempItem.equipamentos.forEach(e => {
+            const unitPrice = tempItem.valor ? (tempItem.valor / eqsCount) : 250.00;
+            const q = parseInt(e.qtd || 1);
+            window.currentPropItems.push({
+                type: 'service',
+                name: `Higienização Completa - ${e.tipo} ${e.marca} ${e.btu} (${e.ambiente || 'Ambiente'})`,
+                qtd: q,
+                price: unitPrice,
+                subtotal: unitPrice * q
+            });
+        });
+
+        if (typeof window.renderPropItemsTable === 'function') window.renderPropItemsTable();
+        if (typeof window.calcPropTotal === 'function') window.calcPropTotal();
+    };
 
     // Analytics e Agenda Tech
     let graficos = {};
