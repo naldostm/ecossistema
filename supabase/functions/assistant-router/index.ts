@@ -2186,14 +2186,20 @@ ${clienteConversaContexto}
               
           if (pauseState && pauseState.length > 0) {
               const state = pauseState[0].content;
+              const pauseTime = new Date(pauseState[0].created_at || 0).getTime();
+              const isRecentlyPaused = (Date.now() - pauseTime) < (45 * 60 * 1000);
 
               if (state === 'BOT_IGNORAR' || state === 'AMIGO_IGNORAR' || state === 'LISTA_NEGRA' || state === 'SPAM_ROBO') {
                   console.log(`[LISTA NEGRA / SPAM] Mensagem registrada no chat, robô está permanentemente ignorado para ${remoteJid}.`);
                   return;
               }
               if (state === 'BOT_PAUSADO') {
-                  console.log(`[ATENDIMENTO HUMANO / PAUSADO] Mensagem registrada no chat, atendimento humano em andamento para ${remoteJid}. Robô em silêncio absoluto (aguardando /retomar, /ativo ou reativação no CRM).`);
-                  return;
+                  if (isRecentlyPaused) {
+                      console.log(`[ATENDIMENTO HUMANO / PAUSADO RECENTE] Mensagem registrada no chat, atendimento humano em andamento para ${remoteJid} (pausa há menos de 45min). Robô em silêncio.`);
+                      return;
+                  } else {
+                      console.log(`[PAUSA HUMANA EXPIRADA] Última pausa de ${remoteJid} ocorreu há mais de 45 minutos. Robô reassume o atendimento automaticamente.`);
+                  }
               }
           }
       }
