@@ -191,6 +191,122 @@ function extractActionBlocks(rawText: string | null | undefined): any[] {
   return actions;
 }
 
+function isArnaldoPhone(rawPhone: string): boolean {
+  if (!rawPhone) return false;
+  const digits = String(rawPhone).replace(/\D/g, '');
+  return digits === '18253369239' || 
+         digits.includes('8253369239') || 
+         digits.endsWith('3369239');
+}
+
+function isBotPhone(rawPhone: string): boolean {
+  if (!rawPhone) return false;
+  const digits = String(rawPhone).replace(/\D/g, '');
+  return digits.includes('947434455');
+}
+
+async function resolveClientContact(searchName: string): Promise<{ phone: string | null; name: string | null }> {
+  if (!searchName || searchName.trim().length < 2) return { phone: null, name: null };
+  const cleanTerm = searchName.trim().toLowerCase();
+
+  // 1. Busca prioritária em tarefas_arnaldo (onde ficam as solicitações de clientes como Fabiana)
+  try {
+    const { data: tarefas } = await supabase
+      .from('tarefas_arnaldo')
+      .select('cliente_nome, cliente_telefone')
+      .not('cliente_telefone', 'is', null)
+      .ilike('cliente_nome', `%${cleanTerm}%`)
+      .order('created_at', { ascending: false })
+      .limit(5);
+
+    if (tarefas && tarefas.length > 0) {
+      for (const t of tarefas) {
+        const p = String(t.cliente_telefone || '').replace(/\D/g, '');
+        if (p.length >= 8 && !isArnaldoPhone(p) && !isBotPhone(p)) {
+          const formatted = (!p.startsWith('55') && p.length <= 11) ? '55' + p : p;
+          return { phone: formatted, name: t.cliente_nome };
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[RESOLVE CLIENTE] Erro em tarefas_arnaldo:', e);
+  }
+
+  // 2. Busca na tabela de clientes
+  try {
+    const { data: cFound } = await supabase
+      .from('clientes')
+      .select('nome_cliente, whatsapp, telefone')
+      .ilike('nome_cliente', `%${cleanTerm}%`)
+      .limit(5);
+
+    if (cFound && cFound.length > 0) {
+      for (const c of cFound) {
+        const rawP = c.whatsapp || c.telefone || '';
+        const p = String(rawP).replace(/\D/g, '');
+        if (p.length >= 8 && !isArnaldoPhone(p) && !isBotPhone(p)) {
+          const formatted = (!p.startsWith('55') && p.length <= 11) ? '55' + p : p;
+          return { phone: formatted, name: c.nome_cliente };
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[RESOLVE CLIENTE] Erro em clientes:', e);
+  }
+
+  // 3. Busca em ordens_servico
+  try {
+    const { data: osFound } = await supabase
+      .from('ordens_servico')
+      .select('clientes(nome_cliente, whatsapp, telefone)')
+      .limit(20);
+
+    if (osFound && osFound.length > 0) {
+      for (const o of (osFound as any[])) {
+        if (o.clientes?.nome_cliente && o.clientes.nome_cliente.toLowerCase().includes(cleanTerm)) {
+          const rawP = o.clientes.whatsapp || o.clientes.telefone || '';
+          const p = String(rawP).replace(/\D/g, '');
+          if (p.length >= 8 && !isArnaldoPhone(p) && !isBotPhone(p)) {
+            const formatted = (!p.startsWith('55') && p.length <= 11) ? '55' + p : p;
+            return { phone: formatted, name: o.clientes.nome_cliente };
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[RESOLVE CLIENTE] Erro em ordens_servico:', e);
+  }
+
+  return { phone: null, name: null };
+}
+
+async function fetchClientConversationSnippet(clientPhone: string, limit = 8): Promise<string> {
+  if (!clientPhone) return "";
+  try {
+    const variants = getPhoneVariants(clientPhone);
+    const { data: msgs } = await supabase
+      .from('agent_memory')
+      .select('role, content, created_at')
+      .in('phone', variants)
+      .not('content', 'in', '("BOT_ATIVO","BOT_PAUSADO","BOT_IGNORAR","AMIGO_IGNORAR","LISTA_NEGRA")')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (!msgs || msgs.length === 0) return "Nenhuma conversa registrada com este número recentemente.";
+
+    const reversed = msgs.slice().reverse();
+    return reversed.map(m => {
+      const dt = new Date(m.created_at).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+      const speaker = m.role === 'model' ? 'Maria Cecília (IA/CRM)' : 'Cliente';
+      const cleanContent = cleanWhatsAppText(m.content).replace(/\[MSG_ID:[^\]]+\]\s*/g, '');
+      return `[${dt}] ${speaker}: ${cleanContent}`;
+    }).join('\n');
+  } catch (err) {
+    console.warn('[FETCH CLIENT SNIPPET] Erro:', err);
+    return "";
+  }
+}
+
 function buildTemporalContext(): { promptContext: string; saudacaoObrigatoria: string; isExpediente: boolean; spTimeStr: string } {
   // Horário oficial de Brasília (America/Sao_Paulo)
   const spNow = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
@@ -241,7 +357,7 @@ const SYSTEM_PROMPTS: Record<string, string> = {
   maria: `
 CONTEXTO CORPORATIVO
 Apresente-se cordialmente como Maria Cecília da Arnaldo Trentin Serviços (Engenharia, Climatização e Refrigeração). Diga apenas que você faz parte da equipe da empresa (NUNCA mencione cargos como "secretária executiva", "assistente de operações" ou títulos formais). Seja muito simpática, acolhedora, ágil, prestativa e natural.
-O responsável técnico e dono da empresa se chama Arnaldo Trentin. Se pedirem para falar com ele, proteja o tempo dele: diga de forma muito educada que ele está em atendimento/em campo no momento, mas afirme com segurança que você vai passar todas as informações e ele retornará em breve.
+O responsável técnico e dono da empresa se chama Arnaldo Trentin (WhatsApp executivo oficial: +1 825 336 9239). Se pedirem para falar com ele, proteja o tempo dele: diga de forma muito educada que ele está em atendimento/em campo no momento, mas afirme com segurança que você vai passar todas as informações e ele retornará em breve.
 
 [INJECT_TEMPORAL_CONTEXT]
 
@@ -546,9 +662,9 @@ DIRETRIZES DE RESPOSTA:
           try {
               res = await model.generateContent(prompt);
           } catch (modelErr) {
-              console.warn('[MODEL FALLBACK] Tentando gemini-1.5-flash...', modelErr);
+              console.warn('[MODEL FALLBACK] Tentando gemini-2.0-flash...', modelErr);
               model = genAI.getGenerativeModel({
-                  model: "gemini-1.5-flash",
+                  model: "gemini-2.0-flash",
                   generationConfig: { temperature: 0.7, maxOutputTokens: 2048 }
               });
               res = await model.generateContent(prompt);
@@ -632,6 +748,155 @@ DIRETRIZES DE RESPOSTA:
       } catch (err: any) {
           console.error('[ORDEM IA ERRO] Falha ao processar ordem da Maria:', err);
           return new Response(JSON.stringify({ error: String(err?.message || err) }), {
+              status: 500,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+      }
+  }
+
+  // === HANDLER: CHAT DA SECRETÁRIA VIRTUAL NO CRM (MARIA CECÍLIA EXECUTIVA UNIFICADA) ===
+  if (payload?.action === 'crm_chat_maria') {
+      const userText = String(payload.mensagem || payload.text || payload.prompt || payload.userText || '').trim();
+      const gestorPhone = '18253369239';
+
+      if (!userText) {
+          return new Response(JSON.stringify({ error: 'Mensagem vazia' }), {
+              status: 400,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+      }
+
+      try {
+          const temporal = buildTemporalContext();
+
+          // 1. Tarefas pendentes do gestor
+          let tarefasGestorTexto = "";
+          try {
+              const { data: pendTarefas } = await supabase
+                  .from('tarefas_arnaldo')
+                  .select('id, cliente_nome, cliente_telefone, titulo, descricao, prioridade, status, created_at')
+                  .in('status', ['pendente', 'em_andamento'])
+                  .order('created_at', { ascending: false })
+                  .limit(10);
+              if (pendTarefas && pendTarefas.length > 0) {
+                  tarefasGestorTexto = pendTarefas.map((t, idx) => 
+                      `${idx + 1}. [${(t.prioridade || 'ALTA').toUpperCase()}] ${t.cliente_nome || 'Cliente'} (${t.cliente_telefone || 'Sem tel'}): "${t.titulo}" - Detalhes: ${t.descricao || 'N/A'}`
+                  ).join('\n');
+              } else {
+                  tarefasGestorTexto = "Nenhuma tarefa pendente no momento.";
+              }
+          } catch {}
+
+          // 2. Propostas recentes
+          let propostasGestorTexto = "";
+          try {
+              const { data: recPropostas } = await supabase
+                  .from('propostas')
+                  .select('id, servico_tipo, valor_estimado, status, observacoes, data_proposta, clientes(nome_cliente)')
+                  .order('created_at', { ascending: false })
+                  .limit(5);
+              if (recPropostas && recPropostas.length > 0) {
+                  propostasGestorTexto = recPropostas.map((p: any, idx: number) => {
+                      const cliente = p.clientes?.nome_cliente || (p.servico_tipo?.includes('tubo') || p.servico_tipo?.includes('GN') ? 'Fabiana Arquiteta (Vila Madalena)' : 'Cliente');
+                      return `${idx + 1}. Proposta #${p.id.slice(0, 8)} | ${cliente} | Serviço: "${p.servico_tipo || 'Geral'}" | Total: R$ ${p.valor_estimado || 0} | Status: ${p.status || 'Pendente'}`;
+                  }).join('\n');
+              }
+          } catch {}
+
+          // 3. Busca histórico real do cliente caso citado
+          let clienteContexto = "";
+          try {
+              const lower = userText.toLowerCase();
+              const candidateNames: string[] = [];
+              ['fabiana', 'artur', 'rafael', 'paula', 'caio', 'katia', 'denise', 'maxwell', 'francisco', 'sergio'].forEach(n => {
+                  if (lower.includes(n)) candidateNames.push(n);
+              });
+              for (const cName of candidateNames) {
+                  const resolved = await resolveClientContact(cName);
+                  if (resolved.phone) {
+                      const snippet = await fetchClientConversationSnippet(resolved.phone, 8);
+                      if (snippet) {
+                          clienteContexto += `\n=== 💬 HISTÓRICO REAL DE CONVERSA COM O(A) CLIENTE: ${resolved.name || cName} (Tel: ${resolved.phone}) ===\n${snippet}\n========================================================\n`;
+                          break;
+                      }
+                  }
+              }
+          } catch {}
+
+          // 4. Histórico da conversa executiva com o Arnaldo (compartilhado com WhatsApp)
+          const { data: gestorHistory } = await supabase
+              .from('agent_memory')
+              .select('role, content')
+              .eq('phone', gestorPhone)
+              .not('content', 'in', '("BOT_ATIVO","BOT_PAUSADO","BOT_IGNORAR","AMIGO_IGNORAR","LISTA_NEGRA")')
+              .order('created_at', { ascending: false })
+              .limit(8);
+
+          let formattedHistory = "";
+          if (gestorHistory && gestorHistory.length > 0) {
+              formattedHistory = gestorHistory.slice().reverse().map(h => {
+                  const speaker = h.role === 'model' ? 'Maria Cecília' : 'Arnaldo';
+                  const clean = cleanWhatsAppText(h.content).replace(/^\[CRM\]\s*/, '');
+                  return `${speaker}: ${clean}`;
+              }).join('\n');
+          }
+
+          const crmPrompt = `
+Você é Maria Cecília, secretária executiva de alto nível e confiança de Arnaldo Trentin na Arnaldo Trentin Serviços.
+O Arnaldo está interagindo com você diretamente pelo painel do CRM Web (compartilhando a mesma mente e memória do WhatsApp).
+
+${temporal.promptContext}
+
+📋 TAREFAS ATUAIS DO ARNALDO NO SISTEMA:
+${tarefasGestorTexto}
+
+${propostasGestorTexto ? `📄 PROPOSTAS RECENTES:\n${propostasGestorTexto}\n` : ''}
+${clienteContexto}
+
+HISTÓRICO RECENTE COM O ARNALDO (WhatsApp e CRM):
+${formattedHistory || 'Início de conversa.'}
+
+DIRETRIZES:
+1. Trate o Arnaldo como o diretor executivo da empresa (WhatsApp executivo oficial cadastrado: +1 825 336 9239 / 18253369239): ágil, eficiente, prestativa e organizada.
+2. Você compartilha a mesma memória do WhatsApp. Se o Arnaldo perguntar sobre conversas com clientes (como Fabiana), consulte a seção HISTÓRICO REAL DE CONVERSA acima e confirme com clareza. NUNCA diga que uma mensagem não foi enviada por você se constar no histórico daquele cliente.
+3. Se ele pedir para gerar um texto, orçamento, introdução ou proposta, redija com primor e profissionalismo.
+4. Responda em português brasileiro de forma natural, sem prefixos técnicos.
+
+MENSAGEM DO ARNALDO NO CRM:
+"${userText}"
+`;
+
+          let model = genAI.getGenerativeModel({
+              model: "gemini-2.5-flash",
+              generationConfig: { temperature: 0.6, maxOutputTokens: 2048 }
+          });
+          let res;
+          try {
+              res = await model.generateContent(crmPrompt);
+          } catch (modelErr) {
+              console.warn('[CRM CHAT FALLBACK] Tentando gemini-2.0-flash...', modelErr);
+              model = genAI.getGenerativeModel({
+                  model: "gemini-2.0-flash",
+                  generationConfig: { temperature: 0.6, maxOutputTokens: 2048 }
+              });
+              res = await model.generateContent(crmPrompt);
+          }
+          const rawAnswer = res.response.text().trim();
+          const cleanAnswer = cleanWhatsAppText(rawAnswer);
+
+          // Salva na memória unificada do gestor
+          await supabase.from('agent_memory').insert([
+              { phone: gestorPhone, role: 'user', content: `[CRM] ${userText}` },
+              { phone: gestorPhone, role: 'model', content: cleanAnswer }
+          ]);
+
+          return new Response(JSON.stringify({ success: true, resposta: cleanAnswer }), {
+              status: 200,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+      } catch (crmErr: any) {
+          console.error('[CRM CHAT MARIA ERRO]:', crmErr);
+          return new Response(JSON.stringify({ error: String(crmErr?.message || crmErr) }), {
               status: 500,
               headers: { ...corsHeaders, 'Content-Type': 'application/json' }
           });
@@ -740,9 +1005,9 @@ DIRETRIZES OBRIGATÓRIAS:
               try {
                   res = await model.generateContent(prompt);
               } catch (modelErr) {
-                  console.warn('[MODEL FALLBACK] Tentando gemini-1.5-flash...', modelErr);
+                  console.warn('[MODEL FALLBACK] Tentando gemini-2.0-flash...', modelErr);
                   model = genAI.getGenerativeModel({
-                      model: "gemini-1.5-flash",
+                      model: "gemini-2.0-flash",
                       generationConfig: { temperature: 0.7, maxOutputTokens: 2048 }
                   });
                   res = await model.generateContent(prompt);
@@ -1124,7 +1389,7 @@ DIRETRIZES OBRIGATÓRIAS:
 
               if (recPropostas && recPropostas.length > 0) {
                   propostasGestorTexto = recPropostas.map((p: any, idx: number) => {
-                      const cliente = p.clientes?.nome_cliente || (p.servico_tipo?.includes('tubo') || p.servico_tipo?.includes('GN') ? 'Denise Zoldan / Fabiana (Vila Madalena)' : 'Cliente');
+                      const cliente = p.clientes?.nome_cliente || (p.servico_tipo?.includes('tubo') || p.servico_tipo?.includes('GN') ? 'Fabiana Arquiteta (Vila Madalena)' : 'Cliente');
                       const dataStr = p.data_proposta ? new Date(p.data_proposta).toLocaleDateString('pt-BR') : '';
                       const moStr = p.valor_maos_obra ? ` | Mão de obra: R$ ${p.valor_maos_obra}` : '';
                       const matValStr = p.valor_estimado_materiais ? ` | Materiais: R$ ${p.valor_estimado_materiais}` : '';
@@ -1223,21 +1488,51 @@ DIRETRIZES OBRIGATÓRIAS:
               console.warn("Erro ao buscar higienizacoes para gestor:", hErr);
           }
 
+          let clienteConversaContexto = "";
+          try {
+              const lower = (userMessage || '').toLowerCase();
+              const searchTerms = (userMessage || '').match(/[A-ZÁÉÍÓÚÂÊÔÃÕ][a-záéíóúâêôãõç]+/g) || [];
+              const ignoreWords = new Set(['Bom', 'Boa', 'Tarde', 'Noite', 'Dia', 'Olá', 'Oi', 'Arnaldo', 'Maria', 'Cecília', 'CRM', 'WhatsApp', 'Sim', 'Não', 'Por', 'Favor', 'Como', 'Você', 'Está', 'Para', 'Com', 'Uma', 'Mais']);
+              const candidateNames = searchTerms.filter(w => !ignoreWords.has(w) && w.length >= 3);
+
+              if (candidateNames.length === 0) {
+                  ['fabiana', 'artur', 'rafael', 'paula', 'caio', 'katia', 'denise', 'maxwell', 'francisco', 'sergio'].forEach(n => {
+                      if (lower.includes(n)) candidateNames.push(n);
+                  });
+              }
+
+              for (const cName of candidateNames) {
+                  const resolved = await resolveClientContact(cName);
+                  if (resolved.phone) {
+                      const snippet = await fetchClientConversationSnippet(resolved.phone, 8);
+                      if (snippet) {
+                          clienteConversaContexto += `
+=== 💬 HISTÓRICO REAL DE CONVERSA COM O(A) CLIENTE: ${resolved.name || cName} (Tel: ${resolved.phone}) ===
+(ATENÇÃO MARIA CECÍLIA: Este é o histórico REAL registrado no banco de dados pelo WhatsApp e pelo CRM.
+Se o Arnaldo perguntar sobre mensagens enviadas para este cliente ou o que foi conversado, CONSULTE ESTAS MENSAGENS e confirme com total clareza! NUNCA negue mensagens que constem aqui):
+${snippet}
+==================================================================================================
+`;
+                          break;
+                      }
+                  }
+              }
+          } catch (cHistErr) {
+              console.warn("Erro ao buscar histórico de cliente para gestor:", cHistErr);
+          }
+
           injectedContext = `
 === MODO EXECUTIVO ATIVADO: VOCÊ É A SECRETÁRIA EXECUTIVA DO DIRETOR ARNALDO TRENTIN! ===
 - O interlocutor atual é o próprio ARNALDO TRENTIN (dono e diretor executivo da empresa).
-- Chame-o de "Arnaldo" com postura de secretária executiva de alto nível: muito educada, ágil, altamente organizada, discreta, executiva e inteligente.
-- NUNCA se apresente como se ele fosse um cliente ("Olá, sou Maria Cecília..."). Ele já é seu chefe!
-- NUNCA tente vender nada para ele.
+- Número de WhatsApp oficial e cadastrado do Arnaldo: +1 825 336 9239 (18253369239).
+- Chame-o de "Arnaldo" com postura de secretária executiva de alto nível: respeitosa, proativa, eficiente, simpática e muito organizada.
 
-🛑 REGRAS DE OURO DA SECRETÁRIA EXECUTIVA:
-1. CONSULTA DE AGENDA, TAREFAS, PROPOSTAS E ORDENS DE SERVIÇO:
-   - Se o Arnaldo perguntar sobre a agenda, compromissos, tarefas pendentes, propostas de orçamento ou ordens de serviço (OS):
-     * SEU PAPEL É INFORMAR E ORGANIZAR COM CLAREZA E ORDEM EXECUTIVA!
-     * ⛔ É TERMINANTEMENTE PROIBIDO DISPARAR MENSAGENS PARA CLIENTES DE FORMA AUTÔNOMA AO APENAS RESPONDER SOBRE A AGENDA! NUNCA GERE A AÇÃO "DISPARAR_CONTATO_ATIVO" SEM ELE PEDIR!
-     * Se você achar conveniente contatar algum cliente, faça apenas uma SUGESTÃO educada e PEÇA A APROVAÇÃO dele primeiro:
-       "Arnaldo, na sua agenda temos pendência com a Denise Zoldan. Quer que eu mande mensagem para ela? Preparei esta sugestão: '...'".
-     * AGUARDE A CONFIRMAÇÃO DELE antes de disparar qualquer coisa!
+1. POSTURA E PROATIVIDADE EXECUTIVA:
+   - Trate o Arnaldo como o diretor da empresa: seja ágil, eficiente, prestativa e organizada.
+   - NUNCA dispare mensagens para clientes por conta própria sem que o Arnaldo tenha pedido ou autorizado expressamente!
+   - Se você achar conveniente contatar algum cliente, faça apenas uma SUGESTÃO educada e PEÇA A APROVAÇÃO dele primeiro:
+     "Arnaldo, na sua agenda temos pendência com o cliente [Nome]. Quer que eu mande mensagem para ele? Preparei esta sugestão: '...'".
+   - AGUARDE A CONFIRMAÇÃO DELE antes de disparar qualquer coisa!
 
 2. ENVIAR MENSAGENS PARA CLIENTES (ORDEM DIRETA OU CONFIRMAÇÃO DO ARNALDO):
    - Se o Arnaldo der ordem direta para falar com um cliente ou confirmar ("Peça a ela esses dados", "Pode enviar", "Sim", "Confirmado", "Manda para o Artur", "Avisa a Fabiana", "Cobra o cliente X"):
@@ -1279,7 +1574,7 @@ DIRETRIZES OBRIGATÓRIAS:
      }
 
 4. GUARDAR E ENCAMINHAR ARQUIVOS / ANEXOS:
-   - Se o Arnaldo mandar uma foto, lista de materiais, PDF de projeto ou orçamento e disser "Guarda isso na obra/proposta X" ou "Encaminha para a Denise/Fabiana":
+   - Se o Arnaldo mandar uma foto, lista de materiais, PDF de projeto ou orçamento e disser "Guarda isso na obra/proposta X" ou "Encaminha para a Fabiana / cliente":
      * Para ENCAMINHAR: use "DISPARAR_CONTATO_ATIVO" incluindo "arquivo_url" e "arquivo_nome" dos arquivos disponíveis abaixo!
      * Para GUARDAR/ANEXAR: use a ação "ANEXAR_ARQUIVO":
      {
@@ -1307,8 +1602,12 @@ DIRETRIZES OBRIGATÓRIAS:
      }
 
 7. RESOLUÇÃO DE CONTATOS:
-   - NUNCA invente números de telefone para clientes. Se não localizar o WhatsApp do cliente na lista abaixo ou no banco, pergunte gentilmente: "Arnaldo, qual é o WhatsApp de [Nome] para eu disparar?".
-   - Denise Zoldan: sócia da Fabiana Arquiteta na obra da Vila Madalena (WhatsApp: 5511996998344).
+   - NUNCA invente números de telefone para clientes. Se não localizar o WhatsApp do cliente na lista abaixo ou no banco de clientes, pergunte gentilmente: "Arnaldo, qual é o WhatsApp de [Nome] para eu disparar?".
+
+8. CONSULTA DE HISTÓRICO E MENSAGENS ENVIADAS A CLIENTES:
+   - Se o Arnaldo perguntar sobre conversas, mensagens enviadas pelo CRM ou pelo WhatsApp, ou pedir o histórico de algum cliente (ex: Fabiana):
+     * Consulte sempre a seção <HISTÓRICO REAL DE CONVERSA COM O(A) CLIENTE> injetada abaixo.
+     * Se constar uma mensagem enviada pela Maria Cecília (IA/CRM) no histórico daquele cliente, CONFIRME para o Arnaldo informando o teor da mensagem e horário. NUNCA diga que não foi você quem enviou se a mensagem estiver registrada no sistema! O CRM e o WhatsApp são um único ecossistema integrado.
 
 📋 TAREFAS ATUAIS DO ARNALDO NO SISTEMA:
 ${tarefasGestorTexto}
@@ -1327,6 +1626,8 @@ ${arquivosGestorTexto || 'Nenhum arquivo anexado recentemente.'}
 
 ❄️ CRONOGRAMA DE HIGIENIZAÇÃO DE AR CONDICIONADO & REAGENDAMENTOS:
 ${higienizacoesTexto || 'Nenhuma higienização cadastrada.'}
+
+${clienteConversaContexto}
 `;
       } else if (cleanPhone.includes("5511954598321") || cleanPhone.includes("11954598321") || last8Digits.includes("54598321")) {
           injectedContext = "Status deste Número: Este é o Sr Francisco (Técnico e Prestador de Serviço da Equipe). NUNCA tente vender nada ou citar regras de expediente. Seja muito gentil, acolha o recado/relatório e confirme que já passou para o Arnaldo.";
@@ -1833,7 +2134,9 @@ ${higienizacoesTexto || 'Nenhuma higienização cadastrada.'}
       const msgIdTag = messageId ? `[MSG_ID:${messageId}] ` : '';
       const validFirstName = sanitizePushName(pushName);
       const nameTag = validFirstName ? ` (${validFirstName})` : '';
-      let exactUserPayload = `${msgIdTag}Mensagem do Cliente${nameTag}: ${userMessage}`;
+      let exactUserPayload = isArnaldoAdmin 
+          ? `${msgIdTag}Arnaldo Trentin (Diretor/Gestor): ${userMessage}`
+          : `${msgIdTag}Mensagem do Cliente${nameTag}: ${userMessage}`;
       
       // NÃO gravar base64 da mídia no banco — polui a conversa e ocupa espaço
       if (mediaPart && mediaPart.inlineData) {
@@ -2108,9 +2411,9 @@ ${higienizacoesTexto || 'Nenhuma higienização cadastrada.'}
       try {
           completion = await chat.sendMessage(geminiInput);
       } catch (geminiErr: any) {
-          console.warn("[GEMINI FALLBACK] Falha no gemini-2.5-flash, tentando gemini-1.5-flash...", geminiErr?.message || geminiErr);
+          console.warn("[GEMINI FALLBACK] Falha no gemini-2.5-flash, tentando gemini-2.0-flash...", geminiErr?.message || geminiErr);
           const fallbackModel = genAI.getGenerativeModel({
-              model: "gemini-1.5-flash",
+              model: "gemini-2.0-flash",
               systemInstruction: finalSystemPrompt + `\n\nINSTRUÇÃO CRÍTICA DE COMPLETUDE:\n- NUNCA corte frases ou finalize respostas pela metade.\n- Seja acolhedora, precisa e conclua todos os raciocínios com naturalidade.`,
               generationConfig: {
                   temperature: 0.7,
@@ -2306,42 +2609,27 @@ ${higienizacoesTexto || 'Nenhuma higienização cadastrada.'}
               // 🚀 AÇÃO: DISPARAR CONTATO ATIVO (COM SUPORTE A TEXTO E ARQUIVOS/ANEXOS)
               else if (actionData.acao === "DISPARAR_CONTATO_ATIVO") {
                   let targetPhone = String(actionData.telefone_destino || '').replace(/\D/g, '');
-                  
-                  // Se não veio número direto mas veio nome do cliente, busca de forma precisa
+
+                  // Se veio o número do próprio Arnaldo ou do Bot, anula para nunca auto-disparar
+                  if (isArnaldoPhone(targetPhone) || isBotPhone(targetPhone)) {
+                      targetPhone = '';
+                  }
+
+                  // Se não veio número direto ou era inválido, busca de forma profunda por nome
                   if (!targetPhone || targetPhone.length < 8) {
                       const searchName = actionData.nome_cliente || '';
                       if (searchName) {
-                          try {
-                              // 1. Busca na tabela de clientes
-                              const { data: cFound } = await supabase.from('clientes')
-                                  .select('whatsapp')
-                                  .ilike('nome_cliente', `%${searchName}%`)
-                                  .limit(1);
-                              if (cFound && cFound.length > 0 && cFound[0].whatsapp) {
-                                  targetPhone = cFound[0].whatsapp.replace(/\D/g, '');
-                              } else if (searchName.toLowerCase().includes('denise')) {
-                                  targetPhone = '5511996998344';
-                              } else {
-                                  // 2. Busca na memória recente da conversa com o Arnaldo se ele citou um número
-                                  const { data: recentArnaldoMsgs } = await supabase
-                                      .from('agent_memory')
-                                      .select('content')
-                                      .eq('phone', remoteJid)
-                                      .order('created_at', { ascending: false })
-                                      .limit(10);
-                                  
-                                  for (const rm of (recentArnaldoMsgs || [])) {
-                                      const matchPhone = (rm.content || '').match(/(?:55\s*)?(?:[1-9]{2})\s*9?[0-9]{8}/);
-                                      if (matchPhone) {
-                                          targetPhone = matchPhone[0].replace(/\D/g, '');
-                                          break;
-                                      }
-                                  }
-                              }
-                          } catch (fErr) {
-                              console.warn("[BUSCA CONTATO] Erro ao buscar telefone por nome:", fErr);
+                          const resolved = await resolveClientContact(searchName);
+                          if (resolved.phone) {
+                              targetPhone = resolved.phone;
+                              if (!actionData.nome_cliente && resolved.name) actionData.nome_cliente = resolved.name;
                           }
                       }
+                  }
+
+                  // Segunda blindagem: se o número resolvido ainda for do Arnaldo ou do Bot, anula
+                  if (isArnaldoPhone(targetPhone) || isBotPhone(targetPhone)) {
+                      targetPhone = '';
                   }
 
                   if (targetPhone && targetPhone.length >= 8) {
@@ -2586,7 +2874,7 @@ ${higienizacoesTexto || 'Nenhuma higienização cadastrada.'}
                                   foundPropId = gnProps[0].id;
                                   propService = gnProps[0].servico_tipo;
                                   propCurrentVal = gnProps[0].valor_estimado || 0;
-                                  propClient = 'Denise Zoldan / Fabiana (Vila Madalena)';
+                                  propClient = 'Fabiana Arquiteta (Vila Madalena)';
                               }
                           }
                       }

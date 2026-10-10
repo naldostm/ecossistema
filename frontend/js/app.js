@@ -3088,7 +3088,25 @@ ${materiaisTxt}${extrasTxt}
         console.log(`[Agent Engine] Connect: ${agentName} | CorrID: ${correlationId}`);
 
         let fetchPromise;
-        if (N8N_MASTER_WEBHOOK.includes('[SEU_N8N_URL]')) {
+        if (agentName === 'Maria Cecília') {
+            // Modo Unificado: Maria Cecília Executiva via Supabase Edge Router (mesma mente e memória do WhatsApp)
+            const supa = getSupa();
+            fetchPromise = supa.functions.invoke('assistant-router', {
+                body: {
+                    action: 'crm_chat_maria',
+                    mensagem: payload.text || payload.prompt || '',
+                    gestor_telefone: '18253369239',
+                    gestor_nome: 'Arnaldo Trentin'
+                }
+            }).then(res => {
+                if (res.error) throw new Error(res.error.message || JSON.stringify(res.error));
+                return {
+                    success: true,
+                    dados: res.data?.resposta || 'Solicitação processada com sucesso.',
+                    correlationId
+                };
+            });
+        } else if (N8N_MASTER_WEBHOOK.includes('[SEU_N8N_URL]')) {
             // Modo Simulação (Para testes UI antes de ligar a URL oficial)
             fetchPromise = new Promise((resolve) => {
                 const delay = Math.random() > 0.5 ? 1200 : 4500;
