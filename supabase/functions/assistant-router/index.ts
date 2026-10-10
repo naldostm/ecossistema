@@ -978,14 +978,19 @@ DIRETRIZES OBRIGATÓRIAS:
       let hasMedia = false;
       let hasAudio = false;
       let hasImage = false;
+      let hasDocument = false;
+      let docFileName = "";
       let directUrl = "";
 
       if (isFileDownloaded) {
           remoteJid = payload?.event?.Sender;
-          msgType = payload?.event?.MimeType?.includes('audio') ? "AudioMessage" : "ImageMessage";
+          hasAudio = Boolean(payload?.event?.MimeType?.includes('audio'));
+          hasImage = Boolean(payload?.event?.MimeType?.includes('image'));
+          hasDocument = Boolean(payload?.event?.MimeType?.includes('pdf') || payload?.event?.MimeType?.includes('document') || payload?.event?.MimeType?.includes('application'));
+          msgType = hasAudio ? "AudioMessage" : (hasDocument ? "DocumentMessage" : "ImageMessage");
           messageId = payload?.event?.MessageIDs?.[0] || "";
+          docFileName = payload?.event?.FileName || payload?.event?.fileName || "";
           hasMedia = true;
-          hasAudio = payload?.event?.MimeType?.includes('audio');
           directUrl = payload?.event?.FileURL;
       } else {
           msgNode = payload?.data?.message || payload?.message || {};
@@ -1001,8 +1006,8 @@ DIRETRIZES OBRIGATÓRIAS:
           hasAudio = msgType.toLowerCase().includes('audio') || msgType === 'ptt' || msgNode?.mediaType === 'ptt' || msgNode?.audioMessage || contentMime.includes('audio');
           hasImage = msgType.toLowerCase().includes('image') || msgType.toLowerCase().includes('video') || msgNode?.imageMessage || msgNode?.videoMessage || contentMime.includes('image');
           
-          const docFileName = msgNode?.documentMessage?.fileName || msgNode?.documentWithCaptionMessage?.message?.documentMessage?.fileName || "";
-          const hasDocument = msgType.toLowerCase().includes('document') || Boolean(msgNode?.documentMessage) || Boolean(msgNode?.documentWithCaptionMessage) || contentMime.includes('pdf') || contentMime.includes('application');
+          docFileName = msgNode?.documentMessage?.fileName || msgNode?.documentWithCaptionMessage?.message?.documentMessage?.fileName || "";
+          hasDocument = msgType.toLowerCase().includes('document') || Boolean(msgNode?.documentMessage) || Boolean(msgNode?.documentWithCaptionMessage) || contentMime.includes('pdf') || contentMime.includes('application');
           const hasLocation = msgType.toLowerCase().includes('location') || Boolean(msgNode?.locationMessage);
           const hasContact = msgType.toLowerCase().includes('contact') || Boolean(msgNode?.contactMessage) || Boolean(msgNode?.contactsArrayMessage);
 
@@ -1438,11 +1443,37 @@ ${higienizacoesTexto || 'Nenhuma higienização cadastrada.'}
       const phoneVariants = allPhoneVariants;
 
 
-      if (isMessageFromMe || sentByApi) {
-          console.log(`[FROM ME] Mensagem detectada. isFromMe: ${isMessageFromMe}, sentByApi: ${sentByApi}. JID: ${remoteJid}.`);
+      // 1. ECHOS DE MENSAGENS ENVIADAS PELA PRÓPRIA API (DISPAROS DA MARIA OU DO CRM)
+      if (sentByApi) {
+          console.log(`[ECHO API] Mensagem enviada pela própria API para ${remoteJid}. Ignorando echo.`);
+          return;
+      }
+
+      // 2. Se for mensagem de Arnaldo gestor com flag fromMe (echo da própria Maria ou Arnaldo no Web)
+      if (isArnaldoAdmin && isMessageFromMe) {
+          const rawMsgClean = userMessage.trim();
+          const sixtySecsAgo = new Date(Date.now() - 60000).toISOString();
+          const { data: recentMariaMsgs } = await supabase
+              .from('agent_memory')
+              .select('id, content')
+              .eq('phone', remoteJid)
+              .eq('role', 'model')
+              .gte('created_at', sixtySecsAgo)
+              .limit(5);
+
+          const isEchoFromMaria = (recentMariaMsgs || []).some(m => (m.content || '').trim() === rawMsgClean);
+          if (isEchoFromMaria) {
+              console.log(`[ECHO MARIA GESTOR] Echo da mensagem da própria Maria para Arnaldo ignorado.`);
+              return;
+          }
+          // Se Arnaldo digitou no WhatsApp Web para a Maria, deixa prosseguir para ela responder!
+      }
+
+      // 3. Se for cliente e mensagem foi digitada manualmente pelo humano diretamente no WhatsApp (não-API)
+      if (isMessageFromMe && !isArnaldoAdmin) {
+          console.log(`[FROM ME] Intervenção humana detectada no cliente. JID: ${remoteJid}.`);
           
-          // Se for uma mensagem digitada manualmente pelo humano diretamente no WhatsApp (não-API)
-          if (isMessageFromMe && !sentByApi && userMessage && userMessage.trim().length > 0) {
+          if (userMessage && userMessage.trim().length > 0) {
               const myText = userMessage.trim().toLowerCase();
               if (myText === '/ignorar' || myText === '/amigo' || myText === '/blacklist') {
                   await supabase.from('agent_memory').insert({ phone: remoteJid, role: 'user', content: 'BOT_IGNORAR' });
@@ -1466,7 +1497,6 @@ ${higienizacoesTexto || 'Nenhuma higienização cadastrada.'}
                                     userMessage.includes('caso deseje facilitar o atendimento');
 
               // 1. DEDUPLICAÇÃO DE ENVIO MANUAL VIA CRM:
-              // Se a mensagem já foi gravada pelo CRM nos últimos 60 segundos, ignora para não duplicar!
               const rawMsgClean = userMessage.replace(/^👨‍🔧\s*\*Arnaldo Trentin:\*\s*/i, '').trim();
               const sixtySecsAgo = new Date(Date.now() - 60000).toISOString();
               const { data: recentModelMsgs } = await supabase
@@ -2074,7 +2104,22 @@ ${higienizacoesTexto || 'Nenhuma higienização cadastrada.'}
           ? [{ text: promptToSend }, mediaPart] 
           : promptToSend;
 
-      const completion = await chat.sendMessage(geminiInput);
+      let completion: any;
+      try {
+          completion = await chat.sendMessage(geminiInput);
+      } catch (geminiErr: any) {
+          console.warn("[GEMINI FALLBACK] Falha no gemini-2.5-flash, tentando gemini-1.5-flash...", geminiErr?.message || geminiErr);
+          const fallbackModel = genAI.getGenerativeModel({
+              model: "gemini-1.5-flash",
+              systemInstruction: finalSystemPrompt + `\n\nINSTRUÇÃO CRÍTICA DE COMPLETUDE:\n- NUNCA corte frases ou finalize respostas pela metade.\n- Seja acolhedora, precisa e conclua todos os raciocínios com naturalidade.`,
+              generationConfig: {
+                  temperature: 0.7,
+                  maxOutputTokens: 3072, 
+              }
+          });
+          const fallbackChat = fallbackModel.startChat({ history: chatHistory });
+          completion = await fallbackChat.sendMessage(geminiInput);
+      }
       let aiResponse = completion.response.text();
       let whatsAppText = "";
 
@@ -2737,8 +2782,15 @@ ${higienizacoesTexto || 'Nenhuma higienização cadastrada.'}
           console.log(`[UAZAPI RETORNO] Status: ${uazapiResponse.status}`);
       }
 
-    } catch (err) {
+    } catch (err: any) {
       console.error("Erro no processamento:", err);
+      try {
+        await supabase.from('agent_memory').insert({ 
+          phone: 'DEBUG_ERROR', 
+          role: 'user', 
+          content: `[CATCH_ERROR]: ${err?.stack || err?.message || String(err)}` 
+        });
+      } catch(_) {}
     }
   };
 
