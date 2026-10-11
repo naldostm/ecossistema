@@ -603,18 +603,21 @@
                     </div>
 
                     <!-- ABAS DE NAVEGAÇÃO -->
-                    <div style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;" id="mensagens-nav-tabs">
+                    <div style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px; flex-wrap: wrap;" id="mensagens-nav-tabs">
                         <button class="action-btn tab-btn-msg active" id="btn-tab-live" onclick="window.switchMensagensTab('live')" style="background: rgba(37,211,102,0.18); color: #25D366; border: 1px solid rgba(37,211,102,0.4); padding: 10px 18px; font-weight: 700; border-radius: 8px; font-size: 0.85rem;">
                             <i class="fa-solid fa-comments"></i> Conversas ao Vivo
+                        </button>
+                        <button class="action-btn tab-btn-msg" id="btn-tab-pausas" onclick="window.switchMensagensTab('pausas')" style="background: var(--surface-light); color: var(--text-primary); border: 1px solid var(--border-color); padding: 10px 18px; font-weight: 700; border-radius: 8px; font-size: 0.85rem;">
+                            <i class="fa-solid fa-pause"></i> Pausas Temporárias (<span id="count-pausas">0</span>)
+                        </button>
+                        <button class="action-btn tab-btn-msg" id="btn-tab-blacklist" onclick="window.switchMensagensTab('blacklist')" style="background: var(--surface-light); color: var(--text-primary); border: 1px solid var(--border-color); padding: 10px 18px; font-weight: 700; border-radius: 8px; font-size: 0.85rem;">
+                            <i class="fa-solid fa-user-shield"></i> Amigos & Colegas — Permanente (<span id="count-blacklist">0</span>)
                         </button>
                         <button class="action-btn tab-btn-msg" id="btn-tab-campanhas" onclick="window.switchMensagensTab('campanhas')" style="background: var(--surface-light); color: var(--text-primary); border: 1px solid var(--border-color); padding: 10px 18px; font-weight: 700; border-radius: 8px; font-size: 0.85rem;">
                             <i class="fa-solid fa-bullhorn"></i> Campanhas & Prospecção
                         </button>
                         <button class="action-btn tab-btn-msg" id="btn-tab-agenda" onclick="window.switchMensagensTab('agenda')" style="background: var(--surface-light); color: var(--text-primary); border: 1px solid var(--border-color); padding: 10px 18px; font-weight: 700; border-radius: 8px; font-size: 0.85rem;">
                             <i class="fa-solid fa-calendar-check"></i> Agenda da Maria (<span id="count-agenda">0</span>)
-                        </button>
-                        <button class="action-btn tab-btn-msg" id="btn-tab-blacklist" onclick="window.switchMensagensTab('blacklist')" style="background: var(--surface-light); color: var(--text-primary); border: 1px solid var(--border-color); padding: 10px 18px; font-weight: 700; border-radius: 8px; font-size: 0.85rem;">
-                            <i class="fa-solid fa-user-shield"></i> Lista Negra / Amigos (<span id="count-blacklist">0</span>)
                         </button>
                     </div>
 
@@ -658,11 +661,11 @@
                                         <span id="live-chat-status-badge" style="font-size: 0.75rem; padding: 4px 10px; border-radius: 20px; font-weight: 700; background: rgba(37,211,102,0.15); color: #25D366; border: 1px solid rgba(37,211,102,0.3);">
                                             🤖 Maria Cecília Ativa
                                         </span>
-                                        <button class="action-btn" id="btn-toggle-pause-chat" onclick="window.toggleCurrentChatPause()" style="background: var(--surface-light); font-size: 0.8rem; padding: 6px 12px; border-radius: 6px;" title="Pausar ou reativar IA para este cliente">
-                                            <i class="fa-solid fa-pause"></i> Pausar IA
+                                        <button class="action-btn" id="btn-toggle-pause-chat" onclick="window.toggleCurrentChatPause()" style="background: var(--surface-light); font-size: 0.8rem; padding: 6px 12px; border-radius: 6px;" title="Pausar IA por 45 minutos para atendimento humano">
+                                            <i class="fa-solid fa-pause"></i> Pausar IA (45m)
                                         </button>
-                                        <button class="action-btn" id="btn-toggle-blacklist-chat" onclick="window.toggleCurrentChatBlacklist()" style="background: rgba(231,76,60,0.15); color: #e74c3c; border: 1px solid rgba(231,76,60,0.3); font-size: 0.8rem; padding: 6px 12px; border-radius: 6px;" title="Marcar como amigo para a IA nunca falar">
-                                            <i class="fa-solid fa-ban"></i> Ignorar IA
+                                        <button class="action-btn" id="btn-toggle-blacklist-chat" onclick="window.toggleCurrentChatBlacklist()" style="background: rgba(155,89,182,0.15); color: #9b59b6; border: 1px solid rgba(155,89,182,0.3); font-size: 0.8rem; padding: 6px 12px; border-radius: 6px;" title="Bloquear permanentemente como amigo ou colega">
+                                            <i class="fa-solid fa-user-shield"></i> Mover p/ Amigos
                                         </button>
                                     </div>
                                 </div>
@@ -1015,39 +1018,78 @@
                         </div>
                     </div>
 
-                    <!-- PANE 3: LISTA NEGRA / CONTATOS PESSOAIS & AMIGOS -->
+                    <!-- PANE 2.8: CLIENTES EM PAUSA TEMPORÁRIA (ATENDIMENTO HUMANO) -->
+                    <div id="pane-mensagens-pausas" class="msg-subpane" style="display: none;">
+                        <div class="glass-panel" style="padding: 20px; margin-bottom: 20px; border-left: 4px solid #f39c12; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px;">
+                            <div>
+                                <h3 style="color: #f39c12; font-size: 1.15rem; margin-bottom: 6px; font-weight: 800;">
+                                    <i class="fa-solid fa-pause"></i> Clientes em Pausa Temporária (Atendimento Humano)
+                                </h3>
+                                <p style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.5; margin: 0;">
+                                    Estes são clientes comerciais com atendimento manual em andamento. A Maria Cecília aguarda <strong>45 minutos</strong> após a sua última mensagem antes de voltar a responder automaticamente.
+                                </p>
+                            </div>
+                            <button class="action-btn" onclick="window.reativarTodasPausas()" style="background: rgba(37,211,102,0.2); color: #25D366; border: 1px solid rgba(37,211,102,0.4); padding: 8px 16px; font-weight: 700; border-radius: 8px; font-size: 0.85rem;">
+                                <i class="fa-solid fa-play"></i> Reativar Todas as Pausas Agora
+                            </button>
+                        </div>
+
+                        <!-- TABELA DE CLIENTES PAUSADOS -->
+                        <div class="glass-panel table-container">
+                            <div class="widget-header">
+                                <h2><i class="fa-solid fa-clock"></i> Clientes Pausados no Momento</h2>
+                                <button class="action-btn" onclick="window.loadPausasTemporariasTable()" style="background: var(--surface-light); font-size: 0.8rem;"><i class="fa-solid fa-rotate"></i></button>
+                            </div>
+                            <table class="data-table" id="table-pausas-temporarias">
+                                <thead>
+                                    <tr>
+                                        <th>Telefone</th>
+                                        <th>Cliente</th>
+                                        <th>Início da Pausa</th>
+                                        <th>Tempo Restante (45 min)</th>
+                                        <th>Ações</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr><td colspan="5" style="text-align:center; padding:20px; color:var(--text-muted);"><i class="fa-solid fa-spinner fa-spin"></i> Carregando pausas...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- PANE 3: AMIGOS, COLEGAS & CONTATOS PESSOAIS (BLOQUEIO PERMANENTE) -->
                     <div id="pane-mensagens-blacklist" class="msg-subpane" style="display: none;">
-                        <div class="glass-panel" style="padding: 20px; margin-bottom: 20px; border-left: 4px solid #e74c3c;">
-                            <h3 style="color: #e74c3c; font-size: 1.1rem; margin-bottom: 8px;">
-                                <i class="fa-solid fa-shield-halved"></i> Proteção de Contatos Pessoais e Amigos
+                        <div class="glass-panel" style="padding: 20px; margin-bottom: 20px; border-left: 4px solid #9b59b6;">
+                            <h3 style="color: #9b59b6; font-size: 1.1rem; margin-bottom: 8px; font-weight: 800;">
+                                <i class="fa-solid fa-user-shield"></i> Amigos, Colegas & Contatos Pessoais (Bloqueio Permanente)
                             </h3>
                             <p style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.5;">
-                                A Maria Cecília <strong>nunca enviará mensagens e nem responderá</strong> para os números cadastrados nesta lista. Seus amigos, familiares e contatos pessoais podem conversar com você normalmente pelo seu WhatsApp nativo sem nenhuma interferência da IA.
+                                A Maria Cecília <strong>NUNCA responderá comercialmente</strong> para os números cadastrados nesta lista. Este bloqueio é <strong>permanente</strong>, nunca expira e não é afetado por pausas temporárias. Seus amigos e colegas podem conversar normalmente com você pelo seu WhatsApp nativo sem qualquer interferência da IA.
                             </p>
                         </div>
 
-                        <!-- CADASTRO RÁPIDO NA LISTA NEGRA -->
+                        <!-- CADASTRO RÁPIDO DE AMIGO / COLEGA PERMANENTE -->
                         <div class="glass-panel" style="padding: 20px; margin-bottom: 20px;">
                             <h4 style="font-size: 0.95rem; font-weight: 700; color: var(--text-primary); margin-bottom: 14px;">
-                                <i class="fa-solid fa-user-plus"></i> Adicionar Número à Lista Negra
+                                <i class="fa-solid fa-user-plus"></i> Adicionar Amigo ou Colega (Bloqueio Permanente)
                             </h4>
                             <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-                                <input type="text" id="blacklist-input-nome" class="modal-input" placeholder="Nome do amigo ou familiar (Ex: Marcos Amigo)" style="flex: 1; min-width: 200px; color: #000; background: #fff; border: 1px solid var(--border-color); padding: 10px 12px; border-radius: 8px; font-size: 0.85rem;">
+                                <input type="text" id="blacklist-input-nome" class="modal-input" placeholder="Nome do amigo ou colega (Ex: Carlos Amigo)" style="flex: 1; min-width: 200px; color: #000; background: #fff; border: 1px solid var(--border-color); padding: 10px 12px; border-radius: 8px; font-size: 0.85rem;">
                                 <input type="text" id="blacklist-input-phone" class="modal-input" placeholder="Telefone WhatsApp (Ex: 11999999999)" style="flex: 1; min-width: 200px; color: #000; background: #fff; border: 1px solid var(--border-color); padding: 10px 12px; border-radius: 8px; font-size: 0.85rem;">
-                                <button class="action-btn" onclick="window.addContactToBlacklist()" style="background: #e74c3c; color: #fff; font-weight: 700; padding: 0 24px; height: 42px; border-radius: 8px;">
-                                    <i class="fa-solid fa-ban"></i> Bloquear para IA
+                                <button class="action-btn" onclick="window.addContactToBlacklist()" style="background: #9b59b6; color: #fff; font-weight: 700; padding: 0 24px; height: 42px; border-radius: 8px;">
+                                    <i class="fa-solid fa-shield-halved"></i> Salvar como Amigo Permanente
                                 </button>
                             </div>
                         </div>
 
-                        <!-- TABELA DE NÚMEROS BLOQUEADOS -->
+                        <!-- TABELA DE AMIGOS E COLEGAS BLOQUEADOS -->
                         <div class="glass-panel table-container">
                             <div class="widget-header">
-                                <h2><i class="fa-solid fa-users-slash"></i> Contatos Bloqueados da IA</h2>
+                                <h2><i class="fa-solid fa-users-slash"></i> Contatos Pessoais / Amigos Protegidos</h2>
                                 <button class="action-btn" onclick="window.loadBlacklistTable()" style="background: var(--surface-light); font-size: 0.8rem;"><i class="fa-solid fa-rotate"></i></button>
                             </div>
                             <table class="data-table" id="table-blacklist-contacts">
-                                <thead><tr><th>Telefone</th><th>Identificação</th><th>Data de Bloqueio</th><th>Ações</th></tr></thead>
+                                <thead><tr><th>Telefone</th><th>Identificação</th><th>Tipo de Bloqueio</th><th>Data</th><th>Ações</th></tr></thead>
                                 <tbody><!-- Dinâmico --></tbody>
                             </table>
                         </div>

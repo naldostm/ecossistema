@@ -8331,6 +8331,8 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
 
         if (tabName === 'live') {
             window.loadLiveConversations();
+        } else if (tabName === 'pausas') {
+            window.loadPausasTemporariasTable();
         } else if (tabName === 'campanhas') {
             loadCampaignClients();
             loadCampaignHistory();
@@ -8417,12 +8419,15 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
 
             // Determinar o status de cada conversa baseado no comando mais recente
             let blacklistCount = 0;
+            let pausasCount = 0;
+            const now = Date.now();
             const convList = Object.values(grouped).map(conv => {
                 // Procurar último comando de status
                 const statusCmd = conv.messages.find(m => 
                     m.content === 'BOT_IGNORAR' || 
                     m.content === 'AMIGO_IGNORAR' || 
                     m.content === 'LISTA_NEGRA' || 
+                    m.content === 'AMIGO_PERMANENTE' ||
                     m.content === 'BOT_PAUSADO' || 
                     m.content === 'BOT_ATIVO' ||
                     m.content === 'SPAM_ROBO'
@@ -8431,12 +8436,20 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
                 if (statusCmd) {
                     if (statusCmd.content === 'SPAM_ROBO') {
                         conv.status = 'spam';
-                    } else if (statusCmd.content === 'BOT_IGNORAR' || statusCmd.content === 'AMIGO_IGNORAR' || statusCmd.content === 'LISTA_NEGRA') {
-                        conv.status = 'ignorado';
+                    } else if (statusCmd.content === 'BOT_IGNORAR' || statusCmd.content === 'AMIGO_IGNORAR' || statusCmd.content === 'LISTA_NEGRA' || statusCmd.content === 'AMIGO_PERMANENTE') {
+                        conv.status = 'amigo';
                         blacklistCount++;
                     } else if (statusCmd.content === 'BOT_PAUSADO') {
-                        const isRecent = (Date.now() - new Date(statusCmd.created_at || 0).getTime()) < (45 * 60 * 1000);
-                        conv.status = isRecent ? 'pausado' : 'ativo';
+                        const elapsedMs = now - new Date(statusCmd.created_at || 0).getTime();
+                        const isRecent = elapsedMs < (45 * 60 * 1000);
+                        if (isRecent) {
+                            conv.status = 'pausado';
+                            conv.pauseMinutesLeft = Math.ceil(((45 * 60 * 1000) - elapsedMs) / 60000);
+                            conv.pausedAt = statusCmd.created_at;
+                            pausasCount++;
+                        } else {
+                            conv.status = 'ativo';
+                        }
                     } else {
                         conv.status = 'ativo';
                     }
@@ -8450,7 +8463,7 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
                 // Filtrar última mensagem legível (ignorar comandos internos)
                 const lastVisibleMsg = conv.messages.find(m => 
                     m.content && 
-                    !['BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA', 'BOT_PAUSADO', 'BOT_ATIVO', 'SPAM_ROBO'].includes(m.content)
+                    !['BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA', 'AMIGO_PERMANENTE', 'BOT_PAUSADO', 'BOT_ATIVO', 'SPAM_ROBO'].includes(m.content)
                 );
                 conv.displayLastMsg = lastVisibleMsg ? lastVisibleMsg.content : 'Conversa iniciada';
 
@@ -8460,9 +8473,11 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
             // Ordenar conversas por data da última mensagem (mais recente no topo)
             convList.sort((a, b) => new Date(b.lastTime || 0).getTime() - new Date(a.lastTime || 0).getTime());
 
-            // Atualiza badge de blacklist
+            // Atualiza badges de contagem
             const badgeEl = document.getElementById('count-blacklist');
             if (badgeEl) badgeEl.textContent = blacklistCount;
+            const badgePausasEl = document.getElementById('count-pausas');
+            if (badgePausasEl) badgePausasEl.textContent = pausasCount;
 
             liveConversations = convList;
             renderLiveConversationsList();
@@ -8519,9 +8534,9 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
             
             let statusBadge = `<span style="font-size:0.68rem; padding:2px 6px; border-radius:4px; font-weight:700; background:rgba(37,211,102,0.15); color:#25D366;">🟢 Maria Ativa</span>`;
             if (c.status === 'pausado') {
-                statusBadge = `<span style="font-size:0.68rem; padding:2px 6px; border-radius:4px; font-weight:700; background:rgba(230,126,34,0.15); color:#e67e22;">🟠 Humano</span>`;
-            } else if (c.status === 'ignorado') {
-                statusBadge = `<span style="font-size:0.68rem; padding:2px 6px; border-radius:4px; font-weight:700; background:rgba(231,76,60,0.15); color:#e74c3c;">🚫 Amigo / Ignorado</span>`;
+                statusBadge = `<span style="font-size:0.68rem; padding:2px 6px; border-radius:4px; font-weight:700; background:rgba(230,126,34,0.18); color:#e67e22; border:1px solid rgba(230,126,34,0.3);">⏸️ Pausa (${c.pauseMinutesLeft || 45}m)</span>`;
+            } else if (c.status === 'amigo' || c.status === 'ignorado') {
+                statusBadge = `<span style="font-size:0.68rem; padding:2px 6px; border-radius:4px; font-weight:700; background:rgba(155,89,182,0.2); color:#9b59b6; border:1px solid rgba(155,89,182,0.3);">🛡️ Amigo (Permanente)</span>`;
             } else if (c.status === 'spam') {
                 statusBadge = `<span style="font-size:0.68rem; padding:2px 6px; border-radius:4px; font-weight:700; background:rgba(231,76,60,0.25); color:#ff6b6b; border:1px solid rgba(231,76,60,0.4);">🚨 Spam / Robô</span>`;
             }
@@ -8591,15 +8606,15 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
                 statusBadge.style.border = '1px solid rgba(231,76,60,0.4)';
                 statusBadge.innerHTML = '🚨 Propaganda / Robô (IA Silenciada)';
             } else if (currentStatus === 'pausado') {
-                statusBadge.style.background = 'rgba(230,126,34,0.15)';
+                statusBadge.style.background = 'rgba(230,126,34,0.18)';
                 statusBadge.style.color = '#e67e22';
                 statusBadge.style.border = '1px solid rgba(230,126,34,0.3)';
-                statusBadge.innerHTML = '🟠 Atendimento Humano (IA Pausada)';
-            } else if (currentStatus === 'ignorado') {
-                statusBadge.style.background = 'rgba(231,76,60,0.15)';
-                statusBadge.style.color = '#e74c3c';
-                statusBadge.style.border = '1px solid rgba(231,76,60,0.3)';
-                statusBadge.innerHTML = '🚫 Amigo / Ignorado';
+                statusBadge.innerHTML = `⏸️ Atendimento Humano (restam ~${conv?.pauseMinutesLeft || 45}m)`;
+            } else if (currentStatus === 'amigo' || currentStatus === 'ignorado') {
+                statusBadge.style.background = 'rgba(155,89,182,0.18)';
+                statusBadge.style.color = '#9b59b6';
+                statusBadge.style.border = '1px solid rgba(155,89,182,0.3)';
+                statusBadge.innerHTML = '🛡️ Amigo / Colega (Bloqueio Permanente)';
             } else {
                 statusBadge.style.background = 'rgba(37,211,102,0.15)';
                 statusBadge.style.color = '#25D366';
@@ -8609,22 +8624,35 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
         }
 
         if (btnPause) {
-            if (currentStatus === 'pausado') {
-                btnPause.innerHTML = '<i class="fa-solid fa-play"></i> Reativar Maria';
-                btnPause.style.background = 'rgba(37,211,102,0.2)';
-                btnPause.style.color = '#25D366';
+            if (currentStatus === 'amigo' || currentStatus === 'ignorado') {
+                btnPause.style.display = 'none'; // Amigos não têm fluxo de pausa comercial
             } else {
-                btnPause.innerHTML = '<i class="fa-solid fa-pause"></i> Pausar IA';
-                btnPause.style.background = 'var(--surface-light)';
-                btnPause.style.color = 'var(--text-primary)';
+                btnPause.style.display = 'inline-flex';
+                if (currentStatus === 'pausado') {
+                    btnPause.innerHTML = '<i class="fa-solid fa-play"></i> Reativar Maria Agora';
+                    btnPause.style.background = 'rgba(37,211,102,0.2)';
+                    btnPause.style.color = '#25D366';
+                } else {
+                    btnPause.innerHTML = '<i class="fa-solid fa-pause"></i> Pausar IA (45m)';
+                    btnPause.style.background = 'var(--surface-light)';
+                    btnPause.style.color = 'var(--text-primary)';
+                }
             }
         }
 
         if (btnBlacklist) {
-            if (currentStatus === 'ignorado') {
-                btnBlacklist.innerHTML = '<i class="fa-solid fa-check"></i> Desbloquear IA';
+            if (currentStatus === 'amigo' || currentStatus === 'ignorado') {
+                btnBlacklist.innerHTML = '<i class="fa-solid fa-unlock"></i> Remover de Amigos';
+                btnBlacklist.style.background = 'rgba(155,89,182,0.15)';
+                btnBlacklist.style.color = '#9b59b6';
+                btnBlacklist.style.border = '1px solid rgba(155,89,182,0.3)';
+                btnBlacklist.title = 'Remover da lista de amigos permanentes e reativar como cliente comercial';
             } else {
-                btnBlacklist.innerHTML = '<i class="fa-solid fa-ban"></i> Ignorar IA';
+                btnBlacklist.innerHTML = '<i class="fa-solid fa-user-shield"></i> Mover p/ Amigos';
+                btnBlacklist.style.background = 'rgba(155,89,182,0.1)';
+                btnBlacklist.style.color = '#9b59b6';
+                btnBlacklist.style.border = '1px solid rgba(155,89,182,0.25)';
+                btnBlacklist.title = 'Bloquear permanentemente como contato pessoal/amigo';
             }
         }
 
@@ -8842,7 +8870,7 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
         stream.scrollTop = stream.scrollHeight;
     }
 
-    // Pausar / Reativar IA na conversa
+    // Pausar / Reativar IA na conversa (Pausa Temporária de 45 min)
     window.toggleCurrentChatPause = async function() {
         if (!currentLivePhone) return;
         const conv = liveConversations.find(c => c.phone === currentLivePhone);
@@ -8851,13 +8879,19 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
 
         try {
             const supa = getSupa();
-            await supa.from('agent_memory').insert({
-                phone: currentLivePhone,
+            const phoneList = getFrontendPhoneVariants(currentLivePhone);
+            const rows = phoneList.map(p => ({
+                phone: p,
                 role: 'user',
                 content: newCmd
-            });
+            }));
+
+            await supa.from('agent_memory').insert(rows);
 
             window.loadLiveConversations();
+            if (typeof window.loadPausasTemporariasTable === 'function') {
+                window.loadPausasTemporariasTable();
+            }
         } catch (err) {
             alert('Erro ao alterar status da IA: ' + err.message);
         }
@@ -8887,16 +8921,19 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
         return Array.from(variants);
     }
 
-    // Bloquear / Desbloquear na Lista Negra direto da conversa
+    // Bloquear / Desbloquear como Amigo Permanente direto da conversa
     window.toggleCurrentChatBlacklist = async function() {
         if (!currentLivePhone) return;
         const conv = liveConversations.find(c => c.phone === currentLivePhone);
-        const isIgnored = conv && conv.status === 'ignorado';
-        const newCmd = isIgnored ? 'BOT_ATIVO' : 'BOT_IGNORAR';
+        const isAmigo = conv && (conv.status === 'amigo' || conv.status === 'ignorado');
 
-        if (!isIgnored) {
-            if (!confirm(`Deseja adicionar ${conv?.clientName || currentLivePhone} à Lista Negra?\n\nA Maria Cecília NUNCA MAIS responderá para este número.`)) return;
+        if (!isAmigo) {
+            if (!confirm(`Deseja adicionar ${conv?.clientName || currentLivePhone} como Amigo / Colega (Bloqueio Permanente)?\n\nA Maria Cecília NUNCA responderá comercialmente para este número e ele NUNCA sairá por expiração.`)) return;
+        } else {
+            if (!confirm(`Deseja remover ${conv?.clientName || currentLivePhone} da lista de amigos permanentes?\n\nA Maria Cecília voltará a responder como cliente comercial quando ele mandar mensagem.`)) return;
         }
+
+        const newCmd = isAmigo ? 'BOT_ATIVO' : 'AMIGO_PERMANENTE';
 
         try {
             const supa = getSupa();
@@ -8907,12 +8944,18 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
                 content: newCmd
             }));
 
+            // Insere também BOT_IGNORAR para retrocompatibilidade
+            if (!isAmigo) {
+                phoneList.forEach(p => rows.push({ phone: p, role: 'user', content: 'BOT_IGNORAR' }));
+            }
+
             await supa.from('agent_memory').insert(rows);
 
             window.loadLiveConversations();
-            window.loadBlacklistTable();
+            if (typeof window.loadBlacklistTable === 'function') window.loadBlacklistTable();
+            if (typeof window.loadPausasTemporariasTable === 'function') window.loadPausasTemporariasTable();
         } catch (err) {
-            alert('Erro ao alterar Lista Negra: ' + err.message);
+            alert('Erro ao alterar status de Amigo: ' + err.message);
         }
     };
 
@@ -9081,7 +9124,141 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
     };
 
     // ==========================================================================
-    // 🚫 LISTA NEGRA: GESTÃO DE CONTATOS PESSOAIS & AMIGOS
+    // ⏸️ PAUSAS TEMPORÁRIAS: CLIENTES EM ATENDIMENTO HUMANO (45 MINUTOS)
+    // ==========================================================================
+    window.loadPausasTemporariasTable = async function() {
+        const tbody = document.querySelector('#table-pausas-temporarias tbody');
+        if (!tbody) return;
+
+        // Se ainda não temos a lista de conversas carregada, recarrega silenciosamente
+        if (!liveConversations || liveConversations.length === 0) {
+            await window.loadLiveConversations(true);
+        }
+
+        const pausedClients = (liveConversations || []).filter(c => c.status === 'pausado');
+        const badgePausasEl = document.getElementById('count-pausas');
+        if (badgePausasEl) badgePausasEl.textContent = pausedClients.length;
+
+        if (pausedClients.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="5" style="text-align:center; padding:30px 20px; color:var(--text-muted);">
+                        <i class="fa-solid fa-circle-check" style="color:#2ecc71; font-size:1.4rem; display:block; margin-bottom:8px;"></i>
+                        Nenhum cliente em pausa temporária no momento.<br>
+                        <span style="font-size:0.8rem; color:var(--text-secondary);">A Maria Cecília está atendendo e respondendo todos os clientes comerciais normalmente.</span>
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        tbody.innerHTML = pausedClients.map(c => {
+            const dateStr = c.pausedAt ? new Date(c.pausedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '-';
+            const minutesLeft = c.pauseMinutesLeft || 45;
+
+            return `
+                <tr>
+                    <td style="font-weight: 700; color: #f39c12;"><i class="fa-brands fa-whatsapp"></i> ${c.phone}</td>
+                    <td style="font-weight: 600;">${c.clientName || 'Cliente WhatsApp'}</td>
+                    <td style="color: var(--text-muted); font-size: 0.85rem;">${dateStr}</td>
+                    <td>
+                        <span style="background: rgba(243,156,18,0.18); color: #f39c12; border: 1px solid rgba(243,156,18,0.35); padding: 3px 9px; border-radius: 6px; font-weight: 700; font-size: 0.8rem;">
+                            <i class="fa-solid fa-hourglass-half"></i> ~${minutesLeft} min
+                        </span>
+                    </td>
+                    <td>
+                        <div style="display: flex; gap: 8px;">
+                            <button class="action-btn" onclick="window.reativarPausaCliente('${c.phone}')" style="background: rgba(37,211,102,0.15); color: #25D366; border: 1px solid rgba(37,211,102,0.3); font-size: 0.8rem; padding: 4px 10px; border-radius: 6px;">
+                                <i class="fa-solid fa-play"></i> Reativar Maria
+                            </button>
+                            <button class="action-btn" onclick="window.converterParaAmigoPermanente('${c.phone}')" style="background: rgba(155,89,182,0.15); color: #9b59b6; border: 1px solid rgba(155,89,182,0.3); font-size: 0.8rem; padding: 4px 10px; border-radius: 6px;" title="Mover para a lista de Amigos / Colegas (Bloqueio Permanente)">
+                                <i class="fa-solid fa-user-shield"></i> Tornar Amigo Permanente
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    };
+
+    window.reativarPausaCliente = async function(phone) {
+        if (!confirm(`Deseja reativar a Maria Cecília para o cliente ${phone} agora?\n\nA IA voltará a responder automaticamente na próxima mensagem que ele enviar.`)) return;
+
+        try {
+            const supa = getSupa();
+            const variants = getFrontendPhoneVariants(phone);
+            const rows = variants.map(p => ({
+                phone: p,
+                role: 'user',
+                content: 'BOT_ATIVO'
+            }));
+
+            await supa.from('agent_memory').insert(rows);
+
+            await window.loadLiveConversations();
+            window.loadPausasTemporariasTable();
+        } catch (err) {
+            alert('Erro ao reativar Maria Cecília: ' + err.message);
+        }
+    };
+
+    window.reativarTodasPausas = async function() {
+        const pausedClients = (liveConversations || []).filter(c => c.status === 'pausado');
+        if (pausedClients.length === 0) {
+            alert('Não há clientes em pausa temporária no momento.');
+            return;
+        }
+
+        if (!confirm(`Deseja reativar a Maria Cecília para todos os ${pausedClients.length} clientes em pausa agora?\n\nEles voltarão a ser atendidos imediatamente pela IA.`)) return;
+
+        try {
+            const supa = getSupa();
+            const rows = [];
+            pausedClients.forEach(c => {
+                const variants = getFrontendPhoneVariants(c.phone);
+                variants.forEach(p => {
+                    rows.push({
+                        phone: p,
+                        role: 'user',
+                        content: 'BOT_ATIVO'
+                    });
+                });
+            });
+
+            await supa.from('agent_memory').insert(rows);
+
+            alert(`✅ ${pausedClients.length} cliente(s) reativado(s) com sucesso!`);
+            await window.loadLiveConversations();
+            window.loadPausasTemporariasTable();
+        } catch (err) {
+            alert('Erro ao reativar clientes em massa: ' + err.message);
+        }
+    };
+
+    window.converterParaAmigoPermanente = async function(phone) {
+        if (!confirm(`Deseja mover o número ${phone} para a lista de Amigos / Colegas (Bloqueio Permanente)?\n\nA Maria Cecília NUNCA responderá comercialmente para ele e este bloqueio NUNCA expira.`)) return;
+
+        try {
+            const supa = getSupa();
+            const variants = getFrontendPhoneVariants(phone);
+            const rows = [];
+            variants.forEach(p => {
+                rows.push({ phone: p, role: 'user', content: 'AMIGO_PERMANENTE' });
+                rows.push({ phone: p, role: 'user', content: 'BOT_IGNORAR' });
+            });
+
+            await supa.from('agent_memory').insert(rows);
+
+            await window.loadLiveConversations();
+            window.loadPausasTemporariasTable();
+            if (typeof window.loadBlacklistTable === 'function') window.loadBlacklistTable();
+        } catch (err) {
+            alert('Erro ao mover para Amigos: ' + err.message);
+        }
+    };
+
+    // ==========================================================================
+    // 🛡️ AMIGOS & COLEGAS: BLOQUEIO PERMANENTE (NUNCA EXPIRA)
     // ==========================================================================
     window.loadBlacklistTable = async function() {
         const tbody = document.querySelector('#table-blacklist-contacts tbody');
@@ -9089,46 +9266,73 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
 
         try {
             const supa = getSupa();
+            // Buscar os comandos de status para apurar quem é amigo permanente ativo
             const { data: list, error } = await supa.from('agent_memory')
-                .select('phone, created_at')
-                .in('content', ['BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA'])
+                .select('phone, content, created_at')
+                .in('content', ['BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA', 'AMIGO_PERMANENTE', 'BOT_ATIVO'])
                 .order('created_at', { ascending: false });
 
             if (error) {
-                tbody.innerHTML = `<tr><td colspan="4" style="color:var(--accent-red);">Erro: ${error.message}</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="5" style="color:var(--accent-red);">Erro: ${error.message}</td></tr>`;
                 return;
             }
 
-            // Agrupar únicos
-            const uniquePhones = {};
+            // Agrupar pelo último comando
+            const latestByPhone = {};
             (list || []).forEach(item => {
-                if (item.phone && !uniquePhones[item.phone]) {
-                    uniquePhones[item.phone] = item;
+                if (!item.phone || item.phone.startsWith('LOCK_') || item.phone.startsWith('LEADER_') || item.phone === 'GLOBAL_CONFIG') return;
+                let cleanPhone = item.phone.replace(/\D/g, '');
+                if (!cleanPhone || cleanPhone.length < 8) return;
+                if (!cleanPhone.startsWith('55') && cleanPhone.length <= 11) cleanPhone = '55' + cleanPhone;
+
+                if (!latestByPhone[cleanPhone]) {
+                    latestByPhone[cleanPhone] = item;
                 }
             });
 
-            const blacklisted = Object.values(uniquePhones);
+            // Filtrar apenas aqueles cujo último comando é de amigo permanente / ignorar
+            const blacklisted = Object.keys(latestByPhone)
+                .map(phone => ({ phone, item: latestByPhone[phone] }))
+                .filter(entry => {
+                    const c = entry.item.content;
+                    return c === 'AMIGO_PERMANENTE' || c === 'BOT_IGNORAR' || c === 'AMIGO_IGNORAR' || c === 'LISTA_NEGRA';
+                });
+
             const badgeEl = document.getElementById('count-blacklist');
             if (badgeEl) badgeEl.textContent = blacklisted.length;
 
             if (blacklisted.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:20px; color:var(--text-muted);">Nenhum número na Lista Negra. Todos os contatos são atendidos normalmente.</td></tr>';
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="5" style="text-align:center; padding:30px 20px; color:var(--text-muted);">
+                            <i class="fa-solid fa-user-shield" style="font-size:1.4rem; color:var(--text-muted); display:block; margin-bottom:8px;"></i>
+                            Nenhum contato pessoal ou amigo cadastrado como permanente.<br>
+                            <span style="font-size:0.8rem; color:var(--text-secondary);">Cadastre acima contatos de amigos ou prestadores que você não quer que a Maria Cecília atenda.</span>
+                        </td>
+                    </tr>
+                `;
                 return;
             }
 
-            tbody.innerHTML = blacklisted.map(item => {
-                const clientObj = liveClientsMap[item.phone] || liveClientsMap[item.phone.replace(/^55/, '')];
+            tbody.innerHTML = blacklisted.map(entry => {
+                const phone = entry.phone;
+                const clientObj = liveClientsMap[phone] || liveClientsMap[phone.replace(/^55/, '')];
                 const nome = clientObj ? clientObj.nome_cliente : 'Amigo / Contato Pessoal';
-                const dateStr = item.created_at ? new Date(item.created_at).toLocaleDateString('pt-BR') : '-';
+                const dateStr = entry.item.created_at ? new Date(entry.item.created_at).toLocaleDateString('pt-BR') : '-';
 
                 return `
                     <tr>
-                        <td style="font-weight: 700; color: #e74c3c;">${item.phone}</td>
+                        <td style="font-weight: 700; color: #9b59b6;"><i class="fa-brands fa-whatsapp"></i> ${phone}</td>
                         <td style="font-weight: 600;">${nome}</td>
+                        <td>
+                            <span style="background: rgba(155,89,182,0.18); color: #9b59b6; border: 1px solid rgba(155,89,182,0.35); padding: 3px 9px; border-radius: 6px; font-weight: 700; font-size: 0.8rem;">
+                                <i class="fa-solid fa-shield-halved"></i> Permanente
+                            </span>
+                        </td>
                         <td style="color: var(--text-muted); font-size: 0.85rem;">${dateStr}</td>
                         <td>
-                            <button class="action-btn" onclick="window.removeContactFromBlacklist('${item.phone}')" style="background: rgba(37,211,102,0.15); color: #25D366; border: 1px solid rgba(37,211,102,0.3); font-size: 0.8rem; padding: 4px 10px;">
-                                <i class="fa-solid fa-unlock"></i> Desbloquear IA
+                            <button class="action-btn" onclick="window.removeContactFromBlacklist('${phone}')" style="background: rgba(231,76,60,0.15); color: #e74c3c; border: 1px solid rgba(231,76,60,0.3); font-size: 0.8rem; padding: 4px 10px; border-radius: 6px;" title="Remover da lista de amigos permanentes">
+                                <i class="fa-solid fa-trash-can"></i> Remover Bloqueio
                             </button>
                         </td>
                     </tr>
@@ -9147,7 +9351,7 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
         const nome = inputNome?.value?.trim();
 
         if (!phone || phone.length < 8) {
-            alert('Por favor, digite um número de telefone WhatsApp válido.');
+            alert('Por favor, digite um número de WhatsApp válido.');
             return;
         }
 
@@ -9158,30 +9362,46 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
 
         try {
             const supa = getSupa();
-            // Grava para todas as variações de DDD e 9º dígito
             const variants = getFrontendPhoneVariants(fullPhone);
-            const rows = variants.map(p => ({
-                phone: p,
-                role: 'user',
-                content: 'BOT_IGNORAR'
-            }));
+            const rows = [];
+            variants.forEach(p => {
+                rows.push({ phone: p, role: 'user', content: 'AMIGO_PERMANENTE' });
+                rows.push({ phone: p, role: 'user', content: 'BOT_IGNORAR' });
+            });
 
             await supa.from('agent_memory').insert(rows);
+
+            // Se digitou um nome e não existe no cadastro de clientes, insere/atualiza para identificar
+            if (nome) {
+                try {
+                    const { data: existingClient } = await supa.from('clientes').select('id').or(`whatsapp.eq.${fullPhone},whatsapp.eq.${fullPhone.replace(/^55/, '')}`).maybeSingle();
+                    if (!existingClient) {
+                        await supa.from('clientes').insert({
+                            nome_cliente: nome,
+                            whatsapp: fullPhone,
+                            tipo_cliente: 'Amigo / Pessoal',
+                            origem: 'Bloqueio Permanente'
+                        });
+                    }
+                } catch (e) {
+                    console.warn('[AMIGO CADASTRO]', e);
+                }
+            }
 
             if (inputNome) inputNome.value = '';
             if (inputPhone) inputPhone.value = '';
 
-            alert(`✅ Número ${fullPhone} adicionado à Lista Negra com sucesso!\nA Maria Cecília nunca mais responderá para este contato.`);
+            alert(`✅ Contato ${nome ? nome + ' (' + fullPhone + ')' : fullPhone} adicionado como Amigo Permanente com sucesso!\nA Maria Cecília nunca atenderá este número.`);
+            await window.loadLiveConversations();
             window.loadBlacklistTable();
-            window.loadLiveConversations();
 
         } catch (err) {
-            alert('Erro ao adicionar à Lista Negra: ' + err.message);
+            alert('Erro ao adicionar Amigo Permanente: ' + err.message);
         }
     };
 
     window.removeContactFromBlacklist = async function(phone) {
-        if (!confirm(`Deseja desbloquear o número ${phone}?\n\nA Maria Cecília voltará a responder quando este contato mandar mensagem.`)) return;
+        if (!confirm(`Deseja remover ${phone} da lista de amigos permanentes?\n\nA Maria Cecília voltará a responder como cliente comercial caso ele envie uma mensagem.`)) return;
 
         try {
             const supa = getSupa();
@@ -9194,10 +9414,10 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
 
             await supa.from('agent_memory').insert(rows);
 
+            await window.loadLiveConversations();
             window.loadBlacklistTable();
-            window.loadLiveConversations();
         } catch (err) {
-            alert('Erro ao desbloquear: ' + err.message);
+            alert('Erro ao remover: ' + err.message);
         }
     };
 

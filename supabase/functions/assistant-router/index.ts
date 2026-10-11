@@ -1834,15 +1834,16 @@ ${clienteConversaContexto}
                   const { data: currentPause } = await supabase.from('agent_memory')
                       .select('content')
                       .in('phone', phoneVariants)
-                      .in('content', ['BOT_PAUSADO', 'BOT_ATIVO', 'BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA', 'SPAM_ROBO'])
+                      .in('content', ['BOT_PAUSADO', 'BOT_ATIVO', 'BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA', 'AMIGO_PERMANENTE', 'SPAM_ROBO'])
                       .order('created_at', { ascending: false })
                       .limit(1);
                   const currentStatus = currentPause?.[0]?.content;
-                  if (currentStatus === 'BOT_IGNORAR' || currentStatus === 'AMIGO_IGNORAR' || currentStatus === 'LISTA_NEGRA' || currentStatus === 'SPAM_ROBO') {
-                      console.log(`[ATENDIMENTO HUMANO] Contato ${remoteJid} já é ignorado/amigo (${currentStatus}). Mantendo status.`);
-                  } else if (currentStatus !== 'BOT_PAUSADO') {
+                  if (currentStatus === 'BOT_IGNORAR' || currentStatus === 'AMIGO_IGNORAR' || currentStatus === 'LISTA_NEGRA' || currentStatus === 'AMIGO_PERMANENTE' || currentStatus === 'SPAM_ROBO') {
+                      console.log(`[ATENDIMENTO HUMANO] Contato ${remoteJid} é amigo/permanente (${currentStatus}). Mantendo status permanente inalterado.`);
+                  } else {
+                      // Para clientes comerciais: sempre renova a pausa de 45 minutos quando Arnaldo fala manualmente
                       await supabase.from('agent_memory').insert({ phone: remoteJid, role: 'user', content: 'BOT_PAUSADO' });
-                      console.log(`[ATENDIMENTO HUMANO] Pausa Automática ativada no JID: ${remoteJid}`);
+                      console.log(`[ATENDIMENTO HUMANO] Pausa Automática de 45min ativada/renovada no JID: ${remoteJid}`);
                   }
               } else {
                   console.log(`[WHATSAPP BUSINESS] Saudação automática detectada no JID: ${remoteJid}. IA NÃO pausada.`);
@@ -2180,7 +2181,7 @@ ${clienteConversaContexto}
               .from('agent_memory')
               .select('content, created_at')
               .in('phone', phoneVariants)
-              .in('content', ['BOT_PAUSADO', 'BOT_ATIVO', 'BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA', 'SPAM_ROBO'])
+              .in('content', ['BOT_PAUSADO', 'BOT_ATIVO', 'BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA', 'AMIGO_PERMANENTE', 'SPAM_ROBO'])
               .order('created_at', { ascending: false })
               .limit(1);
               
@@ -2189,16 +2190,19 @@ ${clienteConversaContexto}
               const pauseTime = new Date(pauseState[0].created_at || 0).getTime();
               const isRecentlyPaused = (Date.now() - pauseTime) < (45 * 60 * 1000);
 
-              if (state === 'BOT_IGNORAR' || state === 'AMIGO_IGNORAR' || state === 'LISTA_NEGRA' || state === 'SPAM_ROBO') {
-                  console.log(`[LISTA NEGRA / SPAM] Mensagem registrada no chat, robô está permanentemente ignorado para ${remoteJid}.`);
+              // 🛡️ BLOQUEIO PERMANENTE (AMIGOS, FAMÍLIA, COLEGAS): NUNCA RESPONDE, NÃO EXPIRA!
+              if (state === 'BOT_IGNORAR' || state === 'AMIGO_IGNORAR' || state === 'LISTA_NEGRA' || state === 'AMIGO_PERMANENTE' || state === 'SPAM_ROBO') {
+                  console.log(`[BLOQUEIO PERMANENTE] Mensagem registrada no chat, contato ${remoteJid} é amigo/permanente (${state}). Robô em silêncio perpétuo.`);
                   return;
               }
+              // ⏱️ PAUSA TEMPORÁRIA DE ATENDIMENTO HUMANO (45 MINUTOS):
               if (state === 'BOT_PAUSADO') {
                   if (isRecentlyPaused) {
-                      console.log(`[ATENDIMENTO HUMANO / PAUSADO RECENTE] Mensagem registrada no chat, atendimento humano em andamento para ${remoteJid} (pausa há menos de 45min). Robô em silêncio.`);
+                      const minLeft = Math.ceil(((45 * 60 * 1000) - (Date.now() - pauseTime)) / 60000);
+                      console.log(`[PAUSA TEMPORÁRIA ATIVA] Atendimento humano em andamento para ${remoteJid} (restam ~${minLeft}min). Robô em silêncio.`);
                       return;
                   } else {
-                      console.log(`[PAUSA HUMANA EXPIRADA] Última pausa de ${remoteJid} ocorreu há mais de 45 minutos. Robô reassume o atendimento automaticamente.`);
+                      console.log(`[PAUSA TEMPORÁRIA EXPIRADA] Pausa de 45min para ${remoteJid} expirou. Robô reassume o atendimento automaticamente.`);
                   }
               }
           }
@@ -2274,7 +2278,7 @@ ${clienteConversaContexto}
               .from('agent_memory')
               .select('content, created_at')
               .in('phone', phoneVariants)
-              .in('content', ['BOT_PAUSADO', 'BOT_ATIVO', 'BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA'])
+              .in('content', ['BOT_PAUSADO', 'BOT_ATIVO', 'BOT_IGNORAR', 'AMIGO_IGNORAR', 'LISTA_NEGRA', 'AMIGO_PERMANENTE'])
               .order('created_at', { ascending: false })
               .limit(1);
 
@@ -2283,8 +2287,8 @@ ${clienteConversaContexto}
               const createdAt = new Date(recheckPause[0].created_at || 0).getTime();
               const isRecentlyPaused = (Date.now() - createdAt) < (45 * 60 * 1000);
 
-              if (state === 'BOT_IGNORAR' || state === 'AMIGO_IGNORAR' || state === 'LISTA_NEGRA') {
-                  console.log(`[PAUSA DETECTADA APÓS BUFFER] Status é ${state}. Abortando.`);
+              if (state === 'BOT_IGNORAR' || state === 'AMIGO_IGNORAR' || state === 'LISTA_NEGRA' || state === 'AMIGO_PERMANENTE') {
+                  console.log(`[BLOQUEIO PERMANENTE APÓS BUFFER] Status é ${state}. Abortando.`);
                   return;
               }
               if (state === 'BOT_PAUSADO' && isRecentlyPaused) {
