@@ -663,6 +663,11 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('cli-end').value = item.endereco_completo || '';
             document.getElementById('cli-doc').value = item.documento_cpf_cnpj || '';
 
+            const quickShortcuts = document.getElementById('cliente-quick-shortcuts');
+            if (quickShortcuts) quickShortcuts.style.display = 'flex';
+            const modalTitle = document.querySelector('#modal-cliente .modal-header h2');
+            if (modalTitle) modalTitle.innerHTML = `<i class="fa-solid fa-address-card"></i> Perfil do Cliente — <span style="color:var(--accent-green);">${item.nome_cliente || ''}</span>`;
+
             // Popula Histórico do Cliente (NOVO)
             const historySec = document.getElementById('cliente-historico-section');
             const historyBody = document.getElementById('cliente-os-list');
@@ -3748,6 +3753,10 @@ ${materiaisTxt}${extrasTxt}
         const m = document.getElementById(id);
         if (m) {
             m.style.display = 'none';
+            if (id === 'modal-cliente') {
+                m.style.zIndex = '';
+                window._openedFromProposta = false;
+            }
             const f = m.querySelector('form');
             if (f) {
                 f.reset();
@@ -3779,6 +3788,14 @@ ${materiaisTxt}${extrasTxt}
                     f.reset();
                     delete f.dataset.editId;
                 }
+            }
+            if (id === 'modal-cliente' && !preventReset) {
+                const qs = document.getElementById('cliente-quick-shortcuts');
+                if (qs) qs.style.display = 'none';
+                const modalTitle = document.querySelector('#modal-cliente .modal-header h2');
+                if (modalTitle) modalTitle.innerHTML = '<i class="fa-solid fa-user-plus"></i> Novo Cliente';
+                const hist = document.getElementById('cliente-historico-section');
+                if (hist) hist.style.display = 'none';
             }
             m.style.display = 'flex';
         }
@@ -3913,6 +3930,101 @@ ${materiaisTxt}${extrasTxt}
             inptEnd.placeholder = 'Digite o endereço específico da obra (ex: Alameda dos Anapurus, 450 - Moema)...';
             inptEnd.focus();
         }
+    };
+
+    // ==========================================
+    // 8.B ATALHOS RÁPIDOS DO PERFIL DO CLIENTE
+    // ==========================================
+    window.quickActionCliente = function (action) {
+        const formCli = document.getElementById('form-cliente');
+        const cliId = formCli?.dataset.editId;
+        if (!cliId) {
+            alert('Aviso: Nenhum cliente selecionado para o atalho.');
+            return;
+        }
+
+        const nomeCli = document.getElementById('cli-nome')?.value || 'Cliente';
+        const whatsCli = document.getElementById('cli-whats')?.value || '';
+
+        if (action === 'proposta') {
+            closeModal('modal-cliente');
+            if (typeof window.populateProposalSelects === 'function') window.populateProposalSelects();
+            const formProp = document.getElementById('form-proposta');
+            if (formProp) {
+                formProp.reset();
+                delete formProp.dataset.editId;
+            }
+            document.getElementById('prop-valor-ajuste').value = '';
+            document.getElementById('prop-obs').value = '';
+            window.currentPropItems = [];
+            if (typeof window.renderPropItemsTable === 'function') window.renderPropItemsTable();
+            if (typeof window.calcPropTotal === 'function') window.calcPropTotal();
+
+            openModal('modal-proposta');
+
+            const sCli = document.getElementById('prop-cliente');
+            if (sCli) {
+                sCli.value = cliId;
+                if (typeof window.onPropClienteChange === 'function') window.onPropClienteChange();
+            }
+            const modalTitle = document.querySelector('#modal-proposta .modal-header h2');
+            if (modalTitle) modalTitle.innerHTML = `<i class="fa-solid fa-file-invoice-dollar"></i> Novo Orçamento — <span style="color:var(--accent-orange);">${nomeCli}</span>`;
+            
+            const propControls = document.getElementById('prop-controls');
+            const propControlsReactivate = document.getElementById('prop-controls-reactivate');
+            if (propControls) propControls.style.display = 'none';
+            if (propControlsReactivate) propControlsReactivate.style.display = 'none';
+            
+            setTimeout(() => {
+                document.getElementById('prop-servico')?.focus();
+            }, 100);
+
+        } else if (action === 'os') {
+            closeModal('modal-cliente');
+            if (typeof window.openSuperOS === 'function') {
+                window.openSuperOS();
+                const sCli = document.getElementById('super-cliente');
+                if (sCli) {
+                    sCli.value = cliId;
+                    if (typeof window.onSuperClienteChange === 'function') window.onSuperClienteChange();
+                }
+                const modalTitle = document.querySelector('#modal-super-os h2');
+                if (modalTitle) modalTitle.innerHTML = `<i class="fa-solid fa-bolt"></i> Nova Super O.S. — <span style="color:var(--accent-green);">${nomeCli}</span>`;
+            }
+
+        } else if (action === 'higienizacao') {
+            closeModal('modal-cliente');
+            if (typeof window.openModalHigienizacao === 'function') {
+                window.openModalHigienizacao();
+                const sCli = document.getElementById('higi-cliente');
+                if (sCli) {
+                    sCli.value = cliId;
+                    if (typeof window.onHigiClienteChange === 'function') window.onHigiClienteChange();
+                }
+            }
+
+        } else if (action === 'whatsapp') {
+            const digits = whatsCli.replace(/\D/g, '');
+            if (!digits) {
+                alert('Este cliente não possui número de WhatsApp cadastrado.');
+                return;
+            }
+            const phone = digits.startsWith('55') ? digits : '55' + digits;
+            const msg = encodeURIComponent(`Olá ${nomeCli}, tudo bem? Aqui é da Arnaldo Trentin Serviços.`);
+            window.open(`https://wa.me/${phone}?text=${msg}`, '_blank');
+        }
+    };
+
+    window.openNovoClienteFromProposta = function() {
+        window._openedFromProposta = true;
+        const modalCli = document.getElementById('modal-cliente');
+        if (modalCli) {
+            modalCli.style.zIndex = '10005';
+        }
+        openModal('modal-cliente');
+        setTimeout(() => {
+            document.getElementById('cli-nome')?.focus();
+        }, 150);
     };
 
     window.populateProposalSelects = function() {
@@ -4582,10 +4694,24 @@ ${materiaisTxt}${extrasTxt}
                 console.error(error);
             } else {
                 const newId = inserted && inserted[0] ? (inserted[0].id || inserted[0].id_os) : 'N/A';
-                await saveAuditLog('INSERT', tableName, newId, dataObject);
-                triggerSaveSuccess('Salvo!');
                 closeModal(modalId);
-                loadData();
+                await loadData(false);
+
+                // Retorno inteligente se foi cadastrado a partir da tela de Propostas
+                if (tableName === 'clientes' && window._openedFromProposta) {
+                    window._openedFromProposta = false;
+                    if (typeof window.populateProposalSelects === 'function') {
+                        window.populateProposalSelects();
+                    }
+                    const sCli = document.getElementById('prop-cliente');
+                    if (sCli && newId !== 'N/A') {
+                        sCli.value = newId;
+                        if (typeof window.onPropClienteChange === 'function') {
+                            window.onPropClienteChange();
+                        }
+                    }
+                    triggerSaveSuccess('Cliente cadastrado e vinculado ao orçamento!');
+                }
             }
         }
     }
@@ -6161,64 +6287,77 @@ ${materiaisTxt}${extrasTxt}
     document.getElementById('form-proposta')?.addEventListener('submit', async (e) => {
         e.preventDefault();
         const editId = e.target.dataset.editId;
-
-        const cliId = document.getElementById('prop-cliente').value || null;
-        const isMesmoEnd = document.getElementById('prop-mesmo-endereco')?.checked ?? true;
-        let endObra = document.getElementById('prop-endereco-obra')?.value || '';
-
-        if (isMesmoEnd && !endObra && cliId) {
-            const cli = (window.clientesCache || []).find(c => String(c.id) === String(cliId));
-            if (cli) endObra = cli.endereco_completo || '';
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        const origHtml = submitBtn ? submitBtn.innerHTML : '';
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Salvando Proposta...';
         }
 
-        // Itens normais limpos
-        const cleanItems = JSON.parse(JSON.stringify(window.currentPropItems.filter(i => i && i.type !== 'payment_condition' && i.type !== 'endereco_obra')));
-        
-        // Insere o metadado de endereco_obra
-        cleanItems.push({
-            type: 'endereco_obra',
-            endereco: endObra,
-            mesmo_endereco: isMesmoEnd
-        });
+        try {
+            const cliId = document.getElementById('prop-cliente').value || null;
+            const isMesmoEnd = document.getElementById('prop-mesmo-endereco')?.checked ?? true;
+            let endObra = document.getElementById('prop-endereco-obra')?.value || '';
 
-        const payload = {
-            cliente_id: cliId,
-            servico_tipo: document.getElementById('prop-servico').value || 'Orçamento Customizado',
-            valor_estimado: parseFloat(document.getElementById('prop-valor').value) || 0,
-            valor_ajuste: parseFloat(document.getElementById('prop-valor-ajuste').value) || 0,
-            itens_json: cleanItems,
-            observacoes: document.getElementById('prop-obs').value || '',
-            fornecimento_materiais: document.getElementById('prop-fornecimento').value || 'Arnaldo Trentin Fornece',
-            prazo_inicio: document.getElementById('prop-prazo').value || null,
-            status: 'Pendente'
-        };
-
-        if (editId) {
-            triggerAutoSave('Atualizando Orçamento...');
-            const { error } = await supabase.from('propostas').update(payload).eq('id', editId);
-            if (!error) {
-                await saveAuditLog('UPDATE', 'propostas', editId, payload);
-                triggerSaveSuccess('Orçamento Atualizado!');
-            } else {
-                console.error("ERRO SUPABASE UPDATE PROPOSTA:", error);
-                alert(`Erro Supabase: ${error.message || JSON.stringify(error)}`);
-                triggerSaveError('Erro ao salvar proposta');
+            if (isMesmoEnd && !endObra && cliId) {
+                const cli = (window.clientesCache || []).find(c => String(c.id) === String(cliId));
+                if (cli) endObra = cli.endereco_completo || '';
             }
-        } else {
-            triggerAutoSave('Gerando Nova Proposta Industrial...');
-            const { data: inserted, error } = await supabase.from('propostas').insert([payload]).select();
-            if (!error) {
-                const newId = inserted[0]?.id || 'N/A';
-                await saveAuditLog('INSERT', 'propostas', newId, payload);
-                triggerSaveSuccess('Orçamento Salvo!');
+
+            // Itens normais limpos
+            const cleanItems = JSON.parse(JSON.stringify(window.currentPropItems.filter(i => i && i.type !== 'payment_condition' && i.type !== 'endereco_obra')));
+            
+            // Insere o metadado de endereco_obra
+            cleanItems.push({
+                type: 'endereco_obra',
+                endereco: endObra,
+                mesmo_endereco: isMesmoEnd
+            });
+
+            const payload = {
+                cliente_id: cliId,
+                servico_tipo: document.getElementById('prop-servico').value || 'Orçamento Customizado',
+                valor_estimado: parseFloat(document.getElementById('prop-valor').value) || 0,
+                valor_ajuste: parseFloat(document.getElementById('prop-valor-ajuste').value) || 0,
+                itens_json: cleanItems,
+                observacoes: document.getElementById('prop-obs').value || '',
+                fornecimento_materiais: document.getElementById('prop-fornecimento').value || 'Arnaldo Trentin Fornece',
+                prazo_inicio: document.getElementById('prop-prazo').value || null,
+                status: 'Pendente'
+            };
+
+            if (editId) {
+                triggerAutoSave('Atualizando Orçamento...');
+                const { error } = await supabase.from('propostas').update(payload).eq('id', editId);
+                if (!error) {
+                    await saveAuditLog('UPDATE', 'propostas', editId, payload);
+                    triggerSaveSuccess('Orçamento Atualizado!');
+                } else {
+                    console.error("ERRO SUPABASE UPDATE PROPOSTA:", error);
+                    alert(`Erro Supabase: ${error.message || JSON.stringify(error)}`);
+                    triggerSaveError('Erro ao salvar proposta');
+                }
             } else {
-                console.error("ERRO SUPABASE INSERT PROPOSTA:", error);
-                alert(`Erro Supabase: ${error.message || JSON.stringify(error)}`);
-                triggerSaveError('Falha no Supabase Propostas');
+                triggerAutoSave('Gerando Nova Proposta Industrial...');
+                const { data: inserted, error } = await supabase.from('propostas').insert([payload]).select();
+                if (!error) {
+                    const newId = inserted[0]?.id || 'N/A';
+                    await saveAuditLog('INSERT', 'propostas', newId, payload);
+                    triggerSaveSuccess('Orçamento Salvo!');
+                } else {
+                    console.error("ERRO SUPABASE INSERT PROPOSTA:", error);
+                    alert(`Erro Supabase: ${error.message || JSON.stringify(error)}`);
+                    triggerSaveError('Falha no Supabase Propostas');
+                }
+            }
+            closeModal('modal-proposta');
+            loadData();
+        } finally {
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = origHtml;
             }
         }
-        closeModal('modal-proposta');
-        loadData();
     });
 
     // ==========================================

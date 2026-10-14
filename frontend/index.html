@@ -1778,7 +1778,25 @@
                     <label>CPF/CNPJ</label>
                     <input type="text" id="cli-doc" class="modal-input" required>
                 </div>
-                <button type="submit" class="action-btn auth-btn" style="background: var(--accent-green); width: 100%;"><i class="fa-solid fa-floppy-disk"></i> Salvar Cliente</button>
+                <div class="cliente-actions-footer" style="display: flex; gap: 10px; margin-top: 15px; flex-wrap: wrap; align-items: center;">
+                    <button type="submit" class="action-btn auth-btn" style="background: var(--accent-green); flex: 1.2; min-width: 160px; height: 44px; font-weight: 700;">
+                        <i class="fa-solid fa-floppy-disk"></i> Salvar Cliente
+                    </button>
+                    <div id="cliente-quick-shortcuts" style="display: none; gap: 8px; flex: 2.8; flex-wrap: wrap; justify-content: flex-end;">
+                        <button type="button" class="action-btn" onclick="window.quickActionCliente && window.quickActionCliente('proposta')" style="background: var(--accent-orange); color: #fff; height: 44px; padding: 0 14px; font-weight: 600; display: inline-flex; align-items: center; gap: 7px; border-radius: 6px;" title="Criar Nova Proposta para este cliente">
+                            <i class="fa-solid fa-file-invoice-dollar"></i> Nova Proposta
+                        </button>
+                        <button type="button" class="action-btn" onclick="window.quickActionCliente && window.quickActionCliente('os')" style="background: var(--accent-blue); color: #fff; height: 44px; padding: 0 14px; font-weight: 600; display: inline-flex; align-items: center; gap: 7px; border-radius: 6px;" title="Criar Nova Ordem de Serviço para este cliente">
+                            <i class="fa-solid fa-bolt"></i> Nova OS
+                        </button>
+                        <button type="button" class="action-btn" onclick="window.quickActionCliente && window.quickActionCliente('higienizacao')" style="background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.2); color: #fff; height: 44px; padding: 0 14px; font-weight: 600; display: inline-flex; align-items: center; gap: 7px; border-radius: 6px;" title="Agendar Higienização / Preventiva de Ar Condicionado">
+                            <i class="fa-solid fa-snowflake"></i> Higienização
+                        </button>
+                        <button type="button" class="action-btn" onclick="window.quickActionCliente && window.quickActionCliente('whatsapp')" style="background: #25D366; color: #fff; height: 44px; padding: 0 14px; font-weight: 700; display: inline-flex; align-items: center; gap: 7px; border-radius: 6px;" title="Iniciar conversa no WhatsApp do cliente">
+                            <i class="fa-brands fa-whatsapp" style="font-size: 1.15rem;"></i> WhatsApp
+                        </button>
+                    </div>
+                </div>
 
                 <!-- Histórico de Serviços (Dinâmico via JS) -->
                 <div id="cliente-historico-section" style="margin-top: 25px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 20px; display: none;">
@@ -3039,7 +3057,12 @@
             </div>
             <form id="form-proposta" autocomplete="off">
                 <div class="input-group">
-                    <label>Cliente</label>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <label style="margin: 0;">Cliente</label>
+                        <button type="button" class="action-btn" onclick="window.openNovoClienteFromProposta && window.openNovoClienteFromProposta()" style="background: rgba(39, 174, 96, 0.15); border: 1px solid var(--accent-green); color: var(--accent-green); padding: 4px 10px; font-size: 0.78rem; font-weight: 600; border-radius: 5px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; transition: all 0.2s;" title="Cadastrar novo cliente rapidamente sem fechar este orçamento">
+                            <i class="fa-solid fa-user-plus"></i> + Novo Cliente
+                        </button>
+                    </div>
                     <select id="prop-cliente" class="auth-select" required onchange="window.onPropClienteChange && window.onPropClienteChange()">
                         <option value="">Selecione o Cliente...</option>
                     </select>
