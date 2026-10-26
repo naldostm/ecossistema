@@ -1217,32 +1217,33 @@
                             <button class="action-btn auth-btn" onclick="openModal('modal-config-categorias')" title="Configurar Categorias e Subcategorias" style="padding: 10px; background: var(--bg-subtle);"><i class="fa-solid fa-gear"></i></button>
                         </div>
                         
-                        <!-- NEW FILTER BAR: MATERIAIS -->
-                        <div class="filter-bar" style="margin-bottom: 20px; background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px;">
-                            <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px;" id="materiais-pills">
-                                <button class="action-btn cat-pill active" style="padding: 5px 15px; font-size: 0.85rem;" data-cat="" onclick="window.setFiltroMatCat(this, '')">Todas</button>
-                                <button class="action-btn cat-pill" style="padding: 5px 15px; font-size: 0.85rem; background: var(--surface-light);" data-cat="Elétrica" onclick="window.setFiltroMatCat(this, 'Elétrica')">Elétrica</button>
-                                <button class="action-btn cat-pill" style="padding: 5px 15px; font-size: 0.85rem; background: var(--surface-light);" data-cat="Hidráulica" onclick="window.setFiltroMatCat(this, 'Hidráulica')">Hidráulica</button>
-                                <button class="action-btn cat-pill" style="padding: 5px 15px; font-size: 0.85rem; background: var(--surface-light);" data-cat="Tubulações" onclick="window.setFiltroMatCat(this, 'Tubulações')">Tubulações</button>
-                                <button class="action-btn cat-pill" style="padding: 5px 15px; font-size: 0.85rem; background: var(--surface-light);" data-cat="Ferramentas" onclick="window.setFiltroMatCat(this, 'Ferramentas')">Ferramentas</button>
-                                <button class="action-btn cat-pill" style="padding: 5px 15px; font-size: 0.85rem; background: var(--surface-light);" data-cat="Uso Geral" onclick="window.setFiltroMatCat(this, 'Uso Geral')">Uso Geral</button>
+                        <!-- FILTER BAR: MATERIAIS COM ABAS DUPLAS DINÂMICAS (CATEGORIAS E SUBCATEGORIAS) -->
+                        <div class="cat-nav-double-bar">
+                            <!-- Linha 1: Categorias Principais em Abas/Pills -->
+                            <div class="cat-master-scroll-container">
+                                <div class="cat-master-tabs" id="materiais-cat-master">
+                                    <!-- Gerado dinamicamente via window.renderCategoryNavBars() -->
+                                </div>
                             </div>
-                            <div style="display: flex; gap: 15px; align-items: flex-end;">
-                                <div style="flex: 1;">
-                                    <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 5px;"><i class="fa-solid fa-magnifying-glass"></i> Busca Rápida</label>
-                                    <input type="text" id="filtro-mat-texto" class="modal-input" placeholder="Digite o nome do material..." style="color: #000; background: #fff; width: 100%; border: 1px solid var(--accent-orange);" onkeyup="window.renderMateriais()">
+
+                            <!-- Linha 2: Subcategorias em Chips Deslizantes -->
+                            <div class="cat-sub-chips-container" id="materiais-sub-wrapper">
+                                <div class="cat-sub-chips-track" id="materiais-cat-sub">
+                                    <!-- Gerado dinamicamente de acordo com a categoria ativa -->
                                 </div>
-                                <div>
-                                    <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 5px;">Subcategoria (Opcional)</label>
-                                    <select id="filtro-mat-sub" class="modal-input" style="color: #000; background: #fff; border: 1px solid var(--border-color); width: 140px;" onchange="window.renderMateriais()">
-                                        <option value="">Qualquer</option>
-                                        <option value="Cabos">Cabos</option>
-                                        <option value="Proteção">Proteção</option>
-                                        <option value="Refrigeração">Refrigeração</option>
-                                    </select>
+                            </div>
+
+                            <!-- Linha 3: Barra de Ações Rápidas (Busca + Filtro Estoque) -->
+                            <div class="cat-search-row">
+                                <div class="cat-search-box">
+                                    <i class="fa-solid fa-magnifying-glass"></i>
+                                    <input type="text" id="filtro-mat-texto" class="cat-search-input" placeholder="Buscar material por nome ou descrição..." onkeyup="window.renderMateriais()">
+                                    <button type="button" class="cat-search-clear" onclick="document.getElementById('filtro-mat-texto').value=''; window.renderMateriais();" title="Limpar busca">
+                                        <i class="fa-solid fa-xmark"></i>
+                                    </button>
                                 </div>
-                                <button class="action-btn" id="btn-toggle-estoque-baixo" style="background: var(--surface-light); border: 1px solid var(--danger-color);" onclick="window.toggleEstoqueBaixo()">
-                                    <i class="fa-solid fa-triangle-exclamation"></i> Falta
+                                <button class="cat-filter-btn" id="btn-toggle-estoque-baixo" onclick="window.toggleEstoqueBaixo()">
+                                    <i class="fa-solid fa-triangle-exclamation"></i> <span>Estoque Baixo</span>
                                 </button>
                             </div>
                         </div>
@@ -1299,20 +1300,30 @@
                             <button class="action-btn auth-btn" onclick="openModal('modal-config-categorias')" title="Configurar Categorias e Subcategorias" style="padding: 10px; background: var(--bg-subtle);"><i class="fa-solid fa-gear"></i></button>
                         </div>
 
-                        <!-- NEW FILTER BAR: SERVICOS -->
-                        <div class="filter-bar" style="margin-bottom: 20px; background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px;">
-                            <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px;" id="servicos-pills">
-                                <button class="action-btn cat-pill-ser active" style="padding: 5px 15px; font-size: 0.85rem;" data-cat="" onclick="window.setFiltroSerCat(this, '')">Todos</button>
-                                <button class="action-btn cat-pill-ser" style="padding: 5px 15px; font-size: 0.85rem; background: var(--surface-light);" data-cat="Elétrica" onclick="window.setFiltroSerCat(this, 'Elétrica')">Elétrica</button>
-                                <button class="action-btn cat-pill-ser" style="padding: 5px 15px; font-size: 0.85rem; background: var(--surface-light);" data-cat="Infraestrutura de Ar-Condicionado" onclick="window.setFiltroSerCat(this, 'Infraestrutura de Ar-Condicionado')">Ar-Condicionado</button>
-                                <button class="action-btn cat-pill-ser" style="padding: 5px 15px; font-size: 0.85rem; background: var(--surface-light);" data-cat="Iluminação" onclick="window.setFiltroSerCat(this, 'Iluminação')">Iluminação</button>
-                                <button class="action-btn cat-pill-ser" style="padding: 5px 15px; font-size: 0.85rem; background: var(--surface-light);" data-cat="Gás" onclick="window.setFiltroSerCat(this, 'Gás')">Gás</button>
-                                <button class="action-btn cat-pill-ser" style="padding: 5px 15px; font-size: 0.85rem; background: var(--surface-light);" data-cat="Geral" onclick="window.setFiltroSerCat(this, 'Geral')">Geral</button>
+                        <!-- FILTER BAR: SERVICOS COM ABAS DUPLAS DINÂMICAS (CATEGORIAS E SUBCATEGORIAS) -->
+                        <div class="cat-nav-double-bar">
+                            <!-- Linha 1: Categorias Principais em Abas/Pills -->
+                            <div class="cat-master-scroll-container">
+                                <div class="cat-master-tabs" id="servicos-cat-master">
+                                    <!-- Gerado dinamicamente via window.renderCategoryNavBars() -->
+                                </div>
                             </div>
-                            <div style="display: flex; gap: 15px; align-items: flex-end;">
-                                <div style="flex: 1;">
-                                    <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 5px;"><i class="fa-solid fa-magnifying-glass"></i> Pesquisar Serviço</label>
-                                    <input type="text" id="filtro-ser-texto" class="modal-input" placeholder="Digite termos como Instalação, Reparo..." style="color: #000; background: #fff; width: 100%; border: 1px solid var(--accent-orange);" onkeyup="window.renderServicos()">
+
+                            <!-- Linha 2: Subcategorias em Chips Deslizantes -->
+                            <div class="cat-sub-chips-container" id="servicos-sub-wrapper">
+                                <div class="cat-sub-chips-track" id="servicos-cat-sub">
+                                    <!-- Gerado dinamicamente de acordo com a categoria ativa -->
+                                </div>
+                            </div>
+
+                            <!-- Linha 3: Barra de Busca Rápida -->
+                            <div class="cat-search-row">
+                                <div class="cat-search-box">
+                                    <i class="fa-solid fa-magnifying-glass"></i>
+                                    <input type="text" id="filtro-ser-texto" class="cat-search-input" placeholder="Pesquisar serviço (ex: Instalação, Reparo, Manutenção...)" onkeyup="window.renderServicos()">
+                                    <button type="button" class="cat-search-clear" onclick="document.getElementById('filtro-ser-texto').value=''; window.renderServicos();" title="Limpar busca">
+                                        <i class="fa-solid fa-xmark"></i>
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -2414,9 +2425,14 @@
                 <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 20px 0;">
 
                 <!-- Cronograma de Instalação (Serviços e Datas) -->
-                <div class="section-header" style="display:flex; justify-content: space-between; align-items:center; margin-bottom:10px;">
+                <div class="section-header" style="display:flex; justify-content: space-between; align-items:center; margin-bottom:10px; flex-wrap: wrap; gap: 8px;">
                     <h3><i class="fa-solid fa-calendar-days"></i> Cronograma Analítico de Serviços</h3>
-                    <button type="button" id="btn-add-cronograma" style="background: transparent; border: 1px solid var(--accent-blue); color: var(--accent-blue); padding: 5px 15px; border-radius: 5px; cursor:pointer;"><i class="fa-solid fa-plus"></i> Inserir Passo</button>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <button type="button" class="btn-open-catalog" onclick="window.crmItemSelector.open({ context: 'super-os-servicos' })">
+                            <i class="fa-solid fa-bolt"></i> Catálogo de Serviços
+                        </button>
+                        <button type="button" id="btn-add-cronograma" style="background: transparent; border: 1px solid var(--accent-blue); color: var(--accent-blue); padding: 6px 12px; border-radius: 6px; cursor:pointer; font-size: 0.82rem;"><i class="fa-solid fa-plus"></i> Linha Avulsa</button>
+                    </div>
                 </div>
                 
                 <div class="table-responsive">
@@ -2445,9 +2461,14 @@
                 <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 20px 0;">
 
                 <!-- Lista de Materiais e Produtos -->
-                <div class="section-header" style="display:flex; justify-content: space-between; align-items:center; margin-bottom:10px;">
+                <div class="section-header" style="display:flex; justify-content: space-between; align-items:center; margin-bottom:10px; flex-wrap: wrap; gap: 8px;">
                     <h3><i class="fa-solid fa-box-open"></i> Logística de Peças e Produtos</h3>
-                    <button type="button" id="btn-add-material" style="background: transparent; border: 1px solid var(--accent-orange); color: var(--accent-orange); padding: 5px 15px; border-radius: 5px; cursor:pointer;"><i class="fa-solid fa-plus"></i> Requisitar do Estoque</button>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <button type="button" class="btn-open-catalog" onclick="window.crmItemSelector.open({ context: 'super-os-materiais' })">
+                            <i class="fa-solid fa-bolt"></i> Catálogo de Peças
+                        </button>
+                        <button type="button" id="btn-add-material" style="background: transparent; border: 1px solid var(--accent-orange); color: var(--accent-orange); padding: 6px 12px; border-radius: 6px; cursor:pointer; font-size: 0.82rem;"><i class="fa-solid fa-plus"></i> Linha Avulsa</button>
+                    </div>
                 </div>
                 
                 <div class="table-responsive">
@@ -3092,40 +3113,19 @@
 
                 <!-- 🛒 CONSTRUTOR DE ITENS (SERVICE & MATERIAL SEPARADOS) -->
                 <div class="glass-panel" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-                    <h4 style="color: var(--accent-orange); font-size: 0.9rem; margin-bottom: 12px;"><i class="fa-solid fa-list-check"></i> Itens do Orçamento</h4>
-                    
-                    <!-- Dropdown: Serviços -->
-                    <div class="form-row" style="display: flex; gap: 10px; align-items: flex-end; margin-bottom: 10px;">
-                        <div class="input-group" style="flex: 2;">
-                            <label>Selecionar Serviço</label>
-                            <select id="prop-service-picker" class="auth-select">
-                                <option value="">--- Escolha um Serviço ---</option>
-                            </select>
-                        </div>
-                        <div class="input-group" style="flex: 0.4;">
-                            <label>Qtd</label>
-                            <input type="number" id="prop-service-qtd" class="modal-input" value="1" min="1">
-                        </div>
-                        <button type="button" class="action-btn" style="background: var(--accent-green); height: 42px; margin-bottom: 5px;" onclick="window.addPropLineItem('service')">
-                            <i class="fa-solid fa-plus"></i>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+                        <h4 style="color: var(--accent-orange); font-size: 0.95rem; margin: 0;"><i class="fa-solid fa-list-check"></i> Itens do Orçamento</h4>
+                        <button type="button" class="btn-open-catalog" onclick="window.crmItemSelector.open({ context: 'proposta' })">
+                            <i class="fa-solid fa-bolt"></i> Abrir Catálogo & Seleção em Massa
                         </button>
                     </div>
 
-                    <!-- Dropdown: Materiais -->
-                    <div class="form-row" style="display: flex; gap: 10px; align-items: flex-end; margin-bottom: 15px;">
-                        <div class="input-group" style="flex: 2;">
-                            <label>Selecionar Material</label>
-                            <select id="prop-material-picker" class="auth-select">
-                                <option value="">--- Escolha um Material ---</option>
-                            </select>
-                        </div>
-                        <div class="input-group" style="flex: 0.4;">
-                            <label>Qtd</label>
-                            <input type="number" id="prop-material-qtd" class="modal-input" value="1" min="1">
-                        </div>
-                        <button type="button" class="action-btn" style="background: var(--accent-orange); height: 42px; margin-bottom: 5px;" onclick="window.addPropLineItem('material')">
-                            <i class="fa-solid fa-plus"></i>
-                        </button>
+                    <!-- Hidden legacy fallback para integridade com funções antigas -->
+                    <div style="display: none;">
+                        <select id="prop-service-picker"></select>
+                        <input type="number" id="prop-service-qtd" value="1">
+                        <select id="prop-material-picker"></select>
+                        <input type="number" id="prop-material-qtd" value="1">
                     </div>
 
                     <div style="border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; overflow: visible;">
@@ -4105,6 +4105,67 @@
                     <button type="submit" class="action-btn" style="background: #f1c40f; color: #000; font-weight: 800; padding: 8px 18px; border-radius: 8px;"><i class="fa-solid fa-check"></i> Salvar Tarefa</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- MODAL: SELETOR RÁPIDO EM MASSA DE SERVIÇOS E MATERIAIS -->
+    <div class="modal-overlay" id="modal-seletor-itens" style="display: none; z-index: 10500;">
+        <div class="modal-content glass-panel-dark crm-seletor-dialog" style="width: 96%; max-width: 860px; max-height: 90vh; display: flex; flex-direction: column; padding: 0; overflow: hidden; border-radius: 16px;">
+            <!-- Header -->
+            <div class="seletor-header">
+                <div class="seletor-title-wrap">
+                    <div class="seletor-icon"><i class="fa-solid fa-boxes-stacked"></i></div>
+                    <div>
+                        <h2 id="seletor-modal-title">Catálogo & Seleção em Massa</h2>
+                        <span class="seletor-subtitle" id="seletor-modal-subtitle">Selecione múltiplos itens com checkbox e ajuste as quantidades</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="closeModal('modal-seletor-itens')"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <!-- Toolbar: Busca e Filtros -->
+            <div class="seletor-toolbar">
+                <div class="seletor-search-box">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                    <input type="text" id="seletor-input-busca" placeholder="Buscar por nome, categoria ou palavra-chave..." autocomplete="off">
+                    <button type="button" id="btn-seletor-clear-search" onclick="window.crmItemSelector.clearSearch()" style="display: none;"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+
+                <!-- Tabs de Tipo (Todos / Serviços / Materiais) -->
+                <div class="seletor-type-tabs" id="seletor-type-tabs">
+                    <button type="button" class="seletor-type-btn active" data-type="all" onclick="window.crmItemSelector.setTypeFilter('all')">Todos</button>
+                    <button type="button" class="seletor-type-btn" data-type="service" onclick="window.crmItemSelector.setTypeFilter('service')"><i class="fa-solid fa-screwdriver-wrench"></i> Serviços</button>
+                    <button type="button" class="seletor-type-btn" data-type="material" onclick="window.crmItemSelector.setTypeFilter('material')"><i class="fa-solid fa-box"></i> Materiais / Peças</button>
+                </div>
+
+                <!-- Chips de Categorias -->
+                <div class="seletor-chips-wrapper">
+                    <div class="seletor-chips-container" id="seletor-chips-container">
+                        <!-- Chips gerados dinamicamente via JS -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Lista de Itens com Checkboxes e Steppers -->
+            <div class="seletor-list-body" id="seletor-itens-lista">
+                <!-- Linhas geradas dinamicamente via JS -->
+            </div>
+
+            <!-- Rodapé Fixo com Resumo e Ação -->
+            <div class="seletor-footer">
+                <div class="seletor-footer-summary">
+                    <span class="seletor-counter-badge" id="seletor-count-badge">0 selecionados</span>
+                    <span class="seletor-total-badge" id="seletor-total-badge">R$ 0,00</span>
+                </div>
+                <div class="seletor-footer-actions">
+                    <button type="button" class="btn-seletor-clear" onclick="window.crmItemSelector.clearSelection()">
+                        <i class="fa-solid fa-rotate-left"></i> Limpar
+                    </button>
+                    <button type="button" class="btn-seletor-confirm" id="btn-seletor-confirm" onclick="window.crmItemSelector.confirm()">
+                        <i class="fa-solid fa-check-double"></i> Adicionar Selecionados
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 </body>

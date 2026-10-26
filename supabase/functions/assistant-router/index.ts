@@ -208,23 +208,27 @@ function isBotPhone(rawPhone: string): boolean {
 async function resolveClientContact(searchName: string): Promise<{ phone: string | null; name: string | null }> {
   if (!searchName || searchName.trim().length < 2) return { phone: null, name: null };
   const cleanTerm = searchName.trim().toLowerCase();
+  const searchWords = cleanTerm.split(/\s+/).filter(w => w.length >= 3);
 
-  // 1. Busca prioritária em tarefas_arnaldo (onde ficam as solicitações de clientes como Fabiana)
+  // 1. Busca prioritária em tarefas_arnaldo (onde ficam clientes históricos e recentes)
   try {
     const { data: tarefas } = await supabase
       .from('tarefas_arnaldo')
       .select('cliente_nome, cliente_telefone')
       .not('cliente_telefone', 'is', null)
-      .ilike('cliente_nome', `%${cleanTerm}%`)
       .order('created_at', { ascending: false })
-      .limit(5);
+      .limit(100);
 
     if (tarefas && tarefas.length > 0) {
       for (const t of tarefas) {
-        const p = String(t.cliente_telefone || '').replace(/\D/g, '');
-        if (p.length >= 8 && !isArnaldoPhone(p) && !isBotPhone(p)) {
-          const formatted = (!p.startsWith('55') && p.length <= 11) ? '55' + p : p;
-          return { phone: formatted, name: t.cliente_nome };
+        const cName = (t.cliente_nome || '').toLowerCase();
+        const matches = cName.includes(cleanTerm) || searchWords.some(w => cName.includes(w));
+        if (matches) {
+          const p = String(t.cliente_telefone || '').replace(/\D/g, '');
+          if (p.length >= 8 && !isArnaldoPhone(p) && !isBotPhone(p)) {
+            const formatted = (!p.startsWith('55') && p.length <= 11) ? '55' + p : p;
+            return { phone: formatted, name: t.cliente_nome };
+          }
         }
       }
     }
@@ -237,16 +241,19 @@ async function resolveClientContact(searchName: string): Promise<{ phone: string
     const { data: cFound } = await supabase
       .from('clientes')
       .select('nome_cliente, whatsapp, telefone')
-      .ilike('nome_cliente', `%${cleanTerm}%`)
-      .limit(5);
+      .limit(100);
 
     if (cFound && cFound.length > 0) {
       for (const c of cFound) {
-        const rawP = c.whatsapp || c.telefone || '';
-        const p = String(rawP).replace(/\D/g, '');
-        if (p.length >= 8 && !isArnaldoPhone(p) && !isBotPhone(p)) {
-          const formatted = (!p.startsWith('55') && p.length <= 11) ? '55' + p : p;
-          return { phone: formatted, name: c.nome_cliente };
+        const cName = (c.nome_cliente || '').toLowerCase();
+        const matches = cName.includes(cleanTerm) || searchWords.some(w => cName.includes(w));
+        if (matches) {
+          const rawP = c.whatsapp || c.telefone || '';
+          const p = String(rawP).replace(/\D/g, '');
+          if (p.length >= 8 && !isArnaldoPhone(p) && !isBotPhone(p)) {
+            const formatted = (!p.startsWith('55') && p.length <= 11) ? '55' + p : p;
+            return { phone: formatted, name: c.nome_cliente };
+          }
         }
       }
     }
@@ -254,16 +261,44 @@ async function resolveClientContact(searchName: string): Promise<{ phone: string
     console.warn('[RESOLVE CLIENTE] Erro em clientes:', e);
   }
 
-  // 3. Busca em ordens_servico
+  // 3. Busca em propostas (onde clientes vinculados ou observações registram dados)
+  try {
+    const { data: propFound } = await supabase
+      .from('propostas')
+      .select('servico_tipo, observacoes, clientes(nome_cliente, whatsapp, telefone)')
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    if (propFound && propFound.length > 0) {
+      for (const pr of (propFound as any[])) {
+        const cName = pr.clientes?.nome_cliente ? pr.clientes.nome_cliente.toLowerCase() : '';
+        const obs = (pr.observacoes || '').toLowerCase();
+        const serv = (pr.servico_tipo || '').toLowerCase();
+        if (cName.includes(cleanTerm) || obs.includes(cleanTerm) || serv.includes(cleanTerm) || searchWords.some(w => cName.includes(w) || obs.includes(w))) {
+          const rawP = pr.clientes?.whatsapp || pr.clientes?.telefone || '';
+          const p = String(rawP).replace(/\D/g, '');
+          if (p.length >= 8 && !isArnaldoPhone(p) && !isBotPhone(p)) {
+            const formatted = (!p.startsWith('55') && p.length <= 11) ? '55' + p : p;
+            return { phone: formatted, name: pr.clientes?.nome_cliente || searchName };
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[RESOLVE CLIENTE] Erro em propostas:', e);
+  }
+
+  // 4. Busca em ordens_servico
   try {
     const { data: osFound } = await supabase
       .from('ordens_servico')
       .select('clientes(nome_cliente, whatsapp, telefone)')
-      .limit(20);
+      .limit(30);
 
     if (osFound && osFound.length > 0) {
       for (const o of (osFound as any[])) {
-        if (o.clientes?.nome_cliente && o.clientes.nome_cliente.toLowerCase().includes(cleanTerm)) {
+        const cName = o.clientes?.nome_cliente ? o.clientes.nome_cliente.toLowerCase() : '';
+        if (cName.includes(cleanTerm) || searchWords.some(w => cName.includes(w))) {
           const rawP = o.clientes.whatsapp || o.clientes.telefone || '';
           const p = String(rawP).replace(/\D/g, '');
           if (p.length >= 8 && !isArnaldoPhone(p) && !isBotPhone(p)) {
@@ -787,18 +822,47 @@ DIRETRIZES DE RESPOSTA:
               }
           } catch {}
 
-          // 2. Propostas recentes
+          // 2. Agenda de contatos do CRM
+          let agendaClientesTexto = "";
+          try {
+              const { data: tarefasContacts } = await supabase
+                  .from('tarefas_arnaldo')
+                  .select('cliente_nome, cliente_telefone')
+                  .not('cliente_telefone', 'is', null)
+                  .order('created_at', { ascending: false })
+                  .limit(100);
+              const cSet = new Map<string, string>();
+              (tarefasContacts || []).forEach((t: any) => {
+                  const p = String(t.cliente_telefone || '').replace(/\D/g, '');
+                  const n = (t.cliente_nome || '').trim();
+                  if (p.length >= 8 && n && !isArnaldoPhone(p) && !isBotPhone(p) && !cSet.has(n.toLowerCase())) {
+                      cSet.set(n.toLowerCase(), (!p.startsWith('55') && p.length <= 11) ? '55' + p : p);
+                  }
+              });
+              if (cSet.size > 0) {
+                  agendaClientesTexto = Array.from(cSet.entries()).map(([name, phone], i) => `${i + 1}. ${name} | WhatsApp: ${phone}`).join('\n');
+              }
+          } catch {}
+
+          // 3. Propostas recentes
           let propostasGestorTexto = "";
           try {
               const { data: recPropostas } = await supabase
                   .from('propostas')
-                  .select('id, servico_tipo, valor_estimado, status, observacoes, data_proposta, clientes(nome_cliente)')
+                  .select('id, servico_tipo, valor_estimado, status, observacoes, data_proposta, itens_json, clientes(nome_cliente, whatsapp)')
                   .order('created_at', { ascending: false })
-                  .limit(5);
+                  .limit(10);
               if (recPropostas && recPropostas.length > 0) {
                   propostasGestorTexto = recPropostas.map((p: any, idx: number) => {
-                      const cliente = p.clientes?.nome_cliente || (p.servico_tipo?.includes('tubo') || p.servico_tipo?.includes('GN') ? 'Fabiana Arquiteta (Vila Madalena)' : 'Cliente');
-                      return `${idx + 1}. Proposta #${p.id.slice(0, 8)} | ${cliente} | Serviço: "${p.servico_tipo || 'Geral'}" | Total: R$ ${p.valor_estimado || 0} | Status: ${p.status || 'Pendente'}`;
+                      const cliente = p.clientes?.nome_cliente || (p.servico_tipo?.includes('tubo') || p.servico_tipo?.includes('GN') ? 'Fabiana Arquiteta' : 'Cliente');
+                      const rawP = p.clientes?.whatsapp || '';
+                      const phoneStr = rawP ? ` (Tel: ${rawP})` : '';
+                      let itemsSummary = '';
+                      if (p.itens_json && Array.isArray(p.itens_json)) {
+                          const namedItems = p.itens_json.filter((it: any) => it.name).map((it: any) => `${it.qtd ? it.qtd + 'x ' : ''}${it.name}${it.subtotal ? ` (R$ ${it.subtotal})` : ''}`).slice(0, 3);
+                          if (namedItems.length > 0) itemsSummary = ` | Itens: ${namedItems.join(', ')}`;
+                      }
+                      return `${idx + 1}. Proposta #${p.id.slice(0, 8)} | ${cliente}${phoneStr} | Serviço: "${p.servico_tipo || 'Geral'}" | Total: R$ ${p.valor_estimado || 0} | Status: ${p.status || 'Pendente'}${itemsSummary}`;
                   }).join('\n');
               }
           } catch {}
@@ -847,10 +911,13 @@ O Arnaldo está interagindo com você diretamente pelo painel do CRM Web (compar
 
 ${temporal.promptContext}
 
+📱 AGENDA DE CONTATOS DO CRM:
+${agendaClientesTexto || 'Nenhum contato na agenda.'}
+
 📋 TAREFAS ATUAIS DO ARNALDO NO SISTEMA:
 ${tarefasGestorTexto}
 
-${propostasGestorTexto ? `📄 PROPOSTAS RECENTES:\n${propostasGestorTexto}\n` : ''}
+${propostasGestorTexto ? `📄 PROPOSTAS E ORÇAMENTOS RECENTES:\n${propostasGestorTexto}\n` : ''}
 ${clienteContexto}
 
 HISTÓRICO RECENTE COM O ARNALDO (WhatsApp e CRM):
@@ -1359,6 +1426,66 @@ DIRETRIZES OBRIGATÓRIAS:
       if (isArnaldoAdmin) {
           console.log(`[MODO GESTOR ATIVADO] Mensagem recebida do Gestor Arnaldo Trentin (${remoteJid})!`);
           
+          // 1. Agenda consolidada de contatos do CRM (tarefas_arnaldo + clientes)
+          let agendaClientesTexto = "";
+          const contactPhoneByName = new Map<string, string>();
+          try {
+              const { data: tarefasContacts } = await supabase
+                  .from('tarefas_arnaldo')
+                  .select('cliente_nome, cliente_telefone')
+                  .not('cliente_telefone', 'is', null)
+                  .order('created_at', { ascending: false })
+                  .limit(150);
+
+              const contactMap = new Map<string, { name: string; phone: string }>();
+
+              (tarefasContacts || []).forEach((t: any) => {
+                  const rawP = String(t.cliente_telefone || '').replace(/\D/g, '');
+                  const name = (t.cliente_nome || '').trim();
+                  if (rawP.length >= 8 && name && !isArnaldoPhone(rawP) && !isBotPhone(rawP)) {
+                      const formatted = (!rawP.startsWith('55') && rawP.length <= 11) ? '55' + rawP : rawP;
+                      const normKey = name.toLowerCase();
+                      if (!contactMap.has(normKey)) {
+                          contactMap.set(normKey, { name, phone: formatted });
+                          contactPhoneByName.set(normKey, formatted);
+                          // Adiciona também pelo primeiro nome se for específico
+                          const firstName = normKey.split(' ')[0];
+                          if (firstName.length >= 3 && !contactPhoneByName.has(firstName)) {
+                              contactPhoneByName.set(firstName, formatted);
+                          }
+                      }
+                  }
+              });
+
+              const { data: dbCli } = await supabase
+                  .from('clientes')
+                  .select('nome_cliente, whatsapp, telefone')
+                  .limit(100);
+
+              (dbCli || []).forEach((c: any) => {
+                  const rawP = String(c.whatsapp || c.telefone || '').replace(/\D/g, '');
+                  const name = (c.nome_cliente || '').trim();
+                  if (rawP.length >= 8 && name && !isArnaldoPhone(rawP) && !isBotPhone(rawP)) {
+                      const formatted = (!rawP.startsWith('55') && rawP.length <= 11) ? '55' + rawP : rawP;
+                      const normKey = name.toLowerCase();
+                      if (!contactMap.has(normKey)) {
+                          contactMap.set(normKey, { name, phone: formatted });
+                          contactPhoneByName.set(normKey, formatted);
+                      }
+                  }
+              });
+
+              if (contactMap.size > 0) {
+                  agendaClientesTexto = Array.from(contactMap.values())
+                      .map((c, i) => `${i + 1}. ${c.name} | WhatsApp: ${c.phone}`)
+                      .join('\n');
+              } else {
+                  agendaClientesTexto = "Nenhum contato na agenda.";
+              }
+          } catch (agErr) {
+              console.warn("Erro ao carregar agenda de contatos:", agErr);
+          }
+
           let tarefasGestorTexto = "";
           try {
               const { data: pendTarefas } = await supabase
@@ -1366,12 +1493,14 @@ DIRETRIZES OBRIGATÓRIAS:
                   .select('id, cliente_nome, cliente_telefone, titulo, descricao, prioridade, status, created_at')
                   .in('status', ['pendente', 'em_andamento'])
                   .order('created_at', { ascending: false })
-                  .limit(10);
+                  .limit(12);
 
               if (pendTarefas && pendTarefas.length > 0) {
-                  tarefasGestorTexto = pendTarefas.map((t, idx) => 
-                      `${idx + 1}. [${(t.prioridade || 'ALTA').toUpperCase()}] ${t.cliente_nome || 'Cliente'} (${t.cliente_telefone || 'Sem tel'}): "${t.titulo}" - Detalhes: ${t.descricao || 'N/A'}`
-                  ).join('\n');
+                  tarefasGestorTexto = pendTarefas.map((t, idx) => {
+                      const rawPhone = String(t.cliente_telefone || '').replace(/\D/g, '');
+                      const clientPhone = rawPhone || contactPhoneByName.get((t.cliente_nome || '').toLowerCase()) || 'Sem tel';
+                      return `${idx + 1}. [${(t.prioridade || 'ALTA').toUpperCase()}] ${t.cliente_nome || 'Cliente'} (WhatsApp: ${clientPhone}): "${t.titulo}" - Detalhes: ${t.descricao || 'N/A'}`;
+                  }).join('\n');
               } else {
                   tarefasGestorTexto = "Nenhuma tarefa pendente no momento. Todas estão em dia!";
               }
@@ -1383,25 +1512,72 @@ DIRETRIZES OBRIGATÓRIAS:
           try {
               const { data: recPropostas } = await supabase
                   .from('propostas')
-                  .select('id, servico_tipo, valor_estimado, valor_maos_obra, valor_estimado_materiais, fornecimento_materiais, status, observacoes, data_proposta, clientes(nome_cliente)')
+                  .select('id, servico_tipo, valor_estimado, valor_maos_obra, valor_estimado_materiais, fornecimento_materiais, status, observacoes, data_proposta, itens_json, clientes(nome_cliente, whatsapp)')
                   .order('created_at', { ascending: false })
-                  .limit(10);
+                  .limit(15);
 
               if (recPropostas && recPropostas.length > 0) {
                   propostasGestorTexto = recPropostas.map((p: any, idx: number) => {
-                      const cliente = p.clientes?.nome_cliente || (p.servico_tipo?.includes('tubo') || p.servico_tipo?.includes('GN') ? 'Fabiana Arquiteta (Vila Madalena)' : 'Cliente');
+                      const clienteNome = p.clientes?.nome_cliente || (p.servico_tipo?.includes('tubo') || p.servico_tipo?.includes('GN') ? 'Fabiana Arquiteta' : 'Cliente');
+                      const rawP = p.clientes?.whatsapp || contactPhoneByName.get(clienteNome.toLowerCase()) || contactPhoneByName.get(clienteNome.toLowerCase().split(' ')[0]) || '';
+                      const phoneStr = rawP ? ` | Tel: ${rawP}` : '';
                       const dataStr = p.data_proposta ? new Date(p.data_proposta).toLocaleDateString('pt-BR') : '';
                       const moStr = p.valor_maos_obra ? ` | Mão de obra: R$ ${p.valor_maos_obra}` : '';
                       const matValStr = p.valor_estimado_materiais ? ` | Materiais: R$ ${p.valor_estimado_materiais}` : '';
                       const matStr = p.fornecimento_materiais ? ` | Fornecimento: ${p.fornecimento_materiais}` : '';
                       const obsStr = p.observacoes ? ` | Obs: ${p.observacoes}` : '';
-                      return `${idx + 1}. Proposta #${p.id.slice(0, 8)} | ${cliente} | Serviço: "${p.servico_tipo || 'Geral'}" | Total: R$ ${p.valor_estimado || 0}${moStr}${matValStr}${matStr} | Status: ${p.status || 'Pendente'}${dataStr ? ` | Data: ${dataStr}` : ''}${obsStr}`;
+
+                      let itemsSummary = '';
+                      if (p.itens_json && Array.isArray(p.itens_json)) {
+                          const namedItems = p.itens_json
+                              .filter((it: any) => it.name)
+                              .map((it: any) => `${it.qtd ? it.qtd + 'x ' : ''}${it.name}${it.subtotal ? ` (R$ ${it.subtotal})` : ''}`)
+                              .slice(0, 4);
+                          if (namedItems.length > 0) itemsSummary = ` | Itens: ${namedItems.join(', ')}`;
+                      }
+
+                      return `${idx + 1}. Proposta #${p.id.slice(0, 8)} | Cliente: ${clienteNome}${phoneStr} | Serviço: "${p.servico_tipo || 'Geral'}" | Total: R$ ${p.valor_estimado || 0}${moStr}${matValStr}${matStr} | Status: ${p.status || 'Pendente'}${dataStr ? ` | Data: ${dataStr}` : ''}${itemsSummary}${obsStr}`;
                   }).join('\n');
               } else {
                   propostasGestorTexto = "Nenhuma proposta cadastrada recentemente.";
               }
           } catch (pErr) {
               console.warn("Erro ao buscar propostas para gestor:", pErr);
+          }
+
+          // Busca profunda de proposta/orçamento específico caso Arnaldo cite termos ou nomes
+          let propostaBuscadaTexto = "";
+          try {
+              const uTextLower = (userMessage || '').toLowerCase();
+              if (/(proposta|or[çc]amento|or[çc]ar|valor|pre[çc]o|g[aá]s|el[eé]trica|maitha|fabiana|denise|rafael|pompeia|studio)/i.test(uTextLower)) {
+                  const words = (userMessage || '').match(/[A-ZÁÉÍÓÚÂÊÔÃÕa-záéíóúâêôãõç0-9]{3,}/g) || [];
+                  const stopWords = new Set(['bom', 'boa', 'tarde', 'noite', 'dia', 'olá', 'arnaldo', 'maria', 'cecília', 'para', 'com', 'uma', 'mais', 'sobre', 'esse', 'essa', 'qual', 'pode', 'manda', 'avisa']);
+                  const candidateWords = words.filter(w => !stopWords.has(w.toLowerCase()));
+
+                  for (const word of candidateWords) {
+                      const { data: propMatches } = await supabase
+                          .from('propostas')
+                          .select('*')
+                          .or(`servico_tipo.ilike.%${word}%,observacoes.ilike.%${word}%,id.ilike.%${word}%`)
+                          .order('created_at', { ascending: false })
+                          .limit(3);
+
+                      if (propMatches && propMatches.length > 0) {
+                          propostaBuscadaTexto = propMatches.map(p => {
+                              const itemsDesc = (p.itens_json || []).map((it: any) => 
+                                  it.name ? `- ${it.qtd ? it.qtd + 'x ' : ''}${it.name}: R$ ${it.subtotal || it.price || 0}` : (it.endereco ? `- Endereço: ${it.endereco}` : '')
+                              ).filter(Boolean).join('\n  ');
+                              return `=== 📑 DETALHES COMPLETOS DO ORÇAMENTO/PROPOSTA #${p.id.slice(0, 8)} (${p.servico_tipo}) ===
+Status: ${p.status || 'Pendente'} | Data: ${p.data_proposta ? new Date(p.data_proposta).toLocaleDateString('pt-BR') : 'N/D'}
+Valor Total: R$ ${p.valor_estimado || 0} (Mão de Obra: R$ ${p.valor_maos_obra || 0} | Materiais: R$ ${p.valor_estimado_materiais || 0} | Fornecimento: ${p.fornecimento_materiais || 'N/A'})
+${itemsDesc ? `Itens e Escopo Detalhado:\n  ${itemsDesc}\n` : ''}${p.observacoes ? `Observações: ${p.observacoes}\n` : ''}==================================================================`;
+                          }).join('\n\n');
+                          break;
+                      }
+                  }
+              }
+          } catch (pSearchErr) {
+              console.warn("Erro ao buscar proposta específica:", pSearchErr);
           }
 
           let ordensGestorTexto = "";
@@ -1601,21 +1777,29 @@ ${snippet}
        "prioridade": "alta"
      }
 
-7. RESOLUÇÃO DE CONTATOS:
-   - NUNCA invente números de telefone para clientes. Se não localizar o WhatsApp do cliente na lista abaixo ou no banco de clientes, pergunte gentilmente: "Arnaldo, qual é o WhatsApp de [Nome] para eu disparar?".
+7. RESOLUÇÃO DE CONTATOS & ACESSO À AGENDA DO CRM:
+   - Você TEM ACESSO TOTAL à lista oficial de contatos salvos no CRM na seção 📱 AGENDA DE CONTATOS & CLIENTES DO CRM abaixo!
+   - Quando o Arnaldo pedir para mandar mensagem, cobrar, avisar ou falar com um cliente (ex: "manda mensagem para a Fabiana", "cobra a Denise", "avisa o Sergio", "fala com o Rafael"):
+     * Localize o cliente na AGENDA DE CONTATOS ou nas PROPOSTAS/TAREFAS abaixo.
+     * Preencha o "nome_cliente" e o "telefone_destino" e dispare o JSON "DISPARAR_CONTATO_ATIVO" IMEDIATAMENTE!
+     * Se você souber o nome mas não encontrar os dígitos exatos, envie com o "nome_cliente" e o backend resolverá o WhatsApp automaticamente!
+     * NUNCA peça o número de WhatsApp para o Arnaldo se o cliente já constar na AGENDA DO CRM, nas PROPOSTAS ou nas TAREFAS!
 
 8. CONSULTA DE HISTÓRICO E MENSAGENS ENVIADAS A CLIENTES:
    - Se o Arnaldo perguntar sobre conversas, mensagens enviadas pelo CRM ou pelo WhatsApp, ou pedir o histórico de algum cliente (ex: Fabiana):
      * Consulte sempre a seção <HISTÓRICO REAL DE CONVERSA COM O(A) CLIENTE> injetada abaixo.
      * Se constar uma mensagem enviada pela Maria Cecília (IA/CRM) no histórico daquele cliente, CONFIRME para o Arnaldo informando o teor da mensagem e horário. NUNCA diga que não foi você quem enviou se a mensagem estiver registrada no sistema! O CRM e o WhatsApp são um único ecossistema integrado.
 
+📱 AGENDA DE CONTATOS & CLIENTES REGISTRADOS NO CRM:
+${agendaClientesTexto || 'Nenhum contato na agenda.'}
+
 📋 TAREFAS ATUAIS DO ARNALDO NO SISTEMA:
 ${tarefasGestorTexto}
 
-📑 PROPOSTAS E ORÇAMENTOS RECENTES NO SISTEMA:
+📑 PROPOSTAS E ORÇAMENTOS RECENTES NO SISTEMA (COM ITENS E VALORES):
 ${propostasGestorTexto}
 
-🛠️ ORDENS DE SERVIÇO (OS) RECENTES NO SISTEMA:
+${propostaBuscadaTexto ? `${propostaBuscadaTexto}\n\n` : ''}🛠️ ORDENS DE SERVIÇO (OS) RECENTES NO SISTEMA:
 ${ordensGestorTexto}
 
 💬 ÚLTIMAS MENSAGENS RECEBIDAS NO CRM:
@@ -1648,6 +1832,30 @@ ${clienteConversaContexto}
                   dbCliente = clientMatches[0];
               }
 
+              // Fallback: se não estiver na tabela clientes, busca na tabela de tarefas_arnaldo
+              if (!dbCliente) {
+                  try {
+                      const { data: taskMatch } = await supabase.from('tarefas_arnaldo')
+                          .select('cliente_nome, cliente_telefone, titulo, descricao')
+                          .in('cliente_telefone', phoneVariants)
+                          .order('created_at', { ascending: false })
+                          .limit(1);
+
+                      if (taskMatch && taskMatch.length > 0 && taskMatch[0].cliente_nome) {
+                          dbCliente = {
+                              id: null,
+                              nome_cliente: taskMatch[0].cliente_nome,
+                              whatsapp: taskMatch[0].cliente_telefone,
+                              endereco_completo: '',
+                              documento_cpf_cnpj: '',
+                              relato_necessidade: `${taskMatch[0].titulo || ''}: ${taskMatch[0].descricao || ''}`
+                          };
+                      }
+                  } catch (tFallbackErr) {
+                      console.warn("Erro ao buscar fallback em tarefas_arnaldo:", tFallbackErr);
+                  }
+              }
+
               let osText = "";
               let propostasText = "";
               let agendaText = "";
@@ -1665,19 +1873,48 @@ ${clienteConversaContexto}
                           `- OS #${os.id_os} | Serviço: ${os.descricao_servico || 'Serviço Geral'} | Data/Hora Agendada: ${os.data_agendamento ? new Date(os.data_agendamento).toLocaleString('pt-BR') : 'A definir'} | Status: ${os.status_os || 'Aberta'}${os.valor_total ? ` | Valor: R$ ${os.valor_total}` : ''}${os.observacoes ? ` | Obs: ${os.observacoes}` : ''}`
                       ).join('\n');
                   }
+              }
 
-                  // 3. Busca Propostas / Orçamentos
-                  const { data: dbProp } = await supabase.from('propostas')
-                      .select('id, servico_tipo, valor_estimado, status, data_proposta, fornecimento_materiais')
-                      .eq('cliente_id', dbCliente.id)
-                      .order('created_at', { ascending: false })
-                      .limit(4);
+              // 3. Busca Propostas / Orçamentos com Itens e Escopo Detalhado
+              try {
+                  let dbProp: any[] = [];
+                  if (dbCliente?.id) {
+                      const { data: pById } = await supabase.from('propostas')
+                          .select('id, servico_tipo, valor_estimado, status, data_proposta, fornecimento_materiais, itens_json, observacoes')
+                          .eq('cliente_id', dbCliente.id)
+                          .order('created_at', { ascending: false })
+                          .limit(4);
+                      if (pById) dbProp = pById;
+                  }
+
+                  // Se não encontrou por ID ou ID é nulo, busca pelo nome do cliente
+                  if (dbProp.length === 0 && dbCliente?.nome_cliente) {
+                      const firstName = dbCliente.nome_cliente.trim().split(' ')[0];
+                      if (firstName.length >= 3) {
+                          const { data: pByName } = await supabase.from('propostas')
+                              .select('id, servico_tipo, valor_estimado, status, data_proposta, fornecimento_materiais, itens_json, observacoes')
+                              .or(`servico_tipo.ilike.%${firstName}%,observacoes.ilike.%${firstName}%`)
+                              .order('created_at', { ascending: false })
+                              .limit(4);
+                          if (pByName && pByName.length > 0) dbProp = pByName;
+                      }
+                  }
 
                   if (dbProp && dbProp.length > 0) {
-                      propostasText = dbProp.map((p: any) =>
-                          `- Proposta/Orçamento: ${p.servico_tipo || 'Geral'} | Valor: R$ ${p.valor_estimado || 0} | Status: ${p.status || 'Pendente'} | Fornecimento: ${p.fornecimento_materiais || 'Padrão'}`
-                      ).join('\n');
+                      propostasText = dbProp.map((p: any) => {
+                          let itemsSummary = '';
+                          if (p.itens_json && Array.isArray(p.itens_json)) {
+                              const namedItems = p.itens_json
+                                  .filter((it: any) => it.name)
+                                  .map((it: any) => `${it.qtd ? it.qtd + 'x ' : ''}${it.name}${it.subtotal ? ` (R$ ${it.subtotal})` : ''}`)
+                                  .slice(0, 4);
+                              if (namedItems.length > 0) itemsSummary = ` | Itens: ${namedItems.join(', ')}`;
+                          }
+                          return `- Proposta/Orçamento #${p.id.slice(0, 8)}: "${p.servico_tipo || 'Geral'}" | Valor: R$ ${p.valor_estimado || 0} | Status: ${p.status || 'Pendente'}${itemsSummary}${p.observacoes ? ` | Obs: ${p.observacoes}` : ''}`;
+                      }).join('\n');
                   }
+              } catch (propErr) {
+                  console.warn("Erro ao buscar propostas do cliente:", propErr);
               }
 
               // 4. Busca Agendamentos e Missões da Maria
@@ -2773,10 +3010,16 @@ ${clienteConversaContexto}
                               content: storedContent
                           });
 
+                          const phoneDisplay = targetPhone.startsWith('55') && targetPhone.length >= 12
+                              ? `(${targetPhone.slice(2, 4)}) ${targetPhone.slice(4)}`
+                              : targetPhone;
                           const defaultConfirmation = fileToSend 
-                              ? `✅ Mensagem com o arquivo "${fileNameToSend}" enviada para ${actionData.nome_cliente || targetPhone} no WhatsApp!`
-                              : `✅ Mensagem enviada para ${actionData.nome_cliente || targetPhone} no WhatsApp!`;
-                          gestorConfirmations.push(actionData.confirmacao_gestor || defaultConfirmation);
+                              ? `✅ Mensagem com o arquivo "${fileNameToSend}" enviada para ${actionData.nome_cliente || 'o cliente'} no WhatsApp ${phoneDisplay}!`
+                              : `✅ Mensagem enviada para ${actionData.nome_cliente || 'o cliente'} no WhatsApp ${phoneDisplay}!`;
+                          const finalConf = actionData.confirmacao_gestor
+                              ? (actionData.confirmacao_gestor.includes(phoneDisplay) ? actionData.confirmacao_gestor : `${actionData.confirmacao_gestor} (Destino: ${phoneDisplay})`)
+                              : defaultConfirmation;
+                          gestorConfirmations.push(finalConf);
                       } else {
                           gestorConfirmations.push(`⚠️ Não foi possível enviar para ${actionData.nome_cliente || targetPhone}: mensagem gerada estava vazia.`);
                       }
@@ -3078,6 +3321,47 @@ ${clienteConversaContexto}
               body: JSON.stringify({ number: remoteJid, text: whatsAppText })
           });
           console.log(`[UAZAPI RETORNO] Status: ${uazapiResponse.status}`);
+
+          // 🔔 NOTIFICAR O GESTOR ARNALDO QUANDO UM CLIENTE/CONTATO RESPONDER OU ENVIAR MENSAGEM
+          if (!isArnaldoAdmin && !isSpamRobo) {
+              try {
+                  const gestorDest = '18253369239';
+                  const clientDisplayName = dbCliente?.nome_cliente || pushName || 'Cliente';
+                  const cleanUserMsg = (userMessage || '').replace(/\[MSG_ID:[^\]]+\]\s*/g, '').trim();
+
+                  if (cleanUserMsg && !cleanUserMsg.startsWith('BOT_') && !cleanUserMsg.startsWith('SPAM_')) {
+                      const previewUserMsg = cleanUserMsg.length > 300 ? cleanUserMsg.substring(0, 297) + '...' : cleanUserMsg;
+                      const previewAiResp = (whatsAppText || '').length > 300 ? (whatsAppText || '').substring(0, 297) + '...' : whatsAppText;
+
+                      const notifText = `🔔 *Maria Cecília Informa:*
+O(A) cliente *${clientDisplayName}* (${remoteJid}) enviou uma mensagem no WhatsApp da empresa:
+
+💬 _"${previewUserMsg}"_
+
+🤖 *Minha resposta enviada:*
+"${previewAiResp}"`;
+
+                      const gestorEndpoint = uazapiUrl.endsWith('/') ? `${uazapiUrl}send/text` : `${uazapiUrl}/send/text`;
+
+                      await fetch(gestorEndpoint, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json', 'token': activeToken },
+                          body: JSON.stringify({ number: gestorDest, text: notifText })
+                      });
+
+                      // Registra na memória unificada do Arnaldo para manter o contexto
+                      await supabase.from('agent_memory').insert({
+                          phone: gestorDest,
+                          role: 'model',
+                          content: notifText
+                      });
+
+                      console.log(`[NOTIFICAÇÃO GESTOR] Enviada com sucesso para Arnaldo (+1 825 336 9239) sobre ${clientDisplayName}!`);
+                  }
+              } catch (notifErr) {
+                  console.error("[NOTIFICAÇÃO GESTOR ERRO] Falha ao enviar notificação para Arnaldo:", notifErr);
+              }
+          }
       }
 
     } catch (err: any) {

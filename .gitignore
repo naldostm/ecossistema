@@ -28,6 +28,8 @@ package/
 !checklist_final.txt
 *.log
 supabase/.temp/
+scratch/
+
 
 
 

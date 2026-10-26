@@ -28,36 +28,124 @@ document.addEventListener('DOMContentLoaded', () => {
     // SISTEMA DE CATEGORIAS E SUBCATEGORIAS (ÁRVORE DINÂMICA)
     // ==========================================
     window.catalogoTree = {
-        "Elétrica": ["Cabos", "Disjuntores", "Iluminação"],
-        "Hidráulica": ["PEX", "PPR", "CPVC", "PVC", "Básica", "Premium"],
-        "Infraestrutura de Ar-Condicionado": ["Tubulação de Cobre", "Suportes", "Isolamento"],
-        "Ferramentas": ["Manuais", "Elétricas"],
-        "Gás": ["Tubos", "Conexões"],
-        "Geral": []
+        "Elétrica": ["Cabos e Fios", "Disjuntores", "Tomadas e Interruptores", "Quadros e Painéis", "Iluminação"],
+        "Hidráulica": ["PEX", "PPR", "PVC / CPVC", "Básica", "Premium", "Louças e Metais"],
+        "Infraestrutura de Ar-Condicionado": ["Tubulação de Cobre", "Suportes e Coxins", "Isolamento Térmico", "Dreno", "Carga de Gás"],
+        "Ferramentas": ["Manuais", "Elétricas", "Medição e Teste"],
+        "Gás": ["Tubulações e Flexíveis", "Válvulas e Reguladores", "Conexões"],
+        "Iluminação": ["Spots e Embutidos", "Fitas de LED", "Luminárias", "Refletores"],
+        "Geral": ["Uso Geral", "Fixação e Parafusos", "Taxas e Visitas"]
+    };
+
+    window.catalogoFilterState = {
+        materiais: { master: '', sub: '' },
+        servicos: { master: '', sub: '' }
+    };
+
+    /**
+     * Mapeia ícones modernos para cada Categoria Principal
+     */
+    window.getCategoryIcon = function (catName) {
+        const map = {
+            'Elétrica': 'fa-bolt',
+            'Hidráulica': 'fa-faucet-drip',
+            'Infraestrutura de Ar-Condicionado': 'fa-snowflake',
+            'Ferramentas': 'fa-toolbox',
+            'Gás': 'fa-fire-flame-simple',
+            'Iluminação': 'fa-lightbulb',
+            'Geral': 'fa-layer-group'
+        };
+        return map[catName] || 'fa-folder';
+    };
+
+    /**
+     * Parser inteligente de categoria: decompõe "Categoria | Subcategoria" ou
+     * normaliza categorias legadas para a árvore ativa sem perda de dados
+     */
+    window.parseItemCategory = function (rawCategory) {
+        if (!rawCategory || typeof rawCategory !== 'string') return { master: 'Geral', sub: '' };
+        const str = rawCategory.trim();
+        if (!str || str === 'Sem Categoria' || str === '(Vazio)') return { master: 'Geral', sub: '' };
+
+        if (str.includes('|')) {
+            const parts = str.split('|');
+            return {
+                master: parts[0]?.trim() || 'Geral',
+                sub: parts[1]?.trim() || ''
+            };
+        }
+
+        const masters = Object.keys(window.catalogoTree || {});
+        for (const m of masters) {
+            if (str.toLowerCase() === m.toLowerCase()) {
+                return { master: m, sub: '' };
+            }
+        }
+        for (const m of masters) {
+            if (str.toLowerCase().startsWith(m.toLowerCase())) {
+                const remainder = str.substring(m.length).replace(/^[\s\-_:/]+/, '').trim();
+                return { master: m, sub: remainder };
+            }
+        }
+
+        if (str.toLowerCase().includes('ar condicionado') || str.toLowerCase().includes('ar-condicionado')) {
+            return { master: 'Infraestrutura de Ar-Condicionado', sub: str };
+        }
+        if (str.toLowerCase().includes('elétrica') || str.toLowerCase().includes('eletrica')) {
+            return { master: 'Elétrica', sub: str };
+        }
+        if (str.toLowerCase().includes('hidráulica') || str.toLowerCase().includes('hidraulica')) {
+            return { master: 'Hidráulica', sub: str };
+        }
+        if (str.toLowerCase().includes('luz') || str.toLowerCase().includes('iluminação') || str.toLowerCase().includes('iluminacao')) {
+            return { master: 'Iluminação', sub: str };
+        }
+
+        return { master: 'Geral', sub: str };
     };
 
     window.loadCatalogoConfig = async function() {
         try {
-            // Tenta puxar ambas as configurações em uma única chamada (usando IN)
             const { data, error } = await supabase.from('sistema_configuracoes').select('*').in('chave', ['catalogo_arvore', 'calc_config']);
             
             if (data && data.length > 0) {
+                let foundTree = false;
                 data.forEach(row => {
-                    if (row.chave === 'catalogo_arvore') window.catalogoTree = row.valor;
+                    if (row.chave === 'catalogo_arvore' && row.valor && Object.keys(row.valor).length > 0) {
+                        window.catalogoTree = row.valor;
+                        foundTree = true;
+                    }
                     if (row.chave === 'calc_config') {
                         window._calcConfig = row.valor.params || {};
                         window._calcHorasEstimadas = row.valor.horas || {};
                     }
                 });
-            } else if (error && error.code === '42P01') {
-                // Tabela não existe, usa fallback local
+                if (!foundTree) {
+                    try {
+                        await supabase.from('sistema_configuracoes').upsert({
+                            chave: 'catalogo_arvore',
+                            valor: window.catalogoTree
+                        }, { onConflict: 'chave' });
+                    } catch (_) {}
+                }
+            } else {
                 const localTree = localStorage.getItem('catalogo_arvore');
-                if (localTree) window.catalogoTree = JSON.parse(localTree);
+                if (localTree) {
+                    try { window.catalogoTree = JSON.parse(localTree); } catch (e) {}
+                }
+                try {
+                    await supabase.from('sistema_configuracoes').upsert({
+                        chave: 'catalogo_arvore',
+                        valor: window.catalogoTree
+                    }, { onConflict: 'chave' });
+                } catch (_) {}
             }
         } catch (e) {
             console.error("Erro ao carregar configurações do sistema:", e);
         } finally {
-            if (typeof window.populateCategorySelects === 'function') {
+            if (typeof window.syncCategorySystem === 'function') {
+                window.syncCategorySystem();
+            } else if (typeof window.populateCategorySelects === 'function') {
                 window.populateCategorySelects();
             }
         }
@@ -696,10 +784,9 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('mat-preco-compra').value = item.preco_compra || '';
             document.getElementById('mat-val').value = item.valor_unitario || '';
 
-            const parts = (item.campo_uso || 'Geral | ').split(' | ');
-            document.getElementById('mat-categoria').value = parts[0] ? parts[0].trim() : 'Geral';
-            window.updateSubcategories('mat-categoria', 'mat-subcategoria');
-            document.getElementById('mat-subcategoria').value = parts[1] ? parts[1].trim() : '';
+            const parsedMat = window.parseItemCategory(item.campo_uso);
+            document.getElementById('mat-categoria').value = parsedMat.master;
+            window.updateSubcategories('mat-categoria', 'mat-subcategoria', parsedMat.sub);
         } else if (table === 'ferramentas') {
             document.getElementById('fer-nome').value = item.nome_ferramenta;
             document.getElementById('fer-status').value = item.status;
@@ -716,10 +803,9 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (table === 'servicos') {
             document.getElementById('ser-nome').value = item.nome_servico;
             
-            const parts = (item.categoria || 'Geral | ').split(' | ');
-            document.getElementById('ser-categoria').value = parts[0] ? parts[0].trim() : 'Geral';
-            window.updateSubcategories('ser-categoria', 'ser-subcategoria');
-            document.getElementById('ser-subcategoria').value = parts[1] ? parts[1].trim() : '';
+            const parsedSer = window.parseItemCategory(item.categoria);
+            document.getElementById('ser-categoria').value = parsedSer.master;
+            window.updateSubcategories('ser-categoria', 'ser-subcategoria', parsedSer.sub);
             
             document.getElementById('ser-desc').value = item.descricao || '';
             document.getElementById('ser-val').value = item.valor_base;
@@ -1520,6 +1606,7 @@ ${materiaisTxt}${extrasTxt}
             if (!errMat && materiais) {
                 window.materiaisCache = materiais;
                 if (typeof window.renderMateriais === 'function') window.renderMateriais();
+                if (typeof window.renderCategoryNavBars === 'function') window.renderCategoryNavBars('materiais');
             }
 
             // 4. Traz Ferramentas
@@ -1536,6 +1623,7 @@ ${materiaisTxt}${extrasTxt}
             if (!errSer && servicos) {
                 window.servicosCache = servicos;
                 if (typeof window.renderServicos === 'function') window.renderServicos();
+                if (typeof window.renderCategoryNavBars === 'function') window.renderCategoryNavBars('servicos');
             }
 
             // 6. Traz Quadro de Funcionários (Colaboradores)
@@ -2121,6 +2209,178 @@ ${materiaisTxt}${extrasTxt}
     };
 
     /**
+     * =========================================================================
+     * MOTOR DE NAVEGAÇÃO DE CATEGORIAS E SUBCATEGORIAS (ABAS DUPLAS DINÂMICAS)
+     * =========================================================================
+     */
+
+    /**
+     * Renderiza visualmente as Abas Duplas (Linha 1: Master, Linha 2: Subcategorias)
+     * para 'materiais' e 'servicos' sincronizadas 100% com window.catalogoTree
+     */
+    window.renderCategoryNavBars = function (targetContext = null) {
+        const contexts = targetContext ? [targetContext] : ['materiais', 'servicos'];
+        
+        contexts.forEach(context => {
+            const masterContainer = document.getElementById(`${context}-cat-master`);
+            const subTrack = document.getElementById(`${context}-cat-sub`);
+            if (!masterContainer) return;
+
+            const items = context === 'materiais' ? (window.materiaisCache || []) : (window.servicosCache || []);
+            const activeMaster = window.catalogoFilterState?.[context]?.master || '';
+            const activeSub = window.catalogoFilterState?.[context]?.sub || '';
+
+            // 1. Contagem por Categoria Principal e Subcategorias
+            const masterCounts = { '': items.length };
+            const subCountsByMaster = {};
+
+            Object.keys(window.catalogoTree || {}).forEach(k => {
+                masterCounts[k] = 0;
+                subCountsByMaster[k] = {};
+                (window.catalogoTree[k] || []).forEach(sub => {
+                    subCountsByMaster[k][sub] = 0;
+                });
+            });
+
+            items.forEach(it => {
+                const rawCat = context === 'materiais' ? it.campo_uso : it.categoria;
+                const parsed = window.parseItemCategory(rawCat);
+                if (masterCounts[parsed.master] !== undefined) {
+                    masterCounts[parsed.master]++;
+                } else {
+                    masterCounts[parsed.master] = 1;
+                }
+
+                if (!subCountsByMaster[parsed.master]) subCountsByMaster[parsed.master] = {};
+                if (parsed.sub) {
+                    let matched = false;
+                    for (const subKey of Object.keys(subCountsByMaster[parsed.master])) {
+                        if (subKey.toLowerCase() === parsed.sub.toLowerCase()) {
+                            subCountsByMaster[parsed.master][subKey]++;
+                            matched = true;
+                            break;
+                        }
+                    }
+                    if (!matched) {
+                        subCountsByMaster[parsed.master][parsed.sub] = (subCountsByMaster[parsed.master][parsed.sub] || 0) + 1;
+                    }
+                }
+            });
+
+            // 2. Linha 1: Categorias Principais (Abas/Pills)
+            let masterHtml = `
+                <button type="button" class="cat-master-btn ${activeMaster === '' ? 'active' : ''}" onclick="window.selectMasterCategory('${context}', '')">
+                    <i class="fa-solid fa-border-all"></i>
+                    <span>Todas</span>
+                    <span class="cat-pill-count">${items.length}</span>
+                </button>
+            `;
+
+            Object.keys(window.catalogoTree || {}).forEach(cat => {
+                const icon = window.getCategoryIcon(cat);
+                const count = masterCounts[cat] || 0;
+                const isActive = activeMaster === cat;
+                const safeCat = cat.replace(/'/g, "\\'");
+                masterHtml += `
+                    <button type="button" class="cat-master-btn ${isActive ? 'active' : ''}" onclick="window.selectMasterCategory('${context}', '${safeCat}')">
+                        <i class="fa-solid ${icon}"></i>
+                        <span>${cat}</span>
+                        <span class="cat-pill-count">${count}</span>
+                    </button>
+                `;
+            });
+            masterContainer.innerHTML = masterHtml;
+
+            // 3. Linha 2: Subcategorias da Categoria Ativa (Chips)
+            if (!subTrack) return;
+
+            if (!activeMaster) {
+                subTrack.innerHTML = `
+                    <span class="cat-sub-hint">
+                        <i class="fa-solid fa-layer-group"></i> Selecione uma categoria acima para explorar as subcategorias
+                    </span>
+                `;
+            } else {
+                const treeSubs = window.catalogoTree[activeMaster] || [];
+                const discoveredSubs = Object.keys(subCountsByMaster[activeMaster] || {});
+                const allSubs = Array.from(new Set([...treeSubs, ...discoveredSubs])).filter(Boolean);
+
+                let subHtml = `
+                    <button type="button" class="cat-sub-chip ${activeSub === '' ? 'active' : ''}" onclick="window.selectSubCategory('${context}', '')">
+                        <i class="fa-solid fa-asterisk"></i> Todas de ${activeMaster}
+                    </button>
+                `;
+
+                if (allSubs.length === 0) {
+                    subHtml += `
+                        <span class="cat-sub-hint">Nenhuma subcategoria cadastrada nesta categoria.</span>
+                    `;
+                } else {
+                    allSubs.forEach(sub => {
+                        const subCount = subCountsByMaster[activeMaster]?.[sub] || 0;
+                        const isSubActive = activeSub.toLowerCase() === sub.toLowerCase();
+                        const safeSub = sub.replace(/'/g, "\\'");
+                        subHtml += `
+                            <button type="button" class="cat-sub-chip ${isSubActive ? 'active' : ''}" onclick="window.selectSubCategory('${context}', '${safeSub}')">
+                                <span>${sub}</span>
+                                ${subCount > 0 ? `<span class="cat-chip-count">(${subCount})</span>` : ''}
+                            </button>
+                        `;
+                    });
+                }
+                subTrack.innerHTML = subHtml;
+            }
+        });
+    };
+
+    /**
+     * Seleciona uma Categoria Master no contexto ('materiais' ou 'servicos')
+     */
+    window.selectMasterCategory = function (context, catName) {
+        if (!window.catalogoFilterState[context]) return;
+        window.catalogoFilterState[context].master = catName;
+        window.catalogoFilterState[context].sub = ''; // Reset da subcategoria ao trocar de categoria principal
+        window.renderCategoryNavBars(context);
+        if (context === 'materiais') window.renderMateriais();
+        if (context === 'servicos') window.renderServicos();
+    };
+
+    /**
+     * Seleciona uma Subcategoria no contexto ('materiais' ou 'servicos')
+     */
+    window.selectSubCategory = function (context, subcatName) {
+        if (!window.catalogoFilterState[context]) return;
+        window.catalogoFilterState[context].sub = subcatName;
+        window.renderCategoryNavBars(context);
+        if (context === 'materiais') window.renderMateriais();
+        if (context === 'servicos') window.renderServicos();
+    };
+
+    /**
+     * Compatibilidade legada com botões inline
+     */
+    window.setFiltroMatCat = function (btnElement, categoria) {
+        window.selectMasterCategory('materiais', categoria);
+    };
+
+    window.setFiltroSerCat = function (btnElement, categoria) {
+        window.selectMasterCategory('servicos', categoria);
+    };
+
+    /**
+     * Toggle botão de estoque baixo
+     */
+    window.filtroEstoqueBaixoAtivo = false;
+    window.toggleEstoqueBaixo = function () {
+        window.filtroEstoqueBaixoAtivo = !window.filtroEstoqueBaixoAtivo;
+        const btn = document.getElementById('btn-toggle-estoque-baixo');
+        if (btn) {
+            btn.classList.toggle('active', window.filtroEstoqueBaixoAtivo);
+        }
+        window.renderMateriais();
+    };
+
+    /**
      * Motor de Renderização e Filtro Inteligente de Materiais
      */
     window.renderMateriais = function () {
@@ -2128,31 +2388,22 @@ ${materiaisTxt}${extrasTxt}
 
         let filteredList = window.materiaisCache.slice();
 
-        // Obter valores dos filtros
-        const texto = (document.getElementById('filtro-mat-texto')?.value || '').toLowerCase();
-        const subcatFiltro = document.getElementById('filtro-mat-sub')?.value || '';
-
-        // O pill ativo guarda a categoria principal atual
-        const btnCatAtivo = document.querySelector('.cat-pill.active');
-        const catFiltro = btnCatAtivo ? btnCatAtivo.getAttribute('data-cat') : '';
-
-        // Obter estado do estoque baixo
+        const texto = (document.getElementById('filtro-mat-texto')?.value || '').toLowerCase().trim();
+        const activeMaster = window.catalogoFilterState?.materiais?.master || '';
+        const activeSub = window.catalogoFilterState?.materiais?.sub || '';
         const isEstoqueBaixo = window.filtroEstoqueBaixoAtivo || false;
 
-        // Limita a exibição usando os filtros
         filteredList = filteredList.filter(m => {
             let pass = true;
-            const parts = (m.campo_uso || 'Geral | Geral').split(' | ');
-            const cat = parts[0] ? parts[0].trim() : 'Geral';
-            const subcat = parts[1] ? parts[1].trim() : '';
+            const parsed = window.parseItemCategory(m.campo_uso);
 
-            // Text Search
+            // Busca por texto
             if (texto && !m.nome_material.toLowerCase().includes(texto)) pass = false;
-            // Cat Pill
-            if (catFiltro && cat !== catFiltro) pass = false;
-            // Subcat Select
-            if (subcatFiltro && subcat !== subcatFiltro) pass = false;
-            // Estoque Baixo (Abaixo de 5 unidades ou <= 10 se for pequeno)
+            // Categoria Principal
+            if (activeMaster && parsed.master.toLowerCase() !== activeMaster.toLowerCase()) pass = false;
+            // Subcategoria
+            if (activeSub && !parsed.sub.toLowerCase().includes(activeSub.toLowerCase())) pass = false;
+            // Estoque Baixo
             if (isEstoqueBaixo && Number(m.quantidade || 0) > 5) pass = false;
 
             return pass;
@@ -2162,20 +2413,20 @@ ${materiaisTxt}${extrasTxt}
         if (!tbody) return;
 
         if (filteredList.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding:30px;">Nenhum material encontrado com esses filtros.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding:30px;"><i class="fa-solid fa-box-open" style="font-size:1.5rem; display:block; margin-bottom:8px; opacity:0.5;"></i>Nenhum material encontrado com os filtros selecionados.</td></tr>';
             return;
         }
 
         tbody.innerHTML = filteredList.map(m => {
-            const parts = (m.campo_uso || 'Geral | Geral').split(' | ');
-            const cat = parts[0] ? parts[0].trim() : 'Geral';
-            const subcat = parts[1] ? parts[1].trim() : '';
+            const parsed = window.parseItemCategory(m.campo_uso);
             const qty = Number(m.quantidade || 0);
 
-            // Badge visual de estoque
-            const qtyBadge = qty <= 5 ? `<span style="color:var(--danger-color); font-weight:bold;"><i class="fa-solid fa-triangle-exclamation"></i> ${qty}</span>` : qty;
+            const qtyBadge = qty <= 5 
+                ? `<span style="color:var(--accent-red); font-weight:bold;"><i class="fa-solid fa-triangle-exclamation"></i> ${qty}</span>` 
+                : qty;
 
-            const badgeHtml = `<span class="badge in-progress" style="margin-right:5px; background:var(--glass-bg-hover); color:var(--text-light); border: 1px solid var(--border-color);">${cat}</span>` + (subcat ? `<span class="badge normal">${subcat}</span>` : '');
+            const badgeHtml = `<span class="badge in-progress" style="margin-right:4px;">${parsed.master}</span>` + 
+                (parsed.sub ? `<span class="badge normal">${parsed.sub}</span>` : '');
 
             return `<tr style="cursor: pointer;" onclick="window.openEditGeneric('materiais', '${m.id}')">
                 <td><strong>${m.nome_material}</strong></td>
@@ -2190,32 +2441,6 @@ ${materiaisTxt}${extrasTxt}
     };
 
     /**
-     * Define Pill ativo de Material
-     */
-    window.setFiltroMatCat = function (btnElement, categoria) {
-        document.querySelectorAll('.cat-pill').forEach(b => b.classList.remove('active'));
-        btnElement.classList.add('active');
-        window.renderMateriais();
-    };
-
-    /**
-     * Toggle botão de estoque baixo
-     */
-    window.filtroEstoqueBaixoAtivo = false;
-    window.toggleEstoqueBaixo = function () {
-        window.filtroEstoqueBaixoAtivo = !window.filtroEstoqueBaixoAtivo;
-        const btn = document.getElementById('btn-toggle-estoque-baixo');
-        if (window.filtroEstoqueBaixoAtivo) {
-            btn.style.background = 'var(--danger-color)';
-            btn.style.color = '#fff';
-        } else {
-            btn.style.background = 'var(--surface-light)';
-            btn.style.color = '';
-        }
-        window.renderMateriais();
-    };
-
-    /**
      * Motor de Renderização e Filtro Inteligente de Servicos
      */
     window.renderServicos = function () {
@@ -2223,17 +2448,23 @@ ${materiaisTxt}${extrasTxt}
 
         let filteredList = window.servicosCache.slice();
 
-        const texto = (document.getElementById('filtro-ser-texto')?.value || '').toLowerCase();
-        const btnCatAtivo = document.querySelector('.cat-pill-ser.active');
-        const catFiltro = btnCatAtivo ? btnCatAtivo.getAttribute('data-cat') : '';
+        const texto = (document.getElementById('filtro-ser-texto')?.value || '').toLowerCase().trim();
+        const activeMaster = window.catalogoFilterState?.servicos?.master || '';
+        const activeSub = window.catalogoFilterState?.servicos?.sub || '';
 
         filteredList = filteredList.filter(s => {
             let pass = true;
-            const cat = s.categoria || 'Geral';
+            const parsed = window.parseItemCategory(s.categoria);
 
-            if (texto && !s.nome_servico.toLowerCase().includes(texto)) pass = false;
-            // Para serviços ignoramos acentuação no cat filter aproximado ou lidamos cru
-            if (catFiltro && cat !== catFiltro) pass = false;
+            if (texto && !s.nome_servico.toLowerCase().includes(texto) && !(s.descricao || '').toLowerCase().includes(texto)) {
+                pass = false;
+            }
+            if (activeMaster && parsed.master.toLowerCase() !== activeMaster.toLowerCase()) {
+                pass = false;
+            }
+            if (activeSub && !parsed.sub.toLowerCase().includes(activeSub.toLowerCase())) {
+                pass = false;
+            }
 
             return pass;
         });
@@ -2242,28 +2473,23 @@ ${materiaisTxt}${extrasTxt}
         if (!tbody) return;
 
         if (filteredList.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding:30px;">Nenhum serviço encontrado com esses filtros.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding:30px;"><i class="fa-solid fa-briefcase" style="font-size:1.5rem; display:block; margin-bottom:8px; opacity:0.5;"></i>Nenhum serviço encontrado com os filtros selecionados.</td></tr>';
             return;
         }
 
         tbody.innerHTML = filteredList.map(s => {
+            const parsed = window.parseItemCategory(s.categoria);
+            const badgeHtml = `<span class="badge in-progress" style="margin-right:4px;">${parsed.master}</span>` + 
+                (parsed.sub ? `<span class="badge normal">${parsed.sub}</span>` : '');
+
             return `<tr style="cursor: pointer;" onclick="window.openEditGeneric('servicos', '${s.id}')">
                 <td><strong>${s.nome_servico}</strong></td>
-                <td><span class="badge in-progress">${s.categoria || 'Geral'}</span></td>
+                <td>${badgeHtml}</td>
                 <td>${s.descricao || '-'}</td>
                 <td>R$ ${Number(s.valor_base || 0).toFixed(2)}</td>
                 <td style="text-align:right;">${getActionButtons('servicos', s.id, s.nome_servico)}</td>
             </tr>`;
         }).join('');
-    };
-
-    /**
-     * Define Pill ativo de Serviço
-     */
-    window.setFiltroSerCat = function (btnElement, categoria) {
-        document.querySelectorAll('.cat-pill-ser').forEach(b => b.classList.remove('active'));
-        btnElement.classList.add('active');
-        window.renderServicos();
     };
 
     /**
@@ -3683,17 +3909,19 @@ ${materiaisTxt}${extrasTxt}
         }, 50);
     };
 
-    window.saveConfigCategorias = async function() {
-        const btn = event.currentTarget;
-        const originalText = btn.innerHTML;
-        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Salvando...';
-        btn.disabled = true;
+    window.saveConfigCategorias = async function(e) {
+        const btn = (e && e.currentTarget) || (typeof event !== 'undefined' && event?.currentTarget) || document.querySelector('#modal-config-categorias .modal-header .action-btn');
+        const originalText = btn ? btn.innerHTML : '';
+        if (btn) {
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Salvando...';
+            btn.disabled = true;
+        }
 
         try {
-            // Salva no localStorage como fallback rápido
+            // Salva no localStorage como fallback imediato
             localStorage.setItem('catalogo_arvore', JSON.stringify(window.catalogoTree));
 
-            // Tenta salvar no Supabase (se a tabela existir e tiver permissão)
+            // Salva no Supabase (se a tabela existir e tiver permissão)
             await supabase.from('sistema_configuracoes').upsert({
                 chave: 'catalogo_arvore',
                 valor: window.catalogoTree
@@ -3702,54 +3930,548 @@ ${materiaisTxt}${extrasTxt}
             triggerSaveSuccess('Árvore de categorias salva com sucesso!');
             window.closeModal('modal-config-categorias');
             
-            // Re-renderizar formulários abertos se necessário
-            window.populateCategorySelects();
-        } catch (e) {
-            console.error(e);
+            // Sincroniza 100% o sistema (abas de materiais, abas de serviços e selects dos popups)
+            window.syncCategorySystem();
+            if (typeof window.renderMateriais === 'function') window.renderMateriais();
+            if (typeof window.renderServicos === 'function') window.renderServicos();
+        } catch (err) {
+            console.error(err);
             triggerSaveError('Erro ao salvar no banco. Salvo localmente.');
+            window.syncCategorySystem();
         } finally {
-            btn.innerHTML = originalText;
-            btn.disabled = false;
+            if (btn) {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+        }
+    };
+
+    /**
+     * Sincroniza todas as partes do sistema que dependem de window.catalogoTree
+     */
+    window.syncCategorySystem = function() {
+        if (typeof window.populateCategorySelects === 'function') {
+            window.populateCategorySelects();
+        }
+        if (typeof window.renderCategoryNavBars === 'function') {
+            window.renderCategoryNavBars();
+        }
+        const modalConfig = document.getElementById('modal-config-categorias');
+        if (modalConfig && (modalConfig.classList.contains('active') || modalConfig.style.display === 'flex')) {
+            if (typeof window.renderConfigCategorias === 'function') {
+                window.renderConfigCategorias();
+            }
         }
     };
 
     window.populateCategorySelects = function() {
-        const catSelects = document.querySelectorAll('#ser-categoria, #mat-categoria');
+        const catSelects = document.querySelectorAll('#ser-categoria, #mat-categoria, #prop-filtro-cat, #super-os-item-cat');
         catSelects.forEach(sel => {
-            if(!sel) return;
-            const val = sel.value; // save current selection
+            if (!sel) return;
+            const currentVal = sel.value;
             sel.innerHTML = '<option value="">Selecione uma Categoria</option>';
-            for (const cat of Object.keys(window.catalogoTree)) {
-                sel.innerHTML += `<option value="${cat}">${cat}</option>`;
+            for (const cat of Object.keys(window.catalogoTree || {})) {
+                const isSelected = (cat === currentVal) ? 'selected' : '';
+                sel.innerHTML += `<option value="${cat}" ${isSelected}>${cat}</option>`;
             }
-            if (window.catalogoTree[val] || val === 'add_new') sel.value = val;
+            if (window.catalogoTree[currentVal]) {
+                sel.value = currentVal;
+            }
             sel.innerHTML += '<option value="add_new">+ Adicionar Outro...</option>';
+
+            // Registra handlers para sincronização e adição on-the-fly
+            if (sel.id === 'ser-categoria') {
+                sel.onchange = () => window.handleCategorySelectChange('ser-categoria', 'ser-subcategoria');
+                const subSel = document.getElementById('ser-subcategoria');
+                if (subSel) subSel.onchange = () => window.handleSubcategorySelectChange('ser-categoria', 'ser-subcategoria');
+            } else if (sel.id === 'mat-categoria') {
+                sel.onchange = () => window.handleCategorySelectChange('mat-categoria', 'mat-subcategoria');
+                const subSel = document.getElementById('mat-subcategoria');
+                if (subSel) subSel.onchange = () => window.handleSubcategorySelectChange('mat-categoria', 'mat-subcategoria');
+            }
         });
     };
 
-    window.updateSubcategories = function(catId, subId) {
+    window.handleCategorySelectChange = async function(catId, subId) {
+        const catSelect = document.getElementById(catId);
+        if (!catSelect) return;
+
+        if (catSelect.value === 'add_new') {
+            const nova = prompt('Digite o nome da nova Categoria Principal:');
+            if (nova && nova.trim()) {
+                const cleanName = nova.trim();
+                if (!window.catalogoTree[cleanName]) {
+                    window.catalogoTree[cleanName] = [];
+                    try {
+                        localStorage.setItem('catalogo_arvore', JSON.stringify(window.catalogoTree));
+                        await supabase.from('sistema_configuracoes').upsert({
+                            chave: 'catalogo_arvore',
+                            valor: window.catalogoTree
+                        }, { onConflict: 'chave' });
+                    } catch (_) {}
+                }
+                window.syncCategorySystem();
+                catSelect.value = cleanName;
+            } else {
+                catSelect.value = '';
+            }
+        }
+
+        window.updateSubcategories(catId, subId);
+    };
+
+    window.handleSubcategorySelectChange = async function(catId, subId) {
+        const catSelect = document.getElementById(catId);
+        const subSelect = document.getElementById(subId);
+        if (!catSelect || !subSelect) return;
+
+        if (subSelect.value === 'add_new') {
+            const cat = catSelect.value || 'Geral';
+            const novaSub = prompt(`Digite a nova Subcategoria para "${cat}":`);
+            if (novaSub && novaSub.trim()) {
+                const cleanSub = novaSub.trim();
+                if (!window.catalogoTree[cat]) window.catalogoTree[cat] = [];
+                if (!window.catalogoTree[cat].includes(cleanSub)) {
+                    window.catalogoTree[cat].push(cleanSub);
+                    try {
+                        localStorage.setItem('catalogo_arvore', JSON.stringify(window.catalogoTree));
+                        await supabase.from('sistema_configuracoes').upsert({
+                            chave: 'catalogo_arvore',
+                            valor: window.catalogoTree
+                        }, { onConflict: 'chave' });
+                    } catch (_) {}
+                }
+                window.syncCategorySystem();
+                catSelect.value = cat;
+                window.updateSubcategories(catId, subId);
+                subSelect.value = cleanSub;
+            } else {
+                subSelect.value = '';
+            }
+        }
+    };
+
+    window.updateSubcategories = function(catId, subId, selectedValue = '') {
         const catSelect = document.getElementById(catId);
         const subSelect = document.getElementById(subId);
         const subGroup = document.getElementById('group-' + subId);
         if (!catSelect || !subSelect) return;
 
         const catValue = catSelect.value;
-        const subs = window.catalogoTree[catValue] || [];
+        const subs = (window.catalogoTree && window.catalogoTree[catValue]) ? [...window.catalogoTree[catValue]] : [];
         
-        subSelect.innerHTML = '<option value="">Selecione...</option>';
-        
-        if (subs.length > 0) {
-            subs.forEach(s => {
-                subSelect.innerHTML += `<option value="${s}">${s}</option>`;
-            });
-            subSelect.innerHTML += '<option value="add_new">+ Adicionar Outro...</option>';
-            if(subGroup) subGroup.style.display = 'block';
-        } else {
-            // Se não tem subcategorias predefinidas, oculta ou permite livre
-            if(subGroup) subGroup.style.display = 'none';
+        const targetVal = selectedValue !== '' ? selectedValue : subSelect.value;
+        if (targetVal && targetVal !== 'add_new' && !subs.some(s => s.toLowerCase() === targetVal.toLowerCase())) {
+            subs.push(targetVal);
+        }
+
+        subSelect.innerHTML = '<option value="">Selecione uma Subcategoria...</option>';
+        subs.forEach(s => {
+            const isSel = (targetVal && s.toLowerCase() === targetVal.toLowerCase()) ? 'selected' : '';
+            subSelect.innerHTML += `<option value="${s}" ${isSel}>${s}</option>`;
+        });
+        subSelect.innerHTML += '<option value="add_new">+ Adicionar Outra Subcategoria...</option>';
+
+        // Se houver categoria selecionada, mostra o grupo de subcategoria
+        if (subGroup) {
+            subGroup.style.display = catValue ? 'block' : 'none';
         }
     };
-    window.closeModal = function (id) {
+    // =========================================================================
+    // CRM UNIVERSAL AUTO-SAVE & MOBILE HISTORY INTERCEPTION (ANTI-DATA LOSS)
+    // =========================================================================
+    window._modalHistoryStack = window._modalHistoryStack || [];
+    window._ignoringPopstateCount = 0;
+
+    window.crmAutoSave = {
+        storagePrefix: 'crm_draft_',
+        activeTimeouts: {},
+        _pendingBanners: {},
+
+        // 1. Serializa e salva o rascunho de qualquer modal
+        saveDraft(modalId) {
+            if (!modalId) return;
+            // Se há um banner de rascunho aguardando decisão do usuário, não sobrescreve
+            if (this._pendingBanners && this._pendingBanners[modalId]) {
+                return;
+            }
+
+            const modal = document.getElementById(modalId);
+            if (!modal) return;
+            const form = modal.querySelector('form');
+            if (!form) return;
+
+            const fields = {};
+            let hasMeaningfulData = false;
+
+            const elements = form.querySelectorAll('input, textarea, select');
+            elements.forEach(el => {
+                const key = el.id || el.name;
+                if (!key || el.type === 'file' || el.type === 'password') return;
+
+                if (el.type === 'checkbox') {
+                    fields[key] = { type: 'checkbox', value: el.checked };
+                    if (el.checked) hasMeaningfulData = true;
+                } else if (el.type === 'radio') {
+                    if (el.checked) {
+                        fields[key] = { type: 'radio', value: el.value };
+                        hasMeaningfulData = true;
+                    }
+                } else {
+                    const val = el.value || '';
+                    fields[key] = { type: el.type, value: val };
+                    if (val.trim() !== '') hasMeaningfulData = true;
+                }
+            });
+
+            // Tratamento especial para itens dinâmicos
+            const extra = {};
+            if (modalId === 'modal-proposta') {
+                if (window.currentPropItems && window.currentPropItems.length > 0) {
+                    extra.currentPropItems = JSON.parse(JSON.stringify(window.currentPropItems));
+                    hasMeaningfulData = true;
+                }
+            } else if (modalId === 'modal-super-os') {
+                // Cronograma de Serviços
+                const cronRows = Array.from(document.querySelectorAll('#cronograma-body tr')).map(tr => ({
+                    svcId: tr.querySelector('.c-ser')?.value || '',
+                    qt: tr.querySelector('.s-qt')?.value || '',
+                    val: tr.querySelector('.s-val')?.value || '',
+                    sub: tr.querySelector('.s-sub')?.value || ''
+                })).filter(r => r.svcId);
+                if (cronRows.length > 0) {
+                    extra.cronograma = cronRows;
+                    hasMeaningfulData = true;
+                }
+
+                // Materiais
+                const matRows = Array.from(document.querySelectorAll('#materiais-body tr')).map(tr => ({
+                    mId: tr.querySelector('.m-id')?.value || '',
+                    qt: tr.querySelector('.m-qt')?.value || '',
+                    val: tr.querySelector('.m-val')?.value || '',
+                    sub: tr.querySelector('.m-sub')?.value || ''
+                })).filter(r => r.mId);
+                if (matRows.length > 0) {
+                    extra.materiais = matRows;
+                    hasMeaningfulData = true;
+                }
+
+                // Custos Extras
+                const extraRows = Array.from(document.querySelectorAll('#extras-body tr')).map(tr => ({
+                    desc: tr.querySelector('.e-desc')?.value || '',
+                    tipo: tr.querySelector('.e-tipo')?.value || '',
+                    qt: tr.querySelector('.e-qt')?.value || '',
+                    sub: tr.querySelector('.e-sub')?.value || ''
+                })).filter(r => r.desc || r.sub);
+                if (extraRows.length > 0) {
+                    extra.extras = extraRows;
+                    hasMeaningfulData = true;
+                }
+            }
+
+            // Não salva rascunho se o formulário estiver completamente limpo
+            if (!hasMeaningfulData) {
+                localStorage.removeItem(this.storagePrefix + modalId);
+                return;
+            }
+
+            const now = new Date();
+            const payload = {
+                timestamp: now.getTime(),
+                formattedTime: now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) + ' de ' + now.toLocaleDateString('pt-BR'),
+                editId: form.dataset.editId || null,
+                fields,
+                extra
+            };
+
+            try {
+                localStorage.setItem(this.storagePrefix + modalId, JSON.stringify(payload));
+            } catch (e) {
+                console.warn('[AUTOSAVE] Falha ao persistir no localStorage:', e);
+            }
+        },
+
+        // 2. Dispara o salvamento com debounce de 400ms
+        triggerSave(modalId) {
+            if (!modalId) return;
+            if (this.activeTimeouts[modalId]) clearTimeout(this.activeTimeouts[modalId]);
+            this.activeTimeouts[modalId] = setTimeout(() => {
+                this.saveDraft(modalId);
+            }, 400);
+        },
+
+        // 3. Lê o rascunho persistido
+        getDraft(modalId) {
+            try {
+                const raw = localStorage.getItem(this.storagePrefix + modalId);
+                if (!raw) return null;
+                return JSON.parse(raw);
+            } catch {
+                return null;
+            }
+        },
+
+        // 4. Limpa o rascunho
+        clearDraft(modalId) {
+            localStorage.removeItem(this.storagePrefix + modalId);
+            if (this._pendingBanners) this._pendingBanners[modalId] = false;
+            const banner = document.getElementById(`draft-banner-${modalId}`);
+            if (banner) banner.remove();
+        },
+
+        // 5. Exibe banner de confirmação ao reabrir (Opção B)
+        checkAndShowDraftBanner(modalId, isEditMode = false) {
+            const draft = this.getDraft(modalId);
+            if (!draft) return;
+
+            const modal = document.getElementById(modalId);
+            const form = modal?.querySelector('form');
+            const currentEditId = form?.dataset?.editId || null;
+            const draftEditId = draft.editId || null;
+
+            // Se o contexto de edição não coincide (ex: rascunho de novo vs editando existente), ignora
+            if (draftEditId !== currentEditId) {
+                return;
+            }
+
+            // Remove banner prévio se houver
+            const oldBanner = document.getElementById(`draft-banner-${modalId}`);
+            if (oldBanner) oldBanner.remove();
+
+            this._pendingBanners = this._pendingBanners || {};
+            this._pendingBanners[modalId] = true;
+
+            const banner = document.createElement('div');
+            banner.className = 'crm-draft-banner';
+            banner.id = `draft-banner-${modalId}`;
+            banner.innerHTML = `
+                <div class="crm-draft-info">
+                    <i class="fa-solid fa-clock-rotate-left"></i>
+                    <div>
+                        <strong>Rascunho não finalizado encontrado</strong>
+                        <span class="crm-draft-time">Salvo automaticamente em ${draft.formattedTime}</span>
+                    </div>
+                </div>
+                <div class="crm-draft-actions">
+                    <button type="button" class="btn-draft-resume" onclick="window.crmAutoSave.resumeDraft('${modalId}')">
+                        <i class="fa-solid fa-rotate-left"></i> Continuar Rascunho
+                    </button>
+                    <button type="button" class="btn-draft-discard" onclick="window.crmAutoSave.discardDraft('${modalId}')">
+                        <i class="fa-solid fa-trash-can"></i> Iniciar Novo
+                    </button>
+                </div>
+            `;
+
+            if (form) {
+                form.prepend(banner);
+            } else if (modal) {
+                const body = modal.querySelector('.modal-body') || modal.querySelector('.modal-content') || modal;
+                body.prepend(banner);
+            }
+        },
+
+        // 6. Usuário optou por continuar de onde parou
+        resumeDraft(modalId) {
+            const draft = this.getDraft(modalId);
+            const modal = document.getElementById(modalId);
+            if (!draft || !modal) return;
+            const form = modal.querySelector('form');
+            if (!form) return;
+
+            if (this._pendingBanners) this._pendingBanners[modalId] = false;
+
+            // Restaura campos do formulário
+            Object.entries(draft.fields || {}).forEach(([key, item]) => {
+                const el = form.querySelector(`#${key}`) || form.querySelector(`[name="${key}"]`);
+                if (!el) return;
+                if (item.type === 'checkbox') {
+                    el.checked = !!item.value;
+                } else if (item.type === 'radio') {
+                    if (el.value === item.value) el.checked = true;
+                } else {
+                    el.value = item.value || '';
+                }
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            });
+
+            // Restauração especial: Propostas
+            if (modalId === 'modal-proposta' && draft.extra?.currentPropItems && Array.isArray(draft.extra.currentPropItems)) {
+                window.currentPropItems = draft.extra.currentPropItems;
+                if (typeof window.renderPropItemsTable === 'function') {
+                    window.renderPropItemsTable();
+                }
+            }
+
+            // Restauração especial: Super OS
+            if (modalId === 'modal-super-os' && draft.extra) {
+                // Cronograma
+                if (draft.extra.cronograma && Array.isArray(draft.extra.cronograma)) {
+                    const t = document.getElementById('cronograma-body');
+                    const btnAdd = document.getElementById('btn-add-cronograma');
+                    if (t && btnAdd) {
+                        t.innerHTML = '';
+                        draft.extra.cronograma.forEach(r => {
+                            btnAdd.click();
+                            const lastTr = t.lastElementChild;
+                            if (lastTr) {
+                                const sel = lastTr.querySelector('.c-ser');
+                                if (sel) {
+                                    sel.value = r.svcId;
+                                    sel.dispatchEvent(new Event('change', { bubbles: true }));
+                                }
+                                const qt = lastTr.querySelector('.s-qt');
+                                if (qt) qt.value = r.qt;
+                                const val = lastTr.querySelector('.s-val');
+                                if (val) val.value = r.val;
+                                const sub = lastTr.querySelector('.s-sub');
+                                if (sub) sub.value = r.sub;
+                            }
+                        });
+                        if (typeof window.calcServicosTotal === 'function') window.calcServicosTotal();
+                    }
+                }
+
+                // Materiais
+                if (draft.extra.materiais && Array.isArray(draft.extra.materiais)) {
+                    const tMat = document.getElementById('materiais-body');
+                    const btnAddMat = document.getElementById('btn-add-material');
+                    if (tMat && btnAddMat) {
+                        tMat.innerHTML = '';
+                        draft.extra.materiais.forEach(r => {
+                            btnAddMat.click();
+                            const lastTr = tMat.lastElementChild;
+                            if (lastTr) {
+                                const sel = lastTr.querySelector('.m-id');
+                                if (sel) {
+                                    sel.value = r.mId;
+                                    sel.dispatchEvent(new Event('change', { bubbles: true }));
+                                }
+                                const qt = lastTr.querySelector('.m-qt');
+                                if (qt) qt.value = r.qt;
+                                const val = lastTr.querySelector('.m-val');
+                                if (val) val.value = r.val;
+                                const sub = lastTr.querySelector('.m-sub');
+                                if (sub) sub.value = r.sub;
+                            }
+                        });
+                        if (typeof window.calcMateriais === 'function') window.calcMateriais();
+                    }
+                }
+
+                // Extras
+                if (draft.extra.extras && Array.isArray(draft.extra.extras)) {
+                    const tExtras = document.getElementById('extras-body');
+                    if (tExtras) {
+                        tExtras.innerHTML = '';
+                        draft.extra.extras.forEach(r => {
+                            if (typeof window.addOSExtraRow === 'function') {
+                                window.addOSExtraRow(r.desc, r.tipo, r.qt, r.sub);
+                            }
+                        });
+                        if (typeof window.calcExtrasTotal === 'function') window.calcExtrasTotal();
+                    }
+                }
+            }
+
+            // Remove o banner
+            const banner = document.getElementById(`draft-banner-${modalId}`);
+            if (banner) banner.remove();
+
+            if (typeof triggerSaveSuccess === 'function') {
+                triggerSaveSuccess('Rascunho recuperado com sucesso!');
+            }
+        },
+
+        // 7. Usuário optou por descartar o rascunho
+        discardDraft(modalId) {
+            this.clearDraft(modalId);
+            if (this._pendingBanners) this._pendingBanners[modalId] = false;
+            const modal = document.getElementById(modalId);
+            const form = modal?.querySelector('form');
+            if (form) {
+                form.reset();
+                delete form.dataset.editId;
+            }
+            if (modalId === 'modal-proposta') {
+                window.currentPropItems = [];
+                if (typeof window.renderPropItemsTable === 'function') {
+                    window.renderPropItemsTable();
+                }
+            }
+            if (modalId === 'modal-super-os') {
+                const cBody = document.getElementById('cronograma-body');
+                if (cBody) cBody.innerHTML = '';
+                const mBody = document.getElementById('materiais-body');
+                if (mBody) mBody.innerHTML = '';
+                const eBody = document.getElementById('extras-body');
+                if (eBody) eBody.innerHTML = '';
+                if (typeof window.calcServicosTotal === 'function') window.calcServicosTotal();
+                if (typeof window.calcMateriais === 'function') window.calcMateriais();
+                if (typeof window.calcExtrasTotal === 'function') window.calcExtrasTotal();
+            }
+            if (typeof triggerSaveSuccess === 'function') {
+                triggerSaveSuccess('Rascunho descartado.');
+            }
+        }
+    };
+
+    // =========================================================================
+    // INTERCEPTAÇÃO DE NAVEGAÇÃO MOBILE (GESTO / BOTÃO VOLTAR DO CELULAR)
+    // =========================================================================
+    window.addEventListener('popstate', (e) => {
+        if (window._ignoringPopstateCount > 0) {
+            window._ignoringPopstateCount--;
+            return;
+        }
+        if (window._modalHistoryStack && window._modalHistoryStack.length > 0) {
+            const topModalId = window._modalHistoryStack.pop();
+            const m = document.getElementById(topModalId);
+            if (m && (m.style.display === 'flex' || m.classList.contains('active'))) {
+                // Fecha o modal suavemente sem disparar nova navegação para trás
+                window.closeModal(topModalId, true);
+            }
+        }
+    });
+
+    // Confirmação nativa se o usuário tentar sair da página com dados pendentes
+    window.addEventListener('beforeunload', (e) => {
+        if (window._modalHistoryStack && window._modalHistoryStack.length > 0) {
+            const topId = window._modalHistoryStack[window._modalHistoryStack.length - 1];
+            if (localStorage.getItem('crm_draft_' + topId)) {
+                e.preventDefault();
+                e.returnValue = 'Existem dados não salvos no formulário aberto. Deseja realmente sair?';
+                return e.returnValue;
+            }
+        }
+    });
+
+    // Listeners globais de Auto-Save (Event Delegation)
+    document.addEventListener('input', (e) => {
+        const modal = e.target.closest('[id^="modal-"], .modal');
+        if (modal && modal.id && window.crmAutoSave) {
+            window.crmAutoSave.triggerSave(modal.id);
+        }
+    });
+
+    document.addEventListener('change', (e) => {
+        const modal = e.target.closest('[id^="modal-"], .modal');
+        if (modal && modal.id && window.crmAutoSave) {
+            window.crmAutoSave.triggerSave(modal.id);
+        }
+    });
+
+    // Limpa o rascunho quando um formulário é submetido com sucesso
+    document.addEventListener('submit', (e) => {
+        const modal = e.target.closest('[id^="modal-"], .modal');
+        if (modal && modal.id && window.crmAutoSave) {
+            setTimeout(() => {
+                window.crmAutoSave.clearDraft(modal.id);
+            }, 600);
+        }
+    });
+
+    window.closeModal = function (id, fromPopstate = false) {
         const m = document.getElementById(id);
         if (m) {
             m.style.display = 'none';
@@ -3762,12 +4484,45 @@ ${materiaisTxt}${extrasTxt}
                 f.reset();
                 delete f.dataset.editId;
             }
+            const b = document.getElementById(`draft-banner-${id}`);
+            if (b) b.remove();
+        }
+
+        if (window.crmAutoSave?._pendingBanners) {
+            window.crmAutoSave._pendingBanners[id] = false;
+        }
+
+        // Sincroniza o histórico do navegador para não acumular entradas vazias
+        if (!fromPopstate && window._modalHistoryStack && window._modalHistoryStack.length > 0) {
+            const idx = window._modalHistoryStack.lastIndexOf(id);
+            if (idx !== -1) {
+                window._modalHistoryStack.splice(idx, 1);
+                window._ignoringPopstateCount = (window._ignoringPopstateCount || 0) + 1;
+                try {
+                    window.history.back();
+                } catch (_) {
+                    window._ignoringPopstateCount = Math.max(0, window._ignoringPopstateCount - 1);
+                }
+            }
         }
     };
 
     window.openModal = function (id, preventReset = false) {
+        // Empurra estado no histórico para o botão "Voltar" do celular fechar o modal
+        if (!window._modalHistoryStack.includes(id)) {
+            try {
+                window.history.pushState({ crmModalId: id, timestamp: Date.now() }, '');
+            } catch (_) {}
+            window._modalHistoryStack.push(id);
+        }
+
         if (id === 'modal-config-categorias') {
             window.renderConfigCategorias();
+        }
+        if (id === 'modal-material' || id === 'modal-servico') {
+            if (typeof window.populateCategorySelects === 'function') {
+                window.populateCategorySelects();
+            }
         }
         if (id === 'modal-venda') {
             window.populateVendaSelect();
@@ -3798,6 +4553,11 @@ ${materiaisTxt}${extrasTxt}
                 if (hist) hist.style.display = 'none';
             }
             m.style.display = 'flex';
+
+            // Verifica e exibe banner de rascunho anterior (Opção B)
+            if (window.crmAutoSave) {
+                window.crmAutoSave.checkAndShowDraftBanner(id, preventReset);
+            }
         }
     };
 
@@ -3812,7 +4572,7 @@ ${materiaisTxt}${extrasTxt}
         document.getElementById('edit-colab-tel').value = c.telefone_whatsapp || '';
         document.getElementById('edit-colab-email').value = c.email || '';
         document.getElementById('edit-colab-cargo').value = c.cargo || 'tecnico';
-        document.getElementById('modal-edit-colab').style.display = 'flex';
+        window.openModal('modal-edit-colab', true);
     };
 
     document.getElementById('form-edit-colab')?.addEventListener('submit', async (e) => {
@@ -3841,7 +4601,7 @@ ${materiaisTxt}${extrasTxt}
             console.error(error);
         } else {
             triggerSaveSuccess('Colaborador Atualizado!');
-            document.getElementById('modal-edit-colab').style.display = 'none';
+            window.closeModal('modal-edit-colab');
             loadData();
         }
     });
@@ -4062,6 +4822,443 @@ ${materiaisTxt}${extrasTxt}
                     const items = window.materiaisCache.filter(m => (m.campo_uso || 'Geral') === cat);
                     return `<optgroup label="${cat.replace(' | ', ' - ')}">${items.map(m => `<option value="${m.id}">${m.nome_material} (${m.unidade_medida})</option>`).join('')}</optgroup>`;
                 }).join('');
+            }
+        }
+    };
+
+    // =========================================================================
+    // CRM UNIVERSAL MASS ITEM SELECTOR (CATÁLOGO DE SERVIÇOS & PEÇAS)
+    // =========================================================================
+    window.crmItemSelector = {
+        context: 'proposta', // 'proposta' | 'super-os-servicos' | 'super-os-materiais'
+        typeFilter: 'all',   // 'all' | 'service' | 'material'
+        categoryFilter: 'all',
+        searchText: '',
+        selectedItems: {},   // { `${type}_${id}`: { item, type, id, qty, price, name, category, unit } }
+
+        open(options = {}) {
+            this.context = options.context || 'proposta';
+            this.searchText = '';
+            this.categoryFilter = 'all';
+            this.selectedItems = {};
+
+            const searchInput = document.getElementById('seletor-input-busca');
+            if (searchInput) searchInput.value = '';
+            const clearSearchBtn = document.getElementById('btn-seletor-clear-search');
+            if (clearSearchBtn) clearSearchBtn.style.display = 'none';
+
+            // Configura abas de tipo de acordo com o contexto
+            const typeTabs = document.getElementById('seletor-type-tabs');
+            const titleElem = document.getElementById('seletor-modal-title');
+            const subTitleElem = document.getElementById('seletor-modal-subtitle');
+
+            if (this.context === 'super-os-servicos') {
+                this.typeFilter = 'service';
+                if (typeTabs) typeTabs.style.display = 'none';
+                if (titleElem) titleElem.innerHTML = '<i class="fa-solid fa-screwdriver-wrench"></i> Catálogo de Serviços';
+                if (subTitleElem) subTitleElem.textContent = 'Selecione as atividades do cronograma e defina as quantidades';
+            } else if (this.context === 'super-os-materiais') {
+                this.typeFilter = 'material';
+                if (typeTabs) typeTabs.style.display = 'none';
+                if (titleElem) titleElem.innerHTML = '<i class="fa-solid fa-box"></i> Catálogo de Peças & Materiais';
+                if (subTitleElem) subTitleElem.textContent = 'Selecione os materiais a requisitar do estoque e defina as quantidades';
+            } else {
+                // Proposta: pode misturar serviços e materiais
+                this.typeFilter = 'all';
+                if (typeTabs) typeTabs.style.display = 'flex';
+                if (titleElem) titleElem.innerHTML = '<i class="fa-solid fa-boxes-stacked"></i> Catálogo de Serviços & Peças';
+                if (subTitleElem) subTitleElem.textContent = 'Marque os itens com checkbox e ajuste as quantidades para o orçamento';
+                document.querySelectorAll('.seletor-type-btn').forEach(b => {
+                    b.classList.toggle('active', b.dataset.type === 'all');
+                });
+            }
+
+            this.renderCategories();
+            this.renderList();
+            this.updateSummary();
+
+            window.openModal('modal-seletor-itens', true);
+            setTimeout(() => searchInput?.focus(), 150);
+        },
+
+        setTypeFilter(type) {
+            this.typeFilter = type;
+            this.categoryFilter = 'all';
+            document.querySelectorAll('.seletor-type-btn').forEach(b => {
+                b.classList.toggle('active', b.dataset.type === type);
+            });
+            this.renderCategories();
+            this.renderList();
+        },
+
+        setCategoryFilter(cat) {
+            this.categoryFilter = cat;
+            document.querySelectorAll('.seletor-chip').forEach(c => {
+                c.classList.toggle('active', c.dataset.cat === cat);
+            });
+            this.renderList();
+        },
+
+        onSearch(val) {
+            this.searchText = (val || '').trim().toLowerCase();
+            const btnClear = document.getElementById('btn-seletor-clear-search');
+            if (btnClear) btnClear.style.display = this.searchText ? 'block' : 'none';
+            this.renderList();
+        },
+
+        clearSearch() {
+            const input = document.getElementById('seletor-input-busca');
+            if (input) input.value = '';
+            this.onSearch('');
+            input?.focus();
+        },
+
+        // Monta a lista unificada de itens disponíveis
+        getAllAvailableItems() {
+            const items = [];
+            if (this.typeFilter === 'all' || this.typeFilter === 'service') {
+                (window.servicosCache || []).forEach(s => {
+                    items.push({
+                        id: s.id,
+                        type: 'service',
+                        name: s.nome_servico,
+                        category: s.categoria || 'Geral',
+                        unit: 'serviço',
+                        price: parseFloat(s.valor_base || 0),
+                        description: s.descricao || ''
+                    });
+                });
+            }
+            if (this.typeFilter === 'all' || this.typeFilter === 'material') {
+                (window.materiaisCache || []).forEach(m => {
+                    items.push({
+                        id: m.id,
+                        type: 'material',
+                        name: m.nome_material,
+                        category: (m.campo_uso || 'Geral').replace(' | ', ' - '),
+                        unit: m.unidade_medida || 'un',
+                        price: parseFloat(m.valor_unitario || 0),
+                        description: m.descricao || ''
+                    });
+                });
+            }
+            return items;
+        },
+
+        // Renderiza os chips de categorias baseados no tipo atual
+        renderCategories() {
+            const container = document.getElementById('seletor-chips-container');
+            if (!container) return;
+
+            const items = this.getAllAvailableItems();
+            const cats = ['all', ...new Set(items.map(i => i.category).filter(Boolean))];
+
+            container.innerHTML = cats.map(cat => {
+                const label = cat === 'all' ? 'Todas as Categorias' : cat;
+                const isActive = this.categoryFilter === cat;
+                return `<button type="button" class="seletor-chip ${isActive ? 'active' : ''}" data-cat="${cat}" onclick="window.crmItemSelector.setCategoryFilter('${cat}')">${label}</button>`;
+            }).join('');
+        },
+
+        // Verifica se o item já existe no alvo (Proposta ou OS)
+        getExistingQuantity(type, id) {
+            if (this.context === 'proposta') {
+                const found = (window.currentPropItems || []).find(i => String(i.id_db || i.id) === String(id) && i.type === type);
+                return found ? parseFloat(found.qtd || 1) : 0;
+            } else if (this.context === 'super-os-servicos') {
+                let foundQtd = 0;
+                document.querySelectorAll('#cronograma-body tr').forEach(tr => {
+                    const sel = tr.querySelector('.c-ser');
+                    if (sel && String(sel.value) === String(id)) {
+                        foundQtd += parseFloat(tr.querySelector('.s-qt')?.value || 1);
+                    }
+                });
+                return foundQtd;
+            } else if (this.context === 'super-os-materiais') {
+                let foundQtd = 0;
+                document.querySelectorAll('#materiais-body tr').forEach(tr => {
+                    const sel = tr.querySelector('.m-id');
+                    if (sel && String(sel.value) === String(id)) {
+                        foundQtd += parseFloat(tr.querySelector('.m-qt')?.value || 1);
+                    }
+                });
+                return foundQtd;
+            }
+            return 0;
+        },
+
+        renderList() {
+            const container = document.getElementById('seletor-itens-lista');
+            if (!container) return;
+
+            let items = this.getAllAvailableItems();
+
+            // Filtro por categoria
+            if (this.categoryFilter && this.categoryFilter !== 'all') {
+                items = items.filter(i => i.category === this.categoryFilter);
+            }
+
+            // Filtro por busca
+            if (this.searchText) {
+                const normalize = str => (str || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                const term = normalize(this.searchText);
+                items = items.filter(i => 
+                    normalize(i.name).includes(term) || 
+                    normalize(i.category).includes(term) ||
+                    normalize(i.description).includes(term)
+                );
+            }
+
+            if (items.length === 0) {
+                container.innerHTML = `
+                    <div style="text-align: center; padding: 40px 20px; color: #94a3b8;">
+                        <i class="fa-solid fa-magnifying-glass" style="font-size: 2rem; margin-bottom: 10px; color: #475569; display: block;"></i>
+                        Nenhum serviço ou material encontrado com os filtros atuais.
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = items.map(item => {
+                const key = `${item.type}_${item.id}`;
+                const isSelected = !!this.selectedItems[key];
+                const qty = isSelected ? this.selectedItems[key].qty : 1;
+                const existingQtd = this.getExistingQuantity(item.type, item.id);
+
+                return `
+                    <div class="seletor-item-card ${isSelected ? 'selected' : ''}" id="card-${key}" onclick="window.crmItemSelector.handleCardClick(event, '${item.type}', '${item.id}')">
+                        <div class="seletor-item-left">
+                            <input type="checkbox" class="seletor-checkbox" id="chk-${key}" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation(); window.crmItemSelector.toggleCheck('${item.type}', '${item.id}', this.checked)">
+                            <div class="seletor-item-info">
+                                <div class="seletor-item-name" title="${item.name}">${item.name}</div>
+                                <div class="seletor-item-meta">
+                                    <span class="seletor-badge-type ${item.type}">${item.type === 'service' ? 'Serviço' : 'Peça'}</span>
+                                    <span class="seletor-badge-cat">${item.category}</span>
+                                    ${item.unit ? `<span class="seletor-badge-cat">${item.unit}</span>` : ''}
+                                    ${existingQtd > 0 ? `<span class="seletor-badge-already"><i class="fa-solid fa-check"></i> Já na lista (${existingQtd})</span>` : ''}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="seletor-item-right" onclick="event.stopPropagation()">
+                            <div class="seletor-item-price">R$ ${item.price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+                            <div class="seletor-qty-control">
+                                <button type="button" class="seletor-qty-btn" onclick="window.crmItemSelector.stepQty('${item.type}', '${item.id}', -1)">-</button>
+                                <input type="number" class="seletor-qty-input" id="qty-${key}" value="${qty}" min="0.1" step="1" oninput="window.crmItemSelector.setQty('${item.type}', '${item.id}', this.value)">
+                                <button type="button" class="seletor-qty-btn" onclick="window.crmItemSelector.stepQty('${item.type}', '${item.id}', 1)">+</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        },
+
+        handleCardClick(e, type, id) {
+            const key = `${type}_${id}`;
+            const chk = document.getElementById(`chk-${key}`);
+            const newState = !this.selectedItems[key];
+            if (chk) chk.checked = newState;
+            this.toggleCheck(type, id, newState);
+        },
+
+        toggleCheck(type, id, isChecked) {
+            const key = `${type}_${id}`;
+            const card = document.getElementById(`card-${key}`);
+            const qtyInput = document.getElementById(`qty-${key}`);
+            const qty = Math.max(0.1, parseFloat(qtyInput?.value) || 1);
+
+            if (isChecked) {
+                const all = this.getAllAvailableItems();
+                const item = all.find(i => i.id === id && i.type === type);
+                if (item) {
+                    this.selectedItems[key] = {
+                        item,
+                        type,
+                        id,
+                        qty,
+                        price: item.price,
+                        name: item.name,
+                        category: item.category,
+                        unit: item.unit
+                    };
+                }
+                if (card) card.classList.add('selected');
+            } else {
+                delete this.selectedItems[key];
+                if (card) card.classList.remove('selected');
+            }
+
+            this.updateSummary();
+        },
+
+        stepQty(type, id, delta) {
+            const key = `${type}_${id}`;
+            const qtyInput = document.getElementById(`qty-${key}`);
+            let cur = parseFloat(qtyInput?.value) || 1;
+            let next = Math.max(0.1, Math.round((cur + delta) * 10) / 10);
+            if (qtyInput) qtyInput.value = next;
+            this.setQty(type, id, next);
+        },
+
+        setQty(type, id, val) {
+            const key = `${type}_${id}`;
+            const qty = Math.max(0.1, parseFloat(val) || 1);
+            if (this.selectedItems[key]) {
+                this.selectedItems[key].qty = qty;
+            } else {
+                // Ao mexer na quantidade, auto-seleciona para agilizar a operação
+                const chk = document.getElementById(`chk-${key}`);
+                if (chk) chk.checked = true;
+                this.toggleCheck(type, id, true);
+            }
+            this.updateSummary();
+        },
+
+        clearSelection() {
+            this.selectedItems = {};
+            document.querySelectorAll('.seletor-item-card').forEach(c => c.classList.remove('selected'));
+            document.querySelectorAll('.seletor-checkbox').forEach(c => c.checked = false);
+            this.updateSummary();
+        },
+
+        updateSummary() {
+            const selectedList = Object.values(this.selectedItems);
+            const totalCount = selectedList.length;
+            const totalPrice = selectedList.reduce((acc, i) => acc + (i.price * i.qty), 0);
+
+            const countBadge = document.getElementById('seletor-count-badge');
+            const totalBadge = document.getElementById('seletor-total-badge');
+            const btnConfirm = document.getElementById('btn-seletor-confirm');
+
+            if (countBadge) countBadge.textContent = `${totalCount} selecionado${totalCount !== 1 ? 's' : ''}`;
+            if (totalBadge) totalBadge.textContent = 'R$ ' + totalPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+            if (btnConfirm) {
+                btnConfirm.disabled = totalCount === 0;
+                btnConfirm.innerHTML = totalCount > 0 
+                    ? `<i class="fa-solid fa-check-double"></i> Adicionar Selecionados (${totalCount})`
+                    : `<i class="fa-solid fa-check-double"></i> Adicionar Selecionados`;
+            }
+        },
+
+        confirm() {
+            const selectedList = Object.values(this.selectedItems);
+            if (selectedList.length === 0) {
+                alert('Nenhum item selecionado.');
+                return;
+            }
+
+            if (this.context === 'proposta') {
+                window.currentPropItems = window.currentPropItems || [];
+                selectedList.forEach(sel => {
+                    const existing = window.currentPropItems.find(i => String(i.id_db || i.id) === String(sel.id) && i.type === sel.type);
+                    if (existing) {
+                        // Regra de Ouro A1: Soma a quantidade se já existir
+                        existing.qtd = (parseFloat(existing.qtd) || 0) + sel.qty;
+                        existing.subtotal = existing.qtd * existing.price;
+                    } else {
+                        window.currentPropItems.push({
+                            id_db: sel.id,
+                            type: sel.type,
+                            name: sel.name,
+                            category: sel.category,
+                            price: sel.price,
+                            qtd: sel.qty,
+                            subtotal: sel.price * sel.qty
+                        });
+                    }
+                });
+
+                if (typeof window.renderPropItemsTable === 'function') window.renderPropItemsTable();
+                if (typeof window.calcPropTotal === 'function') window.calcPropTotal();
+                if (window.crmAutoSave) window.crmAutoSave.triggerSave('modal-proposta');
+
+            } else if (this.context === 'super-os-servicos') {
+                const t = document.getElementById('cronograma-body');
+                const btnAdd = document.getElementById('btn-add-cronograma');
+                if (t && btnAdd) {
+                    selectedList.forEach(sel => {
+                        let existingTr = null;
+                        t.querySelectorAll('tr').forEach(tr => {
+                            const s = tr.querySelector('.c-ser');
+                            if (s && String(s.value) === String(sel.id)) existingTr = tr;
+                        });
+
+                        if (existingTr) {
+                            const qtInput = existingTr.querySelector('.s-qt');
+                            const valInput = existingTr.querySelector('.s-val');
+                            const subInput = existingTr.querySelector('.s-sub');
+                            const oldQtd = parseFloat(qtInput?.value) || 0;
+                            const newQtd = oldQtd + sel.qty;
+                            if (qtInput) qtInput.value = newQtd;
+                            const price = parseFloat(valInput?.value) || sel.price;
+                            if (subInput) subInput.value = (newQtd * price).toFixed(2);
+                        } else {
+                            btnAdd.click();
+                            const lastTr = t.lastElementChild;
+                            if (lastTr) {
+                                const s = lastTr.querySelector('.c-ser');
+                                if (s) {
+                                    s.value = sel.id;
+                                    s.dispatchEvent(new Event('change', { bubbles: true }));
+                                }
+                                const qt = lastTr.querySelector('.s-qt');
+                                if (qt) qt.value = sel.qty;
+                                const val = lastTr.querySelector('.s-val');
+                                if (val) val.value = sel.price.toFixed(2);
+                                const sub = lastTr.querySelector('.s-sub');
+                                if (sub) sub.value = (sel.qty * sel.price).toFixed(2);
+                            }
+                        }
+                    });
+                    if (typeof window.calcServicosTotal === 'function') window.calcServicosTotal();
+                    if (window.crmAutoSave) window.crmAutoSave.triggerSave('modal-super-os');
+                }
+
+            } else if (this.context === 'super-os-materiais') {
+                const t = document.getElementById('materiais-body');
+                const btnAdd = document.getElementById('btn-add-material');
+                if (t && btnAdd) {
+                    selectedList.forEach(sel => {
+                        let existingTr = null;
+                        t.querySelectorAll('tr').forEach(tr => {
+                            const m = tr.querySelector('.m-id');
+                            if (m && String(m.value) === String(sel.id)) existingTr = tr;
+                        });
+
+                        if (existingTr) {
+                            const qtInput = existingTr.querySelector('.m-qt');
+                            const valInput = existingTr.querySelector('.m-val');
+                            const subInput = existingTr.querySelector('.m-sub');
+                            const oldQtd = parseFloat(qtInput?.value) || 0;
+                            const newQtd = oldQtd + sel.qty;
+                            if (qtInput) qtInput.value = newQtd;
+                            const price = parseFloat(valInput?.value) || sel.price;
+                            if (subInput) subInput.value = (newQtd * price).toFixed(2);
+                        } else {
+                            btnAdd.click();
+                            const lastTr = t.lastElementChild;
+                            if (lastTr) {
+                                const m = lastTr.querySelector('.m-id');
+                                if (m) {
+                                    m.value = sel.id;
+                                    m.dispatchEvent(new Event('change', { bubbles: true }));
+                                }
+                                const qt = lastTr.querySelector('.m-qt');
+                                if (qt) qt.value = sel.qty;
+                                const val = lastTr.querySelector('.m-val');
+                                if (val) val.value = sel.price.toFixed(2);
+                                const sub = lastTr.querySelector('.m-sub');
+                                if (sub) sub.value = (sel.qty * sel.price).toFixed(2);
+                            }
+                        }
+                    });
+                    if (typeof window.calcMateriais === 'function') window.calcMateriais();
+                    if (window.crmAutoSave) window.crmAutoSave.triggerSave('modal-super-os');
+                }
+            }
+
+            window.closeModal('modal-seletor-itens');
+            if (typeof triggerSaveSuccess === 'function') {
+                triggerSaveSuccess(`${selectedList.length} ite${selectedList.length > 1 ? 'ns adicionados' : 'm adicionado'} com sucesso!`);
             }
         }
     };
@@ -10357,14 +11554,13 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
             </div>
             <p style="font-size:0.8rem; color:var(--text-muted); text-align:center;">A Maria Cecília continua atendendo normalmente caso o cliente responda no WhatsApp.</p>
         `;
-        modal.style.display = 'flex';
+        window.openModal('modal-maria-task-report', true);
     };
 
     window.viewMariaTaskReport = window.viewMariaSentMessage;
 
     window.closeMariaTaskReportModal = function() {
-        const modal = document.getElementById('modal-maria-task-report');
-        if (modal) modal.style.display = 'none';
+        window.closeModal('modal-maria-task-report');
     };
 
     let _isCheckingAgenda = false;
@@ -10409,12 +11605,8 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
     window.arnaldoTarefas = [];
 
     window.openModalNovaTarefa = function() {
-        const modal = document.getElementById('modal-nova-tarefa');
-        if (modal) {
-            modal.style.display = 'flex';
-            document.getElementById('form-nova-tarefa')?.reset();
-            setTimeout(() => document.getElementById('tarefa-manual-titulo')?.focus(), 100);
-        }
+        window.openModal('modal-nova-tarefa');
+        setTimeout(() => document.getElementById('tarefa-manual-titulo')?.focus(), 100);
     };
 
     window.loadTarefasArnaldo = async function(silent = false) {
