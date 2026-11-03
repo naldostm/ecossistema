@@ -394,6 +394,28 @@ async function fetchClientConversationSnippet(clientPhone: string, limit = 8): P
   }
 }
 
+let _manualCache: { at: number; text: string } | null = null;
+async function loadManualOperacoes(): Promise<string> {
+  if (_manualCache && Date.now() - _manualCache.at < 60000) return _manualCache.text;
+  try {
+    const { data, error } = await supabase.from('manual_operacoes')
+      .select('categoria, titulo, regra')
+      .eq('ativo', true)
+      .order('ordem', { ascending: true })
+      .limit(60);
+    if (error) { console.warn("[MANUAL] Erro ao carregar manual:", error.message); return ""; }
+    if (!data || data.length === 0) return "";
+    const text = "\n\n=== MANUAL DE OPERAÇÕES (REGRAS DO ARNALDO — SEGUIR SEMPRE) ===\n" +
+      data.map((r: any, i: number) => `${i + 1}. [${r.categoria}] ${r.titulo}: ${r.regra}`).join("\n") +
+      "\n(Se alguma regra do manual conflitar com instruções anteriores, o MANUAL prevalece.)\n=== FIM DO MANUAL ===\n";
+    _manualCache = { at: Date.now(), text };
+    return text;
+  } catch (e) {
+    console.warn("[MANUAL] Falha:", e);
+    return "";
+  }
+}
+
 function buildTemporalContext(): { promptContext: string; saudacaoObrigatoria: string; isExpediente: boolean; spTimeStr: string } {
   // Horário oficial de Brasília (America/Sao_Paulo)
   const spNow = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
@@ -855,6 +877,7 @@ DIRETRIZES DE RESPOSTA:
 
       try {
           const temporal = buildTemporalContext();
+          const manualOps = await loadManualOperacoes();
 
           // 1. Tarefas pendentes do gestor
           let tarefasGestorTexto = "";
@@ -972,6 +995,7 @@ ${clienteContexto}
 HISTÓRICO RECENTE COM O ARNALDO (WhatsApp e CRM):
 ${formattedHistory || 'Início de conversa.'}
 
+${manualOps}
 DIRETRIZES:
 1. Trate o Arnaldo como o diretor executivo da empresa (WhatsApp executivo oficial cadastrado: +1 825 336 9239 / 18253369239): ágil, eficiente, prestativa e organizada.
 2. Você compartilha a mesma memória do WhatsApp. Se o Arnaldo perguntar sobre conversas com clientes (como Fabiana), consulte a seção HISTÓRICO REAL DE CONVERSA acima e confirme com clareza. NUNCA diga que uma mensagem não foi enviada por você se constar no histórico daquele cliente.
@@ -1866,7 +1890,7 @@ ${clienteConversaContexto}
               let dbCliente: any = null;
               let taskOnlyHint = '';
               const { data: clientMatches } = await supabase.from('clientes')
-                  .select('id, nome_cliente, endereco_completo, documento_cpf_cnpj, relato_necessidade, whatsapp, telefone')
+                  .select('id, nome_cliente, endereco_completo, documento_cpf_cnpj, relato_necessidade, whatsapp, telefone, ficha_ia')
                   .or(`whatsapp.ilike.%${last8Digits}%,telefone.ilike.%${last8Digits}%,whatsapp.eq.${cleanPhone},whatsapp.eq.${remoteJid}`)
                   .limit(5);
 
@@ -1972,6 +1996,7 @@ ${clienteConversaContexto}
               if (dbCliente) {
                   injectedContext = `Status deste Número: CADASTRADO NO SISTEMA.\n` +
                       `Nome do Cliente: ${dbCliente.nome_cliente}\n` +
+                      (dbCliente.ficha_ia ? `Ficha do cliente (anotações internas, use com discrição): ${dbCliente.ficha_ia}\n` : '') +
                       `Endereço Cadastrado (APENAS CONSULTA INTERNA - NUNCA CITAR ESPONTANEAMENTE): ${dbCliente.endereco_completo || 'Não informado'}\n` +
                       `CPF/CNPJ: ${dbCliente.documento_cpf_cnpj || 'Não informado'}\n\n` +
                       `⚠️ REGRAS CRÍTICAS ANTI-ALUCINAÇÃO PARA CLIENTE CADASTRADO:\n` +
@@ -2003,9 +2028,10 @@ ${clienteConversaContexto}
       }
       
       const { promptContext: tempoPromptContext } = buildTemporalContext();
+      const manualOps = await loadManualOperacoes();
       const finalSystemPrompt = systemPrompt
           .replace("[INJECT_TEMPORAL_CONTEXT]", tempoPromptContext)
-          .replace("[INJECT_DB_CONTEXT]", injectedContext);
+          .replace("[INJECT_DB_CONTEXT]", injectedContext) + manualOps;
       
       // Sanitização Limpa antes de usar na Triagem de Arquivos
       if (typeof userMessage !== 'string') {
@@ -2377,7 +2403,7 @@ ${clienteConversaContexto}
         model: "gemini-2.5-flash",
         systemInstruction: finalSystemPrompt + `\n\nINSTRUÇÃO CRÍTICA DE COMPLETUDE:\n- NUNCA corte frases ou finalize respostas pela metade.\n- Seja acolhedora, precisa e conclua todos os raciocínios com naturalidade.`,
         generationConfig: {
-          temperature: 0.7,
+          temperature: 0.2,
           maxOutputTokens: 3072, 
         }
       });
@@ -2697,7 +2723,7 @@ ${clienteConversaContexto}
               model: "gemini-2.0-flash",
               systemInstruction: finalSystemPrompt + `\n\nINSTRUÇÃO CRÍTICA DE COMPLETUDE:\n- NUNCA corte frases ou finalize respostas pela metade.\n- Seja acolhedora, precisa e conclua todos os raciocínios com naturalidade.`,
               generationConfig: {
-                  temperature: 0.7,
+                  temperature: 0.2,
                   maxOutputTokens: 3072, 
               }
           });

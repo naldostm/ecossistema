@@ -751,6 +751,7 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('cli-end').value = item.endereco_completo || '';
             document.getElementById('cli-doc').value = item.documento_cpf_cnpj || '';
             window.fillEmpresaFields(item);
+            const fichaEl = document.getElementById('cli-ficha-ia'); if (fichaEl) fichaEl.value = item.ficha_ia || '';
 
             const quickShortcuts = document.getElementById('cliente-quick-shortcuts');
             if (quickShortcuts) quickShortcuts.style.display = 'flex';
@@ -5988,7 +5989,8 @@ ${materiaisTxt}${extrasTxt}
             whatsapp: document.getElementById('cli-whats').value,
             endereco_completo: document.getElementById('cli-end').value,
             documento_cpf_cnpj: document.getElementById('cli-doc').value,
-            empresa_id: empresaId
+            empresa_id: empresaId,
+            ficha_ia: (document.getElementById('cli-ficha-ia')?.value || '').trim() || null
         }, 'modal-cliente');
     });
 
