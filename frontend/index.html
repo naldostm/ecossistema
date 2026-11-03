@@ -1789,6 +1789,24 @@
                     <label>CPF/CNPJ</label>
                     <input type="text" id="cli-doc" class="modal-input" required>
                 </div>
+                <div class="input-group" style="display: flex; flex-direction: row; align-items: center; gap: 10px;">
+                    <input type="checkbox" id="cli-is-empresa" onchange="window.toggleEmpresaFields()" style="width: 18px; height: 18px; cursor: pointer;">
+                    <label for="cli-is-empresa" style="margin: 0; cursor: pointer;">Cliente comercial (empresa)</label>
+                </div>
+                <div id="cli-empresa-fields" style="display: none;">
+                    <div class="input-group">
+                        <label>Nome da Empresa</label>
+                        <input type="text" id="cli-empresa-nome" class="modal-input">
+                    </div>
+                    <div class="input-group">
+                        <label>Área de Atuação</label>
+                        <input type="text" id="cli-empresa-area" class="modal-input" placeholder="Ex: Restaurante, Clínica, Construtora...">
+                    </div>
+                    <div class="input-group">
+                        <label>E-mail da Empresa (opcional)</label>
+                        <input type="email" id="cli-empresa-email" class="modal-input" placeholder="contato@empresa.com.br">
+                    </div>
+                </div>
                 <div class="cliente-actions-footer" style="display: flex; gap: 10px; margin-top: 15px; flex-wrap: wrap; align-items: center;">
                     <button type="submit" class="action-btn auth-btn" style="background: var(--accent-green); flex: 1.2; min-width: 160px; height: 44px; font-weight: 700;">
                         <i class="fa-solid fa-floppy-disk"></i> Salvar Cliente
@@ -3814,7 +3832,7 @@
         </div>
     </div>
 
-    <script type="module" src="/js/app.js?v=5.9.7"></script>
+    <script type="module" src="/js/app.js?v=5.9.8"></script>
     <script type="module" src="/js/julia_engine.js"></script>
     <!-- Service Worker Desativado Temporariamente para Diagnóstico de Cache
     <script>
@@ -4127,7 +4145,7 @@
             <div class="seletor-toolbar">
                 <div class="seletor-search-box">
                     <i class="fa-solid fa-magnifying-glass"></i>
-                    <input type="text" id="seletor-input-busca" placeholder="Buscar por nome, categoria ou palavra-chave..." autocomplete="off">
+                    <input type="text" id="seletor-input-busca" placeholder="Buscar por nome..." autocomplete="off" oninput="window.crmItemSelector.onSearch(this.value)">
                     <button type="button" id="btn-seletor-clear-search" onclick="window.crmItemSelector.clearSearch()" style="display: none;"><i class="fa-solid fa-xmark"></i></button>
                 </div>
 

@@ -205,10 +205,64 @@ function isBotPhone(rawPhone: string): boolean {
   return digits.includes('947434455');
 }
 
+function normalizeNameTokens(raw: string): string[] {
+  return (raw || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
+
+// Casamento estrito: TODAS as palavras buscadas devem existir como palavras inteiras no nome.
+// Evita que "ana" case com "Mariana" ou que "maria" case com qualquer "Maria ...".
+function nameMatchesStrict(candidateName: string, searchTokens: string[]): boolean {
+  if (!candidateName || searchTokens.length === 0) return false;
+  const candTokens = new Set(normalizeNameTokens(candidateName));
+  return searchTokens.every(t => candTokens.has(t));
+}
+
+const NAME_IGNORE_WORDS = new Set(['bom', 'boa', 'tarde', 'noite', 'dia', 'olá', 'ola', 'oi', 'arnaldo', 'maria', 'cecília', 'cecilia', 'crm', 'whatsapp', 'sim', 'não', 'nao', 'por', 'favor', 'como', 'você', 'voce', 'está', 'esta', 'para', 'com', 'uma', 'mais', 'quando', 'qual', 'quais', 'onde', 'hoje', 'amanhã', 'amanha', 'segunda', 'terça', 'terca', 'quarta', 'quinta', 'sexta', 'sábado', 'sabado', 'domingo']);
+
+// Extrai nomes próprios (palavras capitalizadas) da mensagem, sem depender de lista fixa de clientes.
+function extractCandidateNames(text: string, max = 4): string[] {
+  const caps = (text || '').match(/[A-ZÁÉÍÓÚÂÊÔÃÕ][a-záéíóúâêôãõç]+/g) || [];
+  const out: string[] = [];
+  for (const w of caps) {
+    const lw = w.toLowerCase();
+    if (w.length >= 3 && !NAME_IGNORE_WORDS.has(lw) && !out.includes(lw)) out.push(lw);
+  }
+  return out.slice(0, max);
+}
+
+async function findOrCreateEmpresa(nome: string, area?: string, email?: string): Promise<string | null> {
+  const n = (nome || '').trim();
+  if (!n) return null;
+  try {
+    const escaped = n.replace(/[\\%_]/g, (m) => '\\' + m);
+    const { data: found } = await supabase.from('empresas').select('id').ilike('nome', escaped).limit(1);
+    if (found && found.length > 0) {
+      const upd: Record<string, any> = {};
+      if (area && area.trim()) upd.area_atuacao = area.trim();
+      if (email && email.trim()) upd.email = email.trim();
+      if (Object.keys(upd).length) await supabase.from('empresas').update(upd).eq('id', found[0].id);
+      return found[0].id;
+    }
+    const { data: created, error } = await supabase.from('empresas')
+      .insert({ nome: n, area_atuacao: (area || '').trim() || null, email: (email || '').trim() || null })
+      .select('id').single();
+    if (error) { console.error("[EMPRESA] Erro ao criar empresa:", error); return null; }
+    return created.id;
+  } catch (e) {
+    console.error("[EMPRESA] Falha:", e);
+    return null;
+  }
+}
+
 async function resolveClientContact(searchName: string): Promise<{ phone: string | null; name: string | null }> {
   if (!searchName || searchName.trim().length < 2) return { phone: null, name: null };
-  const cleanTerm = searchName.trim().toLowerCase();
-  const searchWords = cleanTerm.split(/\s+/).filter(w => w.length >= 3);
+  const searchTokens = normalizeNameTokens(searchName).filter(w => w.length >= 2);
+  if (searchTokens.length === 0) return { phone: null, name: null };
 
   // 1. Busca prioritária em tarefas_arnaldo (onde ficam clientes históricos e recentes)
   try {
@@ -221,8 +275,8 @@ async function resolveClientContact(searchName: string): Promise<{ phone: string
 
     if (tarefas && tarefas.length > 0) {
       for (const t of tarefas) {
-        const cName = (t.cliente_nome || '').toLowerCase();
-        const matches = cName.includes(cleanTerm) || searchWords.some(w => cName.includes(w));
+        const cName = t.cliente_nome || '';
+        const matches = nameMatchesStrict(cName, searchTokens);
         if (matches) {
           const p = String(t.cliente_telefone || '').replace(/\D/g, '');
           if (p.length >= 8 && !isArnaldoPhone(p) && !isBotPhone(p)) {
@@ -245,8 +299,8 @@ async function resolveClientContact(searchName: string): Promise<{ phone: string
 
     if (cFound && cFound.length > 0) {
       for (const c of cFound) {
-        const cName = (c.nome_cliente || '').toLowerCase();
-        const matches = cName.includes(cleanTerm) || searchWords.some(w => cName.includes(w));
+        const cName = c.nome_cliente || '';
+        const matches = nameMatchesStrict(cName, searchTokens);
         if (matches) {
           const rawP = c.whatsapp || c.telefone || '';
           const p = String(rawP).replace(/\D/g, '');
@@ -271,10 +325,8 @@ async function resolveClientContact(searchName: string): Promise<{ phone: string
 
     if (propFound && propFound.length > 0) {
       for (const pr of (propFound as any[])) {
-        const cName = pr.clientes?.nome_cliente ? pr.clientes.nome_cliente.toLowerCase() : '';
-        const obs = (pr.observacoes || '').toLowerCase();
-        const serv = (pr.servico_tipo || '').toLowerCase();
-        if (cName.includes(cleanTerm) || obs.includes(cleanTerm) || serv.includes(cleanTerm) || searchWords.some(w => cName.includes(w) || obs.includes(w))) {
+        const cName = pr.clientes?.nome_cliente || '';
+        if (nameMatchesStrict(cName, searchTokens)) {
           const rawP = pr.clientes?.whatsapp || pr.clientes?.telefone || '';
           const p = String(rawP).replace(/\D/g, '');
           if (p.length >= 8 && !isArnaldoPhone(p) && !isBotPhone(p)) {
@@ -297,8 +349,8 @@ async function resolveClientContact(searchName: string): Promise<{ phone: string
 
     if (osFound && osFound.length > 0) {
       for (const o of (osFound as any[])) {
-        const cName = o.clientes?.nome_cliente ? o.clientes.nome_cliente.toLowerCase() : '';
-        if (cName.includes(cleanTerm) || searchWords.some(w => cName.includes(w))) {
+        const cName = o.clientes?.nome_cliente || '';
+        if (nameMatchesStrict(cName, searchTokens)) {
           const rawP = o.clientes.whatsapp || o.clientes.telefone || '';
           const p = String(rawP).replace(/\D/g, '');
           if (p.length >= 8 && !isArnaldoPhone(p) && !isBotPhone(p)) {
@@ -487,8 +539,8 @@ NUNCA CITAR ENDEREÇO ESPONTANEAMENTE:
 - O endereço que consta no sistema é exclusivamente para conferência interna. NUNCA inicie mensagens dizendo "Sobre o endereço tal..." ou "Referente ao endereço...". Só cite o endereço se o cliente perguntar expressamente ou se for para confirmar um agendamento já solicitado.
 
 AÇÃO MÁGICA - CRIAR_CADASTRO (EXCLUSIVO PARA CLIENTES NOVOS):
-1. Dispare a ação abaixo APENAS E EXCLUSIVAMENTE para clientes que AINDA NÃO SÃO CADASTRADOS (Status: Novo Contato/Desconhecido), após coletar Nome e Endereço:
-{"acao": "CRIAR_CADASTRO", "nome_cliente": "Nome Completo", "endereco_completo": "Rua X, nº Y, Bairro, Cidade (Endereço EXATO informado pelo cliente)", "cpf_cnpj": "123.456.789-00 ou deixe vazio se não informado", "relato": "Forte Resumo do Caso e Detalhes do Serviço", "mensagem_pro_cliente": "Seu agradecimento confirmando que registrou os dados e que a equipe técnica entrará em contato dentro de 48h."}
+1. Dispare a ação abaixo APENAS E EXCLUSIVAMENTE para clientes que AINDA NÃO SÃO CADASTRADOS (Status: Novo Contato/Desconhecido), após coletar Nome completo, Endereço do serviço e CPF/CNPJ (e, se for cliente comercial: nome da empresa, área de atuação e e-mail da empresa). Se faltar algum dado, pergunte antes de disparar:
+{"acao": "CRIAR_CADASTRO", "nome_cliente": "Nome Completo", "endereco_completo": "Rua X, nº Y, Bairro, Cidade (Endereço EXATO informado pelo cliente)", "cpf_cnpj": "123.456.789-00 ou deixe vazio se não informado", "empresa": "Nome da empresa ou vazio", "area_atuacao": "Área de atuação da empresa ou vazio", "email_empresa": "E-mail da empresa ou vazio", "relato": "Forte Resumo do Caso e Detalhes do Serviço", "mensagem_pro_cliente": "Seu agradecimento confirmando que registrou os dados e que a equipe técnica entrará em contato dentro de 48h."}
 * Se o cliente JÁ FOR CADASTRADO, NUNCA envie este JSON. Converse normalmente confirmando que o pedido já foi recebido e encaminhado.
 
 REGRAS ABSOLUTAS DE PRECISÃO E FIDELIDADE (ÁUDIO E TEXTO):
@@ -854,7 +906,7 @@ DIRETRIZES DE RESPOSTA:
                   .limit(10);
               if (recPropostas && recPropostas.length > 0) {
                   propostasGestorTexto = recPropostas.map((p: any, idx: number) => {
-                      const cliente = p.clientes?.nome_cliente || (p.servico_tipo?.includes('tubo') || p.servico_tipo?.includes('GN') ? 'Fabiana Arquiteta' : 'Cliente');
+                      const cliente = p.clientes?.nome_cliente || (p.servico_tipo?.includes('tubo') || p.servico_tipo?.includes('GN') ? 'Cliente não identificado' : 'Cliente');
                       const rawP = p.clientes?.whatsapp || '';
                       const phoneStr = rawP ? ` (Tel: ${rawP})` : '';
                       let itemsSummary = '';
@@ -871,10 +923,7 @@ DIRETRIZES DE RESPOSTA:
           let clienteContexto = "";
           try {
               const lower = userText.toLowerCase();
-              const candidateNames: string[] = [];
-              ['fabiana', 'artur', 'rafael', 'paula', 'caio', 'katia', 'denise', 'maxwell', 'francisco', 'sergio'].forEach(n => {
-                  if (lower.includes(n)) candidateNames.push(n);
-              });
+              const candidateNames: string[] = extractCandidateNames(userText);
               for (const cName of candidateNames) {
                   const resolved = await resolveClientContact(cName);
                   if (resolved.phone) {
@@ -1518,7 +1567,7 @@ DIRETRIZES OBRIGATÓRIAS:
 
               if (recPropostas && recPropostas.length > 0) {
                   propostasGestorTexto = recPropostas.map((p: any, idx: number) => {
-                      const clienteNome = p.clientes?.nome_cliente || (p.servico_tipo?.includes('tubo') || p.servico_tipo?.includes('GN') ? 'Fabiana Arquiteta' : 'Cliente');
+                      const clienteNome = p.clientes?.nome_cliente || (p.servico_tipo?.includes('tubo') || p.servico_tipo?.includes('GN') ? 'Cliente não identificado' : 'Cliente');
                       const rawP = p.clientes?.whatsapp || contactPhoneByName.get(clienteNome.toLowerCase()) || contactPhoneByName.get(clienteNome.toLowerCase().split(' ')[0]) || '';
                       const phoneStr = rawP ? ` | Tel: ${rawP}` : '';
                       const dataStr = p.data_proposta ? new Date(p.data_proposta).toLocaleDateString('pt-BR') : '';
@@ -1667,15 +1716,7 @@ ${itemsDesc ? `Itens e Escopo Detalhado:\n  ${itemsDesc}\n` : ''}${p.observacoes
           let clienteConversaContexto = "";
           try {
               const lower = (userMessage || '').toLowerCase();
-              const searchTerms = (userMessage || '').match(/[A-ZÁÉÍÓÚÂÊÔÃÕ][a-záéíóúâêôãõç]+/g) || [];
-              const ignoreWords = new Set(['Bom', 'Boa', 'Tarde', 'Noite', 'Dia', 'Olá', 'Oi', 'Arnaldo', 'Maria', 'Cecília', 'CRM', 'WhatsApp', 'Sim', 'Não', 'Por', 'Favor', 'Como', 'Você', 'Está', 'Para', 'Com', 'Uma', 'Mais']);
-              const candidateNames = searchTerms.filter(w => !ignoreWords.has(w) && w.length >= 3);
-
-              if (candidateNames.length === 0) {
-                  ['fabiana', 'artur', 'rafael', 'paula', 'caio', 'katia', 'denise', 'maxwell', 'francisco', 'sergio'].forEach(n => {
-                      if (lower.includes(n)) candidateNames.push(n);
-                  });
-              }
+              const candidateNames: string[] = extractCandidateNames(userMessage || '');
 
               for (const cName of candidateNames) {
                   const resolved = await resolveClientContact(cName);
@@ -1823,13 +1864,20 @@ ${clienteConversaContexto}
           try {
               // 1. Busca Cliente por múltiplos formatos de telefone
               let dbCliente: any = null;
+              let taskOnlyHint = '';
               const { data: clientMatches } = await supabase.from('clientes')
-                  .select('id, nome_cliente, endereco_completo, documento_cpf_cnpj, relato_necessidade, whatsapp')
-                  .or(`whatsapp.ilike.%${last8Digits}%,whatsapp.eq.${cleanPhone},whatsapp.eq.${remoteJid}`)
-                  .limit(1);
+                  .select('id, nome_cliente, endereco_completo, documento_cpf_cnpj, relato_necessidade, whatsapp, telefone')
+                  .or(`whatsapp.ilike.%${last8Digits}%,telefone.ilike.%${last8Digits}%,whatsapp.eq.${cleanPhone},whatsapp.eq.${remoteJid}`)
+                  .limit(5);
 
               if (clientMatches && clientMatches.length > 0) {
-                  dbCliente = clientMatches[0];
+                  // Prefere o cadastro cujo número bate por inteiro; senão, o primeiro que bate pelos 8 últimos dígitos.
+                  const digitsOf = (v: any) => String(v || '').replace(/\D/g, '');
+                  const exact = clientMatches.find((m: any) => [m.whatsapp, m.telefone].some((v: any) => {
+                      const d = digitsOf(v);
+                      return d.length >= 10 && (d === cleanPhone || cleanPhone.endsWith(d) || d.endsWith(cleanPhone));
+                  }));
+                  dbCliente = exact || clientMatches[0];
               }
 
               // Fallback: se não estiver na tabela clientes, busca na tabela de tarefas_arnaldo
@@ -1842,14 +1890,7 @@ ${clienteConversaContexto}
                           .limit(1);
 
                       if (taskMatch && taskMatch.length > 0 && taskMatch[0].cliente_nome) {
-                          dbCliente = {
-                              id: null,
-                              nome_cliente: taskMatch[0].cliente_nome,
-                              whatsapp: taskMatch[0].cliente_telefone,
-                              endereco_completo: '',
-                              documento_cpf_cnpj: '',
-                              relato_necessidade: `${taskMatch[0].titulo || ''}: ${taskMatch[0].descricao || ''}`
-                          };
+                          taskOnlyHint = `${taskMatch[0].cliente_nome} (nome anotado em tarefa, SEM cadastro completo; confirme com o cliente)`;
                       }
                   } catch (tFallbackErr) {
                       console.warn("Erro ao buscar fallback em tarefas_arnaldo:", tFallbackErr);
@@ -1887,18 +1928,7 @@ ${clienteConversaContexto}
                       if (pById) dbProp = pById;
                   }
 
-                  // Se não encontrou por ID ou ID é nulo, busca pelo nome do cliente
-                  if (dbProp.length === 0 && dbCliente?.nome_cliente) {
-                      const firstName = dbCliente.nome_cliente.trim().split(' ')[0];
-                      if (firstName.length >= 3) {
-                          const { data: pByName } = await supabase.from('propostas')
-                              .select('id, servico_tipo, valor_estimado, status, data_proposta, fornecimento_materiais, itens_json, observacoes')
-                              .or(`servico_tipo.ilike.%${firstName}%,observacoes.ilike.%${firstName}%`)
-                              .order('created_at', { ascending: false })
-                              .limit(4);
-                          if (pByName && pByName.length > 0) dbProp = pByName;
-                      }
-                  }
+                  // Propostas só por cliente_id (busca por primeiro nome removida: misturava clientes diferentes).
 
                   if (dbProp && dbProp.length > 0) {
                       propostasText = dbProp.map((p: any) => {
@@ -1960,7 +1990,11 @@ ${clienteConversaContexto}
               } else {
                   injectedContext = `Status deste Número: Novo Contato / Cliente em Prospecção (Não cadastrado na tabela de clientes).\n` +
                       (agendaText ? `📅 AGENDAMENTOS NA AGENDA DA MARIA:\n${agendaText}\n` : "") +
-                      `TRATE COM TOTAL ACOLHIMENTO E COLETE NOME, ENDEREÇO E DETALHES DO SERVIÇO SE ELE QUISER UM ATENDIMENTO/ORÇAMENTO.`;
+                      (taskOnlyHint ? `Nome provável (NÃO confirmado): ${taskOnlyHint}\n` : "") +
+                      `Este número NÃO tem cadastro no CRM. Faça o cadastro completo, perguntando com naturalidade (uma ou duas perguntas por vez):\n` +
+                      `1) Nome completo (se houver nome provável acima, confirme: "falo com o(a) ...?"); 2) Endereço completo do serviço; 3) CPF ou CNPJ; 4) Nome da empresa, se for empresa.\n` +
+                      `Só use o nome depois que o cliente confirmar. NUNCA presuma nome por foto de perfil ou apelido do WhatsApp.\n` +
+                      `Quando tiver os dados, acione CRIAR_CADASTRO. Em seguida siga o atendimento (orçamento/visita).`;
               }
 
           } catch(dbErr) {
@@ -2826,6 +2860,10 @@ ${clienteConversaContexto}
                           const updatePayload: Record<string, any> = { relato_necessidade: newRelato };
                           if (!exist.endereco_completo && actionData.endereco_completo) updatePayload.endereco_completo = actionData.endereco_completo;
                           if (!exist.documento_cpf_cnpj && actionData.cpf_cnpj) updatePayload.documento_cpf_cnpj = actionData.cpf_cnpj;
+                          if (actionData.empresa) {
+                              const empId = await findOrCreateEmpresa(actionData.empresa, actionData.area_atuacao, actionData.email_empresa);
+                              if (empId) updatePayload.empresa_id = empId;
+                          }
 
                           const { error: updErr } = await supabase.from('clientes').update(updatePayload).eq('id', exist.id);
                           if (updErr) console.error("[ANTI-DUPLICAÇÃO] Erro ao atualizar cliente existente:", updErr);
@@ -2837,7 +2875,8 @@ ${clienteConversaContexto}
                               whatsapp: clientPhone || null,
                               endereco_completo: actionData.endereco_completo,
                               documento_cpf_cnpj: actionData.cpf_cnpj,
-                              relato_necessidade: actionData.relato
+                              relato_necessidade: actionData.relato,
+                              empresa_id: await findOrCreateEmpresa(actionData.empresa, actionData.area_atuacao, actionData.email_empresa)
                           });
                           if (insertErr) console.error("[ACTION] Erro ao inserir novo cliente:", insertErr);
                           else console.log(`[ACTION] ✅ NOVO CLIENTE SALVO: ${actionData.nome_cliente} | ${clientPhone}`);
@@ -3087,14 +3126,22 @@ ${clienteConversaContexto}
                           .select('id, servico_tipo, valor_estimado, clientes(nome_cliente)')
                           .or(`servico_tipo.ilike.%${term}%,observacoes.ilike.%${term}%`)
                           .order('created_at', { ascending: false })
-                          .limit(1);
+                          .limit(5);
 
-                      if (foundProps && foundProps.length > 0) {
+                       const distinctClients = new Set((foundProps || []).map((x: any) => x.clientes?.nome_cliente || `sem-cliente-${x.id}`));
+                       let ambiguousTerm = false;
+                       if (distinctClients.size > 1) {
+                           ambiguousTerm = true;
+                           const nomes = Array.from(distinctClients).filter(nm => !String(nm).startsWith("sem-cliente-")).join(", ");
+                           gestorConfirmations.push(`Arnaldo, o termo "${term}" bate com propostas de clientes diferentes (${nomes || "sem cliente vinculado"}). Para não alterar a errada, me diga o nome completo do cliente.`);
+                       }
+
+                       if (!ambiguousTerm && foundProps && foundProps.length > 0) {
                           foundPropId = foundProps[0].id;
                           propService = foundProps[0].servico_tipo;
                           propCurrentVal = foundProps[0].valor_estimado || 0;
                           propClient = (foundProps[0] as any).clientes?.nome_cliente || '';
-                      } else {
+                      } else if (!ambiguousTerm) {
                           const { data: foundClient } = await supabase
                               .from('clientes')
                               .select('id, nome_cliente')
@@ -3114,20 +3161,6 @@ ${clienteConversaContexto}
                                   propService = clientProps[0].servico_tipo;
                                   propCurrentVal = clientProps[0].valor_estimado || 0;
                                   propClient = foundClient[0].nome_cliente;
-                              }
-                          } else if (/vila\s*madalena|gn|tubula[çc][aã]o|aquecedor/i.test(term)) {
-                              // Fallback inteligente para a proposta da Vila Madalena
-                              const { data: gnProps } = await supabase
-                                  .from('propostas')
-                                  .select('id, servico_tipo, valor_estimado')
-                                  .ilike('servico_tipo', '%tubo%')
-                                  .order('created_at', { ascending: false })
-                                  .limit(1);
-                              if (gnProps && gnProps.length > 0) {
-                                  foundPropId = gnProps[0].id;
-                                  propService = gnProps[0].servico_tipo;
-                                  propCurrentVal = gnProps[0].valor_estimado || 0;
-                                  propClient = 'Fabiana Arquiteta (Vila Madalena)';
                               }
                           }
                       }

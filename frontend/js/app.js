@@ -750,6 +750,7 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('cli-whats').value = item.whatsapp || '';
             document.getElementById('cli-end').value = item.endereco_completo || '';
             document.getElementById('cli-doc').value = item.documento_cpf_cnpj || '';
+            window.fillEmpresaFields(item);
 
             const quickShortcuts = document.getElementById('cliente-quick-shortcuts');
             if (quickShortcuts) quickShortcuts.style.display = 'flex';
@@ -1424,11 +1425,10 @@ ${materiaisTxt}${extrasTxt}
 
         try {
             if (showSkeletons) triggerAutoSave('Sincronizando Dados Gerais...');
-
-            // 1. Traz Ordem de Serviço (Aprimorado com Obras e Pagamento V5 e Itens)
-            let ordens = null;
-            try {
-                const { data: ordensData, error: errOrdens } = await supabase
+            // PERFORMANCE: dispara todas as consultas independentes ao mesmo tempo.
+            // O restante da função apenas consome estes resultados na mesma ordem de antes.
+            const fetchNow = (q) => Promise.resolve(q).catch(err => ({ data: null, error: err }));
+            const qOrdens = fetchNow(supabase
                     .from('ordens_servico')
                     .select(`
                         id_os, servico_tipo, status_ia, status_pagamento, cliente_id, obra_id, data_hora, tecnico_id, colaborador, materiais_lista,
@@ -1439,7 +1439,27 @@ ${materiaisTxt}${extrasTxt}
                         os_datas(data, descricao)
                     `)
                     .order('data_hora', { ascending: false })
-                    .limit(100);
+                    .limit(100));
+            const qObras = fetchNow(supabase.from('obras').select('*, clientes(nome_cliente)').order('created_at', { ascending: false }).limit(100));
+            const qCaixa = fetchNow(supabase.from('fluxo_caixa').select('*').order('data_ocorrencia', { ascending: false }).limit(200));
+            const qPause = fetchNow(supabase.from('agent_memory')
+                .select('phone, content, created_at')
+                .eq('role', 'user')
+                .in('content', ['BOT_PAUSADO', 'BOT_ATIVO', 'GLOBAL_PAUSE', 'GLOBAL_ACTIVE'])
+                .order('created_at', { ascending: false }));
+            const qClientes = fetchNow(supabase.from('clientes').select('*').order('created_at', { ascending: false }));
+            const qMateriais = fetchNow(supabase.from('materiais').select('*'));
+            const qFerram = fetchNow(supabase.from('ferramentas').select('*, colaboradores(nome_completo)'));
+            const qServicos = fetchNow(supabase.from('servicos').select('*'));
+            const qColab = fetchNow(supabase.from('colaboradores').select('*').order('nome_completo', {ascending: true}));
+            const qContratos = fetchNow(supabase.from('contratos_pmoc').select('*, clientes(nome_cliente)').order('created_at', { ascending: false }));
+            const qPropostas = fetchNow(supabase.from('propostas').select('*, clientes(nome_cliente)').order('created_at', { ascending: false }));
+            const qVendas = fetchNow(supabase.from('vendas_produtos').select('*').order('data_venda', { ascending: false }));
+
+            // 1. Traz Ordem de Serviço (Aprimorado com Obras e Pagamento V5 e Itens)
+            let ordens = null;
+            try {
+                const { data: ordensData, error: errOrdens } = await qOrdens;
 
                 if (errOrdens) {
                     console.error('Erro Crítico [ordens_servico]:', errOrdens.message);
@@ -1467,7 +1487,7 @@ ${materiaisTxt}${extrasTxt}
             }
 
             // 1.5 Traz Obras
-            const { data: obras, error: errObras } = await supabase.from('obras').select('*, clientes(nome_cliente)').order('created_at', { ascending: false }).limit(100);
+            const { data: obras, error: errObras } = await qObras;
             if (errObras) console.error("Erro Supabase nas Obras:", errObras);
             if (!errObras && obras) {
                 window.obrasCache = obras; // Pra usar nas Super Fichas
@@ -1476,7 +1496,7 @@ ${materiaisTxt}${extrasTxt}
             }
 
             // 1.6 Traz Fluxo de Caixa Central
-            const { data: caixa, error: errCaixa } = await supabase.from('fluxo_caixa').select('*').order('data_ocorrencia', { ascending: false }).limit(200);
+            const { data: caixa, error: errCaixa } = await qCaixa;
             if (errCaixa) console.error("Erro Supabase no Caixa:", errCaixa);
             if (!errCaixa && caixa) {
                 window.caixaCache = caixa;
@@ -1548,11 +1568,7 @@ ${materiaisTxt}${extrasTxt}
             }
 
             // 2. Traz Clientes e Status do Bot
-            const { data: pauseMemories } = await supabase.from('agent_memory')
-                .select('phone, content, created_at')
-                .eq('role', 'user')
-                .in('content', ['BOT_PAUSADO', 'BOT_ATIVO', 'GLOBAL_PAUSE', 'GLOBAL_ACTIVE'])
-                .order('created_at', { ascending: false });
+            const { data: pauseMemories } = await qPause;
 
             window.pausedPhones = {};
             window._globalBotLoaded = false;
@@ -1581,7 +1597,7 @@ ${materiaisTxt}${extrasTxt}
                 });
             }
 
-            const { data: clientes, error: errCli } = await supabase.from('clientes').select('*').order('created_at', { ascending: false });
+            const { data: clientes, error: errCli } = await qClientes;
             if (errCli) console.error('[loadData] Erro ao carregar clientes (RLS?):', errCli.message);
             if (!errCli && clientes) {
                 window.clientesCache = clientes; // Guardando pra uso offline de selects
@@ -1601,7 +1617,7 @@ ${materiaisTxt}${extrasTxt}
             }
 
             // 3. Traz Materiais (Estoque)
-            const { data: materiais, error: errMat } = await supabase.from('materiais').select('*');
+            const { data: materiais, error: errMat } = await qMateriais;
             if (errMat) console.error('[loadData] Erro ao carregar materiais (RLS?):', errMat.message);
             if (!errMat && materiais) {
                 window.materiaisCache = materiais;
@@ -1610,7 +1626,7 @@ ${materiaisTxt}${extrasTxt}
             }
 
             // 4. Traz Ferramentas
-            const { data: ferramentas, error: errFer } = await supabase.from('ferramentas').select('*, colaboradores(nome_completo)');
+            const { data: ferramentas, error: errFer } = await qFerram;
             if (!errFer && ferramentas) {
                 window.ferramentasCache = ferramentas;
                 const tbody = document.querySelector('#table-ferramentas tbody');
@@ -1618,7 +1634,7 @@ ${materiaisTxt}${extrasTxt}
             }
 
             // 5. Traz Servicos
-            const { data: servicos, error: errSer } = await supabase.from('servicos').select('*');
+            const { data: servicos, error: errSer } = await qServicos;
             if (errSer) console.error('[loadData] Erro ao carregar servicos (RLS?):', errSer.message);
             if (!errSer && servicos) {
                 window.servicosCache = servicos;
@@ -1627,7 +1643,7 @@ ${materiaisTxt}${extrasTxt}
             }
 
             // 6. Traz Quadro de Funcionários (Colaboradores)
-            const { data: colaboradores, error: errCol } = await supabase.from('colaboradores').select('*').order('nome_completo', {ascending: true});
+            const { data: colaboradores, error: errCol } = await qColab;
             if (!errCol && colaboradores) {
                 window.colabCache = colaboradores;
                 const filterTecnicoObj = document.getElementById('filter-comissao-tecnico');
@@ -1659,7 +1675,7 @@ ${materiaisTxt}${extrasTxt}
             }
 
             // 7. Traz Contratos PMOC e Jurídico
-            const { data: contratos, error: errContratos } = await supabase.from('contratos_pmoc').select('*, clientes(nome_cliente)').order('created_at', { ascending: false });
+            const { data: contratos, error: errContratos } = await qContratos;
             if (!errContratos && contratos) {
                 window.contratosCache = contratos;
                 const tbody = document.querySelector('#table-contratos tbody');
@@ -1694,7 +1710,7 @@ ${materiaisTxt}${extrasTxt}
             }
 
             // 7.1 Traz Propostas (Orçamentos Industriais) V5.7
-            const { data: propostas, error: errPropostas } = await supabase.from('propostas').select('*, clientes(nome_cliente)').order('created_at', { ascending: false });
+            const { data: propostas, error: errPropostas } = await qPropostas;
             if (!errPropostas && propostas) {
                 window.propostasCache = propostas;
                 const tbody = document.querySelector('#table-propostas tbody');
@@ -1738,7 +1754,7 @@ ${materiaisTxt}${extrasTxt}
             if (typeof window.loadComissoes === 'function') await window.loadComissoes();
 
             // 7.4 Traz Vendas de Produtos (Estoque)
-            const { data: vendas, error: errVendas } = await supabase.from('vendas_produtos').select('*').order('data_venda', { ascending: false });
+            const { data: vendas, error: errVendas } = await qVendas;
             if (!errVendas && vendas) {
                 window.vendasCache = vendas;
                 const tbody = document.querySelector('#table-vendas-produtos tbody');
@@ -5002,11 +5018,7 @@ ${materiaisTxt}${extrasTxt}
             if (this.searchText) {
                 const normalize = str => (str || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
                 const term = normalize(this.searchText);
-                items = items.filter(i => 
-                    normalize(i.name).includes(term) || 
-                    normalize(i.category).includes(term) ||
-                    normalize(i.description).includes(term)
-                );
+                items = items.filter(i => normalize(i.name).includes(term));
             }
 
             if (items.length === 0) {
@@ -5914,13 +5926,69 @@ ${materiaisTxt}${extrasTxt}
     }
 
     // Formulários Standard
+    // Cliente comercial: caixa que abre os campos da empresa (nome, área de atuação, e-mail)
+    window.toggleEmpresaFields = function() {
+        const on = !!document.getElementById('cli-is-empresa')?.checked;
+        const box = document.getElementById('cli-empresa-fields');
+        if (box) box.style.display = on ? 'block' : 'none';
+        const nomeEmp = document.getElementById('cli-empresa-nome');
+        if (nomeEmp) nomeEmp.required = on;
+    };
+
+    window.fillEmpresaFields = async function(item) {
+        const chk = document.getElementById('cli-is-empresa');
+        if (!chk) return;
+        chk.checked = !!(item && item.empresa_id);
+        ['cli-empresa-nome', 'cli-empresa-area', 'cli-empresa-email'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+        window.toggleEmpresaFields();
+        if (!item || !item.empresa_id) return;
+        const { data: emp } = await supabase.from('empresas').select('nome, area_atuacao, email').eq('id', item.empresa_id).maybeSingle();
+        if (emp) {
+            document.getElementById('cli-empresa-nome').value = emp.nome || '';
+            document.getElementById('cli-empresa-area').value = emp.area_atuacao || '';
+            document.getElementById('cli-empresa-email').value = emp.email || '';
+        }
+    };
+
+    document.getElementById('form-cliente')?.addEventListener('reset', () => setTimeout(() => window.toggleEmpresaFields(), 0));
+
+    // Acha a empresa pelo nome (sem diferenciar maiúsculas) ou cria; várias pessoas da mesma empresa compartilham o mesmo registro.
+    async function resolveEmpresaId() {
+        if (!document.getElementById('cli-is-empresa')?.checked) return null;
+        const nome = document.getElementById('cli-empresa-nome').value.trim();
+        const area = document.getElementById('cli-empresa-area').value.trim();
+        const email = document.getElementById('cli-empresa-email').value.trim();
+        if (!nome) return null;
+        const escaped = nome.replace(/[\\%_]/g, m => '\\' + m);
+        const { data: found } = await supabase.from('empresas').select('id').ilike('nome', escaped).limit(1);
+        if (found && found.length > 0) {
+            const upd = {};
+            if (area) upd.area_atuacao = area;
+            if (email) upd.email = email;
+            if (Object.keys(upd).length) await supabase.from('empresas').update(upd).eq('id', found[0].id);
+            return found[0].id;
+        }
+        const { data: created, error } = await supabase.from('empresas').insert({ nome, area_atuacao: area || null, email: email || null }).select('id').single();
+        if (error) throw error;
+        return created.id;
+    }
+
     document.getElementById('form-cliente')?.addEventListener('submit', async (e) => {
         e.preventDefault();
+        let empresaId = null;
+        try {
+            empresaId = await resolveEmpresaId();
+        } catch (err) {
+            console.error('Erro ao salvar empresa:', err);
+            alert('Não foi possível salvar a empresa: ' + (err.message || err));
+            return;
+        }
         await saveToDatabase('clientes', {
             nome_cliente: document.getElementById('cli-nome').value,
             whatsapp: document.getElementById('cli-whats').value,
             endereco_completo: document.getElementById('cli-end').value,
-            documento_cpf_cnpj: document.getElementById('cli-doc').value
+            documento_cpf_cnpj: document.getElementById('cli-doc').value,
+            empresa_id: empresaId
         }, 'modal-cliente');
     });
 
