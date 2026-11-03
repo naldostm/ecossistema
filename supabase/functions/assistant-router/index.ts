@@ -235,6 +235,25 @@ function extractCandidateNames(text: string, max = 4): string[] {
   return out.slice(0, max);
 }
 
+type CatalogItem = { id: any; type: "service" | "material"; name: string; price: number; category: string; unit?: string };
+
+// Casa um item falado ("instalação de split 12000") com o catálogo real. Ambíguo ou fraco = não casa.
+function bestCatalogMatch(query: string, catalog: CatalogItem[]): { match: CatalogItem | null; ambiguous: boolean } {
+  const qt = normalizeNameTokens(query).filter(t => t.length >= 3 || /\d/.test(t));
+  if (qt.length === 0) return { match: null, ambiguous: false };
+  let best: CatalogItem | null = null; let bestScore = 0; let second = 0;
+  for (const it of catalog) {
+    const ct = new Set(normalizeNameTokens(it.name));
+    const hit = qt.filter(t => ct.has(t)).length;
+    const adj = hit / qt.length - Math.max(0, ct.size - hit) * 0.001;
+    if (adj > bestScore) { second = bestScore; bestScore = adj; best = it; }
+    else if (adj > second) { second = adj; }
+  }
+  if (!best || bestScore < 0.75) return { match: null, ambiguous: false };
+  if (second >= 0.75 && bestScore - second < 0.0015) return { match: null, ambiguous: true };
+  return { match: best, ambiguous: false };
+}
+
 async function findOrCreateEmpresa(nome: string, area?: string, email?: string): Promise<string | null> {
   const n = (nome || '').trim();
   if (!n) return null;
@@ -1814,6 +1833,22 @@ ${snippet}
        "observacao": "Detalhes da alteração"
      }
 
+3.B CRIAR ORÇAMENTO / PROPOSTA A PARTIR DE ÁUDIO OU TEXTO DO ARNALDO:
+   - Se o Arnaldo ditar (por áudio ou texto) um orçamento para um cliente ("Faz um orçamento pro Roberto: instalação de um split 12000 e 10 metros de infra"), ouça com atenção redobrada e responda com a ação JSON:
+   {
+     "acao": "CRIAR_PROPOSTA_RASCUNHO",
+     "nome_cliente": "Nome do cliente como o Arnaldo falou",
+     "telefone_cliente": "somente números, se o Arnaldo informar; senão vazio",
+     "servico_tipo": "Título curto da proposta",
+     "itens": [ {"nome": "descrição do serviço ou material", "quantidade": 1, "tipo": "servico ou material"} ],
+     "fornecimento_materiais": "Arnaldo Trentin Fornece ou Cliente",
+     "observacoes": "condições ditas pelo Arnaldo, ou vazio",
+     "prazo_inicio": "AAAA-MM-DD ou vazio"
+   }
+   - REGRA ABSOLUTA: NUNCA invente preços e NUNCA coloque valores nos itens. Informe só nome e quantidade; o sistema busca o preço no catálogo oficial. Item que não existir no catálogo fica sinalizado para o Arnaldo precificar.
+   - Não invente itens que o Arnaldo não falou. Se faltar o cliente ou a quantidade, pergunte antes de criar.
+   - A proposta é criada como RASCUNHO para revisão. NUNCA envie ao cliente sem o Arnaldo confirmar.
+
 4. GUARDAR E ENCAMINHAR ARQUIVOS / ANEXOS:
    - Se o Arnaldo mandar uma foto, lista de materiais, PDF de projeto ou orçamento e disser "Guarda isso na obra/proposta X" ou "Encaminha para a Fabiana / cliente":
      * Para ENCAMINHAR: use "DISPARAR_CONTATO_ATIVO" incluindo "arquivo_url" e "arquivo_nome" dos arquivos disponíveis abaixo!
@@ -3272,6 +3307,98 @@ ${clienteConversaContexto}
               }
 
               // 📎 AÇÃO: ANEXAR / GUARDAR ARQUIVO NA PROPOSTA OU OBRA
+              else if (actionData.acao === "CRIAR_PROPOSTA_RASCUNHO" && isArnaldoAdmin) {
+                  try {
+                      const nomeCli = String(actionData.nome_cliente || "").trim();
+                      const telDigits = String(actionData.telefone_cliente || "").replace(/\D/g, "");
+                      let clienteProp: any = null;
+                      let avisoCliente = "";
+
+                      if (telDigits.length >= 8) {
+                          const l8 = telDigits.slice(-8);
+                          const { data: byPhone } = await supabase.from("clientes")
+                              .select("id, nome_cliente, endereco_completo, whatsapp")
+                              .or(`whatsapp.ilike.%${l8}%,telefone.ilike.%${l8}%`).limit(2);
+                          if (byPhone && byPhone.length === 1) clienteProp = byPhone[0];
+                      }
+                      if (!clienteProp && nomeCli) {
+                          const toks = normalizeNameTokens(nomeCli);
+                          const { data: cands } = await supabase.from("clientes")
+                              .select("id, nome_cliente, endereco_completo, whatsapp").limit(1000);
+                          const found = (cands || []).filter((x: any) => nameMatchesStrict(x.nome_cliente, toks));
+                          if (found.length === 1) clienteProp = found[0];
+                          else if (found.length > 1) avisoCliente = `Arnaldo, encontrei mais de um cliente para "${nomeCli}": ${found.slice(0, 5).map((x: any) => x.nome_cliente).join("; ")}. Me diga qual deles (nome completo) que eu monto o orçamento.`;
+                      }
+
+                      if (!clienteProp) {
+                          gestorConfirmations.push(avisoCliente || `Arnaldo, não encontrei "${nomeCli || "esse cliente"}" no cadastro. Me passe o nome completo ou o telefone, ou cadastre o cliente, que eu monto o orçamento.`);
+                      } else {
+                          const [{ data: svcs }, { data: mats }] = await Promise.all([
+                              supabase.from("servicos").select("id, nome_servico, valor_base, categoria"),
+                              supabase.from("materiais").select("id, nome_material, valor_unitario, unidade_medida, campo_uso")
+                          ]);
+                          const catSvc: CatalogItem[] = (svcs || []).map((s: any) => ({ id: s.id, type: "service", name: s.nome_servico || "", price: parseFloat(s.valor_base || 0), category: s.categoria || "Geral", unit: "serviço" }));
+                          const catMat: CatalogItem[] = (mats || []).map((m: any) => ({ id: m.id, type: "material", name: m.nome_material || "", price: parseFloat(m.valor_unitario || 0), category: (m.campo_uso || "Geral").replace(" | ", " - "), unit: m.unidade_medida || "un" }));
+
+                          const itensProp: any[] = [];
+                          const semPreco: string[] = [];
+                          const linhasResumo: string[] = [];
+                          for (const raw of (Array.isArray(actionData.itens) ? actionData.itens : [])) {
+                              const nomeItem = String(raw?.nome || "").trim();
+                              if (!nomeItem) continue;
+                              const qtd = Math.max(parseFloat(String(raw?.quantidade ?? 1).replace(",", ".")) || 1, 0.01);
+                              const tipoPedido = String(raw?.tipo || "").toLowerCase();
+                              const pool = tipoPedido.startsWith("serv") ? catSvc : (tipoPedido.startsWith("mat") ? catMat : [...catSvc, ...catMat]);
+                              const { match, ambiguous } = bestCatalogMatch(nomeItem, pool);
+                              if (match) {
+                                  const sub = match.price * qtd;
+                                  itensProp.push({ id_db: match.id, type: match.type, name: match.name, category: match.category, price: match.price, qtd, subtotal: sub });
+                                  linhasResumo.push(`• ${qtd}x ${match.name} — R$ ${sub.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`);
+                              } else {
+                                  itensProp.push({ type: tipoPedido.startsWith("mat") ? "material" : "service", name: nomeItem, category: "Item avulso (precificar)", price: 0, qtd, subtotal: 0, sem_preco: true });
+                                  semPreco.push(ambiguous ? `${nomeItem} (vários itens parecidos no catálogo)` : nomeItem);
+                                  linhasResumo.push(`• ${qtd}x ${nomeItem} — ⚠️ SEM PREÇO ${ambiguous ? "(ambíguo no catálogo)" : "(não está no catálogo)"}`);
+                              }
+                          }
+
+                          if (itensProp.length === 0) {
+                              gestorConfirmations.push(`Arnaldo, não consegui entender os itens do orçamento para ${clienteProp.nome_cliente}. Pode repetir o que vai nele?`);
+                          } else {
+                              const total = itensProp.reduce((a, i) => a + (i.subtotal || 0), 0);
+                              const obsBase = String(actionData.observacoes || "").trim();
+                              const obsFinal = `[RASCUNHO DA MARIA — revisar antes de enviar ao cliente]` + (obsBase ? `\n${obsBase}` : "") + (semPreco.length ? `\nItens sem preço no catálogo: ${semPreco.join("; ")}` : "");
+                              const forn = /cliente/i.test(String(actionData.fornecimento_materiais || "")) && !/arnaldo/i.test(String(actionData.fornecimento_materiais || "")) ? "Cliente" : "Arnaldo Trentin Fornece";
+                              const prazo = /^\d{4}-\d{2}-\d{2}$/.test(String(actionData.prazo_inicio || "")) ? actionData.prazo_inicio : null;
+                              const { data: nova, error: propErr } = await supabase.from("propostas").insert([{
+                                  cliente_id: clienteProp.id,
+                                  servico_tipo: String(actionData.servico_tipo || "Orçamento").slice(0, 120),
+                                  valor_estimado: total,
+                                  valor_ajuste: 0,
+                                  itens_json: [...itensProp, { type: "endereco_obra", endereco: clienteProp.endereco_completo || "", mesmo_endereco: true }],
+                                  observacoes: obsFinal,
+                                  fornecimento_materiais: forn,
+                                  prazo_inicio: prazo,
+                                  status: "Pendente"
+                              }]).select("id").single();
+                              if (propErr || !nova) {
+                                  console.error("[PROPOSTA RASCUNHO] Erro ao salvar:", propErr);
+                                  gestorConfirmations.push("Arnaldo, tive um erro ao salvar o orçamento no sistema e nada foi criado. Tente de novo em instantes.");
+                              } else {
+                                  gestorConfirmations.push(
+                                      `✅ Montei o rascunho do orçamento #${String(nova.id).slice(0, 8)} para ${clienteProp.nome_cliente}:\n${linhasResumo.join("\n")}\nTotal: R$ ${total.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}` +
+                                      (semPreco.length ? `\n⚠️ ${semPreco.length} item(ns) sem preço: precisa precificar no CRM (Propostas) antes de enviar.` : "") +
+                                      `\nEstá em Propostas, como Pendente. Me diga se quer ajustar algum item ou valor.`
+                                  );
+                              }
+                          }
+                      }
+                  } catch (propCatchErr) {
+                      console.error("[PROPOSTA RASCUNHO] Falha:", propCatchErr);
+                      gestorConfirmations.push("Arnaldo, tive um problema ao montar o orçamento e nada foi criado. Tente de novo.");
+                  }
+              }
+
+              // 📎 AÇÃO: ANEXAR ARQUIVO À PROPOSTA/OBRA
               else if (actionData.acao === "ANEXAR_ARQUIVO" || actionData.acao === "VINCULAR_ARQUIVO") {
                   const term = String(actionData.termo_busca || '').trim();
                   const fileDesc = actionData.descricao_arquivo || 'Arquivo / Lista de materiais enviado pelo Arnaldo';
