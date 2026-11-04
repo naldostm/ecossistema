@@ -678,7 +678,7 @@ serve(async (req) => {
       try {
           payload = JSON.parse(rawText);
       } catch (parseErr) {
-          const { error: insErr } = await supabase.from('agent_memory').insert({ phone: 'DEBUG_AUDIO', role: 'user', content: 'JSON PARSE ERROR. Raw text: ' + rawText.substring(0, 1000) });
+          const { error: insErr } = await supabase.from('agent_memory').insert({ phone: 'DEBUG_AUDIO', role: 'user', content: 'JSON PARSE ERROR. Raw text: ' + rawText.substring(0, 300) });
           if (insErr) console.error("DEBUG INSERT ERROR:", insErr);
           return new Response("Bad Request Payload", { status: 400, headers: corsHeaders });
       }
@@ -686,7 +686,7 @@ serve(async (req) => {
       console.log("[PAYLOAD UAZAPI LIDO - RESUMO]:", rawText.substring(0, 300));
   } catch (err) {
       console.error("[CRITICAL] Falha ao ler stream da Uazapi antes de liberar conexão:", err);
-      await supabase.from('agent_memory').insert({ phone: 'DEBUG_AUDIO', role: 'user', content: 'STREAM READ ERROR: ' + String(err) });
+      await supabase.from('agent_memory').insert({ phone: 'DEBUG_AUDIO', role: 'user', content: 'STREAM READ ERROR: ' + String(err).substring(0, 300) });
       return new Response("Bad Request Payload", { status: 400, headers: corsHeaders });
   }
 
@@ -2223,6 +2223,15 @@ ${clienteConversaContexto}
           }
           // Grava o lock em phone separado para não aparecer na conversa
           await supabase.from('agent_memory').insert({ phone: lockPhone, role: 'user', content: lockContent });
+          // Faxina: travas antigas viram lixo no banco. Em ~5% das mensagens, apaga as com mais de 1 hora.
+          if (Math.random() < 0.05) {
+              try {
+                  const cutoffLock = new Date(Date.now() - 3600000).toISOString();
+                  await supabase.from('agent_memory').delete().or('phone.like.LOCK_%,phone.like.LEADER_%').lt('created_at', cutoffLock);
+              } catch (cleanupErr) {
+                  console.warn('[FAXINA TRAVAS] Falha (ignorada):', cleanupErr);
+              }
+          }
       }
 
       console.log(`[DIAG] msgType=${msgType} | hasAudio=${hasAudio} | hasImage=${hasImage} | hasMedia=${hasMedia} | userMessage='${userMessage}' | messageId='${messageId}' | msgNodeKeys=${Object.keys(msgNode||{}).join(',')}`);
@@ -2355,7 +2364,7 @@ ${clienteConversaContexto}
                                           userMessage = hasAudio ? "[🎙️ Áudio de Voz enviado pelo cliente]" : "[📷 Foto enviada pelo cliente]";
                                           forceAnalysisText = true;
                                       }
-                                      await supabase.from('agent_memory').insert({ phone: 'DEBUG_AUDIO', role: 'user', content: `[SUCESSO] Mídia baixada (URL física)! MIME: ${mimeType}` });
+                                      console.log(`[MIDIA] Download OK (URL física). MIME: ${mimeType}`);
                                       console.log(`[SUCESSO] Mídia baixada da URL física! MIME: ${mimeType}`);
                                       return true;
                                   }
@@ -2488,7 +2497,7 @@ ${clienteConversaContexto}
       }).select('id, created_at').single();
 
       if (!insertedData) {
-          await supabase.from('agent_memory').insert({ phone: 'DEBUG_AUDIO', role: 'user', content: `Falha ao gravar memória de entrada: ${JSON.stringify(insertError)}` });
+          await supabase.from('agent_memory').insert({ phone: 'DEBUG_AUDIO', role: 'user', content: `Falha ao gravar memória de entrada: ${JSON.stringify(insertError).substring(0, 300)}` });
           return;
       }
       const myId = insertedData.id;
