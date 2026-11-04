@@ -254,6 +254,147 @@ function bestCatalogMatch(query: string, catalog: CatalogItem[]): { match: Catal
   return { match: best, ambiguous: false };
 }
 
+// === MEMÓRIA DE LONGO PRAZO: RESUMO DO HISTÓRICO POR CONTATO ===
+// Modelo do resumo. Trocar junto com os demais modelos antes de 01/12/2026 (gemini-2.5-flash será descontinuado).
+const SUMMARY_MODEL = "gemini-2.5-flash";
+const SUMMARY_FALLBACK_MODEL = "gemini-2.5-flash-lite";
+const TECHNICAL_CONTENTS = new Set(["BOT_ATIVO", "BOT_PAUSADO", "BOT_IGNORAR", "AMIGO_IGNORAR", "LISTA_NEGRA", "AMIGO_PERMANENTE", "SPAM_ROBO", "GLOBAL_PAUSE", "GLOBAL_ACTIVE"]);
+const summarizingKeys = new Set<string>();
+
+function summaryKey(rawPhone: string): string {
+  return String(rawPhone || "").replace(/\D/g, "").slice(-8);
+}
+
+async function loadConversationSummary(rawPhone: string): Promise<string> {
+  const key = summaryKey(rawPhone);
+  if (key.length < 8) return "";
+  try {
+    const { data } = await supabase.from("resumos_conversa").select("resumo").eq("chave", key).maybeSingle();
+    return String(data?.resumo || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+// Para cliente comercial: resumos dos colegas da mesma empresa (histórico da empresa, não só da pessoa).
+async function loadEmpresaSummaries(empresaId: any, ownKey: string): Promise<string> {
+  if (!empresaId) return "";
+  try {
+    const { data: contatos } = await supabase.from("clientes").select("nome_cliente, whatsapp").eq("empresa_id", empresaId).limit(20);
+    const lines: string[] = [];
+    for (const ct of (contatos || [])) {
+      const k = summaryKey(ct.whatsapp || "");
+      if (k.length < 8 || k === ownKey) continue;
+      const r = await loadConversationSummary(ct.whatsapp);
+      if (r) lines.push(`- Colega ${ct.nome_cliente}: ${r}`);
+    }
+    return lines.join("\n");
+  } catch {
+    return "";
+  }
+}
+
+// mode "bootstrap": primeira vez do contato (resume as últimas mensagens). "incremental": só quando há 10+ mensagens novas.
+async function updateConversationSummary(remoteJid: string, variants: string[], clienteId: any, mode: "bootstrap" | "incremental"): Promise<void> {
+  const key = summaryKey(remoteJid);
+  if (key.length < 8 || summarizingKeys.has(key)) return;
+  summarizingKeys.add(key);
+  try {
+    const { data: existing } = await supabase.from("resumos_conversa").select("resumo, ultima_msg_em, msgs_resumidas").eq("chave", key).maybeSingle();
+    if (mode === "bootstrap" && existing?.resumo) return;
+
+    let rows: any[] = [];
+    if (existing?.ultima_msg_em) {
+      const { data } = await supabase.from("agent_memory").select("role, content, created_at").in("phone", variants)
+        .gt("created_at", existing.ultima_msg_em).order("created_at", { ascending: true }).limit(80);
+      rows = data || [];
+    } else {
+      const { data } = await supabase.from("agent_memory").select("role, content, created_at").in("phone", variants)
+        .order("created_at", { ascending: false }).limit(80);
+      rows = (data || []).slice().reverse();
+    }
+
+    const usable = rows.filter((m: any) => {
+      const t = String(m.content || "").trim();
+      return t.length > 0 && !TECHNICAL_CONTENTS.has(t) && !t.startsWith("LOCK") && !t.startsWith("CLAIM_");
+    });
+    const minMsgs = mode === "bootstrap" ? 14 : 10;
+    if (usable.length < minMsgs) return;
+
+    const transcript = usable.map((m: any) => {
+      const raw = String(m.content || "");
+      const who = m.role === "user" ? "Cliente" : (/^\s*👨‍🔧\s*\*?Arnaldo/.test(raw) ? "Arnaldo" : "Maria");
+      const txt = cleanWhatsAppText(raw).replace(/\[MSG_ID:[^\]]+\]\s*/g, "").replace(/\s+/g, " ").trim().slice(0, 400);
+      const dt = new Date(m.created_at).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" });
+      return `[${dt}] ${who}: ${txt}`;
+    }).filter((l: string) => !l.endsWith(": ")).join("\n");
+    if (!transcript) return;
+
+    const prompt = [
+      "Você mantém o RESUMO DE HISTÓRICO de um cliente da Arnaldo Trentin Serviços (engenharia, climatização e refrigeração). A secretária Maria Cecília usa este resumo para lembrar dos assuntos anteriores.",
+      "",
+      "RESUMO ATUAL (pode estar vazio):",
+      existing?.resumo ? existing.resumo : "(vazio)",
+      "",
+      'NOVAS MENSAGENS (das mais antigas para as mais novas). "Cliente" é o cliente, "Maria" é a secretária IA e "Arnaldo" é o dono da empresa:',
+      transcript,
+      "",
+      "Atualize o resumo incorporando as novas mensagens. Regras:",
+      "- Português, em tópicos curtos, no máximo 1500 caracteres.",
+      "- Estrutura: Serviços e assuntos tratados; Orçamentos e valores combinados; Prazos e promessas pendentes (com data); Preferências e cuidados do cliente; Última interação (data e o que ficou combinado).",
+      "- Use SOMENTE o que está nas mensagens. NUNCA invente. Se não souber, omita.",
+      "- Diga quem prometeu o quê (Cliente, Maria ou Arnaldo) e use datas absolutas (dd/mm/aa).",
+      "- Não inclua CPF, CNPJ, senhas nem dados de pagamento.",
+      "- Remova o que já foi resolvido e não ajuda mais; mantenha as pendências.",
+      "- Responda SOMENTE com o texto do resumo, sem introdução."
+    ].join("\n");
+
+    let resumoNovo = "";
+    try {
+      const r = await genAI.getGenerativeModel({ model: SUMMARY_MODEL, generationConfig: { temperature: 0.2, maxOutputTokens: 900 } }).generateContent(prompt);
+      resumoNovo = r.response.text().trim();
+    } catch (e1) {
+      console.warn("[RESUMO] Modelo principal falhou, tentando reserva:", e1);
+      const r = await genAI.getGenerativeModel({ model: SUMMARY_FALLBACK_MODEL, generationConfig: { temperature: 0.2, maxOutputTokens: 900 } }).generateContent(prompt);
+      resumoNovo = r.response.text().trim();
+    }
+    resumoNovo = resumoNovo.slice(0, 1800);
+    if (resumoNovo.length < 20) return;
+
+    await supabase.from("resumos_conversa").upsert({
+      chave: key,
+      telefone: String(remoteJid).replace(/\D/g, ""),
+      cliente_id: clienteId || null,
+      resumo: resumoNovo,
+      ultima_msg_em: usable[usable.length - 1].created_at,
+      msgs_resumidas: (existing?.msgs_resumidas || 0) + usable.length,
+      atualizado_em: new Date().toISOString()
+    }, { onConflict: "chave" });
+    console.log(`[RESUMO] Atualizado para ${key} (${usable.length} mensagens incorporadas).`);
+  } catch (e) {
+    console.warn("[RESUMO] Falha (ignorada):", e);
+  } finally {
+    summarizingKeys.delete(key);
+  }
+}
+
+// Aviso ao Arnaldo quando um cliente escreve: urgência, reclamação ou pedido que vira tarefa avisam na hora;
+// o restante avisa no máximo 1 vez a cada 10 minutos por contato (a 1ª mensagem de cada contato sempre avisa).
+async function shouldNotifyGestor(remoteJid: string, gestorDest: string, cleanUserMsg: string, criouTarefa: boolean): Promise<boolean> {
+  const t = String(cleanUserMsg || "").toLowerCase();
+  const urgente = /curto[- ]?circuito|queimad|inunda|vazamento|urgen|fa[ií]sca|choque|fuma[çc]a|cheiro de g[aá]s/.test(t);
+  const reclamacao = /garantia|reclama|insatisfeit|p[ée]ssim|absurdo|cancel/.test(t);
+  if (urgente || reclamacao || criouTarefa) return true;
+  try {
+    const desde = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const { data: recentes } = await supabase.from("agent_memory").select("id")
+      .eq("phone", gestorDest).eq("role", "model").ilike("content", `%${remoteJid}%`).gte("created_at", desde).limit(1);
+    return !(recentes && recentes.length > 0);
+  } catch {
+    return true; // na dúvida, avisa
+  }
+}
+
 async function findOrCreateEmpresa(nome: string, area?: string, email?: string): Promise<string | null> {
   const n = (nome || '').trim();
   if (!n) return null;
@@ -1514,6 +1655,8 @@ DIRETRIZES OBRIGATÓRIAS:
       
       // === CONSULTA DE CONTEXTO E IDENTIDADE (BANCO DE DADOS EM TEMPO REAL) ===
       let injectedContext = "Status deste Número: Desconhecido (Não cadastrado). TRATE COMO UM NOVO CONTATO / POSSÍVEL NOVO CLIENTE.";
+  let dbClienteOuter: any = null; // cópia de dbCliente visível fora do bloco try (aviso ao gestor e resumo)
+  let resumoHistorico = "";
       
       if (isArnaldoAdmin) {
           console.log(`[MODO GESTOR ATIVADO] Mensagem recebida do Gestor Arnaldo Trentin (${remoteJid})!`);
@@ -1925,7 +2068,7 @@ ${clienteConversaContexto}
               let dbCliente: any = null;
               let taskOnlyHint = '';
               const { data: clientMatches } = await supabase.from('clientes')
-                  .select('id, nome_cliente, endereco_completo, documento_cpf_cnpj, relato_necessidade, whatsapp, telefone, ficha_ia')
+                  .select('id, nome_cliente, endereco_completo, documento_cpf_cnpj, relato_necessidade, whatsapp, telefone, ficha_ia, empresa_id')
                   .or(`whatsapp.ilike.%${last8Digits}%,telefone.ilike.%${last8Digits}%,whatsapp.eq.${cleanPhone},whatsapp.eq.${remoteJid}`)
                   .limit(5);
 
@@ -2027,6 +2170,22 @@ ${clienteConversaContexto}
                   if (tasks.length > 0) agendaText = tasks.join('\n');
               }
 
+              dbClienteOuter = dbCliente;
+              try {
+                  let resumoPessoa = await loadConversationSummary(remoteJid);
+                  if (!resumoPessoa) {
+                      await updateConversationSummary(remoteJid, allPhoneVariants, dbCliente?.id, "bootstrap");
+                      resumoPessoa = await loadConversationSummary(remoteJid);
+                  }
+                  const resumoEmpresa = await loadEmpresaSummaries(dbCliente?.empresa_id, summaryKey(remoteJid));
+                  resumoHistorico = [
+                      resumoPessoa ? `Resumo deste contato:\n${resumoPessoa}` : "",
+                      resumoEmpresa ? `Histórico de colegas da mesma empresa:\n${resumoEmpresa}` : ""
+                  ].filter(Boolean).join("\n\n");
+              } catch (resErr) {
+                  console.warn("[RESUMO] Falha ao carregar (ignorada):", resErr);
+              }
+
               // Monta contexto completo
               if (dbCliente) {
                   injectedContext = `Status deste Número: CADASTRADO NO SISTEMA.\n` +
@@ -2055,6 +2214,9 @@ ${clienteConversaContexto}
                       `1) Nome completo (se houver nome provável acima, confirme: "falo com o(a) ...?"); 2) Endereço completo do serviço; 3) CPF ou CNPJ; 4) Nome da empresa, se for empresa.\n` +
                       `Só use o nome depois que o cliente confirmar. NUNCA presuma nome por foto de perfil ou apelido do WhatsApp.\n` +
                       `Quando tiver os dados, acione CRIAR_CADASTRO. Em seguida siga o atendimento (orçamento/visita).`;
+              }
+              if (resumoHistorico) {
+                  injectedContext += `\n\n📚 RESUMO DO HISTÓRICO (memória de conversas anteriores; use para dar continuidade sem repetir tudo ao cliente):\n${resumoHistorico}\n(Se o resumo e as mensagens recentes divergirem, confie nas mensagens recentes.)`;
               }
 
           } catch(dbErr) {
@@ -3521,10 +3683,10 @@ ${clienteConversaContexto}
           if (!isArnaldoAdmin && !isSpamRobo) {
               try {
                   const gestorDest = '18253369239';
-                  const clientDisplayName = dbCliente?.nome_cliente || pushName || 'Cliente';
+                  const clientDisplayName = dbClienteOuter?.nome_cliente || pushName || 'Cliente';
                   const cleanUserMsg = (userMessage || '').replace(/\[MSG_ID:[^\]]+\]\s*/g, '').trim();
 
-                  if (cleanUserMsg && !cleanUserMsg.startsWith('BOT_') && !cleanUserMsg.startsWith('SPAM_')) {
+                  if (cleanUserMsg && !cleanUserMsg.startsWith('BOT_') && !cleanUserMsg.startsWith('SPAM_') && await shouldNotifyGestor(remoteJid, gestorDest, cleanUserMsg, actions.some((a: any) => a?.acao === "CRIAR_TAREFA_GESTOR"))) {
                       const previewUserMsg = cleanUserMsg.length > 300 ? cleanUserMsg.substring(0, 297) + '...' : cleanUserMsg;
                       const previewAiResp = (whatsAppText || '').length > 300 ? (whatsAppText || '').substring(0, 297) + '...' : whatsAppText;
 
@@ -3556,6 +3718,14 @@ O(A) cliente *${clientDisplayName}* (${remoteJid}) enviou uma mensagem no WhatsA
               } catch (notifErr) {
                   console.error("[NOTIFICAÇÃO GESTOR ERRO] Falha ao enviar notificação para Arnaldo:", notifErr);
               }
+          }
+      }
+      // 📚 Atualiza o resumo do histórico (conversas reais de clientes; só roda com 10+ mensagens novas)
+      if (!isArnaldoAdmin && !isSpamRobo) {
+          try {
+              await updateConversationSummary(remoteJid, allPhoneVariants, dbClienteOuter?.id, "incremental");
+          } catch (sumErr) {
+              console.warn("[RESUMO] Falha ao atualizar (ignorada):", sumErr);
           }
       }
 

@@ -752,6 +752,21 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('cli-doc').value = item.documento_cpf_cnpj || '';
             window.fillEmpresaFields(item);
             const fichaEl = document.getElementById('cli-ficha-ia'); if (fichaEl) fichaEl.value = item.ficha_ia || '';
+            (async () => {
+                const grp = document.getElementById('cli-resumo-group');
+                const box = document.getElementById('cli-resumo-ia');
+                const dt = document.getElementById('cli-resumo-data');
+                if (grp) grp.style.display = 'none';
+                if (box) box.value = '';
+                const key = String(item.whatsapp || '').replace(/\D/g, '').slice(-8);
+                if (key.length < 8 || !box) return;
+                const { data: rs } = await supabase.from('resumos_conversa').select('resumo, atualizado_em').eq('chave', key).maybeSingle();
+                if (rs && rs.resumo) {
+                    box.value = rs.resumo;
+                    if (dt) dt.textContent = rs.atualizado_em ? '(atualizado em ' + new Date(rs.atualizado_em).toLocaleDateString('pt-BR') + ')' : '';
+                    if (grp) grp.style.display = 'block';
+                }
+            })();
 
             const quickShortcuts = document.getElementById('cliente-quick-shortcuts');
             if (quickShortcuts) quickShortcuts.style.display = 'flex';
