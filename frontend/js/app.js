@@ -9669,6 +9669,7 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
     const _origShowSection = window.showSection;
     let _liveChatPollTimer = null;
     let _liveChatRealtimeChannel = null;
+    let _liveChatDebounce = null;
 
     function startLiveChatAutoSync() {
         if (!_liveChatPollTimer) {
@@ -9677,7 +9678,7 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
                 if (view && view.style.display !== 'none' && !document.hidden) {
                     window.loadLiveConversations(true);
                 }
-            }, 3500);
+            }, 30000); // era 3500ms: consultava agent_memory sem parar e esgotou o Disk IO do Supabase
         }
 
         try {
@@ -9687,7 +9688,8 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
                     .on('postgres_changes', { event: '*', schema: 'public', table: 'agent_memory' }, () => {
                         const view = document.getElementById('view-mensagens');
                         if (view && view.style.display !== 'none') {
-                            window.loadLiveConversations(true);
+                            clearTimeout(_liveChatDebounce);
+                            _liveChatDebounce = setTimeout(() => window.loadLiveConversations(true), 4000);
                         }
                     })
                     .subscribe();
@@ -9786,6 +9788,9 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
             // 2. Carrega mensagens de agent_memory
             const { data: memories, error } = await supa.from('agent_memory')
                 .select('phone, role, content, created_at')
+                .not('phone', 'like', 'LOCK_%')
+                .not('phone', 'like', 'LEADER_%')
+                .not('phone', 'in', '(GLOBAL_CONFIG,DEBUG_AUDIO,MARIA_TASK,TEST)')
                 .order('created_at', { ascending: false })
                 .limit(300);
 
@@ -12133,8 +12138,9 @@ console.log('[EquipFix v5.8] Módulo Parque de Máquinas integrado com sucesso.'
 
     // Auto-verificador a cada 45 segundos quando o CRM está aberto
     setInterval(() => {
+        if (document.hidden) return;
         window.checkAndRunPendingTasks();
-    }, 45000);
+    }, 120000);
 
     console.log('[CentralAtendimento v2.2] Live CRM, Anti-Spam Shield, Minhas Tarefas e Agenda da Maria carregados.');
 })();
