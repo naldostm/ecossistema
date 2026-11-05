@@ -5527,6 +5527,7 @@ ${materiaisTxt}${extrasTxt}
             `;
         }
 
+        let tickerProgresso = null;
         try {
             const supa = window.supabaseClient || supabase;
             const baseBody = {
@@ -5544,6 +5545,18 @@ ${materiaisTxt}${extrasTxt}
             let totalItens = 0;
             let falhas = 0;
             let guarda = 0;
+            let faseTexto = 'Preparando análise do catálogo...';
+            const t0 = Date.now();
+            const pintarProgresso = () => {
+                const el = body?.querySelector('p');
+                if (!el) return;
+                const s = Math.floor((Date.now() - t0) / 1000);
+                const mm = String(Math.floor(s / 60)).padStart(2, '0');
+                const ss = String(s % 60).padStart(2, '0');
+                el.innerHTML = `<strong style="color:#34d399;">${faseTexto}</strong><br>${consolidado.itens.length} ajustes sugeridos até agora · tempo decorrido ${mm}:${ss}<br><span style="opacity:.8;">Cada lote leva de 30 a 60 s. Não feche esta janela.</span>`;
+            };
+            tickerProgresso = setInterval(pintarProgresso, 1000);
+            pintarProgresso();
 
             const invocarLote = async (loteInicio) => {
                 for (let tentativa = 1; tentativa <= 2; tentativa++) {
@@ -5562,6 +5575,10 @@ ${materiaisTxt}${extrasTxt}
 
             while (guarda++ < 25) {
                 let data;
+                faseTexto = inicio === 0
+                    ? 'Lote 1: pesquisando preços e analisando os primeiros itens...'
+                    : `Lote ${Math.floor(inicio / 20) + 1} de ${Math.ceil(totalItens / 20)} em andamento (${inicio} de ${totalItens} itens já analisados)`;
+                pintarProgresso();
                 try {
                     data = await invocarLote(inicio);
                 } catch (e) {
@@ -5590,13 +5607,8 @@ ${materiaisTxt}${extrasTxt}
                 if (consolidado.modo !== 'reorganizar' || data.proximo_inicio == null) break;
                 inicio = data.proximo_inicio;
 
-                const totalLotes = Math.ceil(totalItens / 20);
-                const loteAtualNum = Math.floor(inicio / 20) + 1;
-                const progressoEl = body?.querySelector('p');
-                if (progressoEl) {
-                    progressoEl.innerHTML = `<strong style="color:#34d399;">Revisando o catálogo em lotes: ${inicio} de ${totalItens} itens analisados (lote ${loteAtualNum} de ${totalLotes}).</strong><br>${consolidado.itens.length} ajustes sugeridos até agora. Não feche esta janela.`;
-                }
             }
+            clearInterval(tickerProgresso);
 
             const resumoFinal = consolidado.modo === 'reorganizar'
                 ? `Revisão em lote concluída: ${totalItens} itens analisados e ${consolidado.itens.length} com ajuste sugerido (os demais já estavam corretos).${falhas ? ' ⚠️ Um lote falhou e foi pulado: rode novamente para completar.' : ''}\n${consolidado.resumos[0] || ''}`
@@ -5620,6 +5632,7 @@ ${materiaisTxt}${extrasTxt}
                 `;
             }
         } finally {
+            if (tickerProgresso) clearInterval(tickerProgresso);
             if (btnGerar) {
                 btnGerar.disabled = false;
                 btnGerar.innerHTML = originalBtnHtml || '<i class="fa-solid fa-wand-magic-sparkles"></i> Gerar Proposta de Catálogo';
