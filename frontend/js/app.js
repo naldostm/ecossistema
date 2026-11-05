@@ -3367,7 +3367,7 @@ ${materiaisTxt}${extrasTxt}
                     action: 'gestor_catalogo_ia',
                     comando: payload.text || payload.comando || payload.prompt || '',
                     escopo: payload.escopo || 'ambos',
-                    praca_referencia: (localStorage.getItem('gestor_ia_praca') || 'São Paulo / SP'),
+                    praca_referencia: window.getGestorPraca(),
                     custo_hora: custoHora,
                     catalogo_arvore: window.catalogoTree || {}
                 }
@@ -5442,6 +5442,21 @@ ${materiaisTxt}${extrasTxt}
     // =========================================================================
     window._gestorIALastResult = null;
 
+    window.getGestorPraca = function () {
+        const raw = (document.getElementById('gestor-ia-praca')?.value || localStorage.getItem('gestor_ia_praca') || '').trim();
+        return (raw && raw.length <= 40 && raw.split(/\s+/).length <= 6) ? raw : 'São Paulo / SP';
+    };
+
+    window.salvarGestorPraca = function (inputEl) {
+        const valor = (inputEl?.value || '').trim();
+        if (valor.length > 40 || valor.split(/\s+/).length > 6) {
+            alert('Este campo é só para Cidade / UF (ex: São Paulo / SP). Digite o pedido no campo ao lado.');
+            inputEl.value = localStorage.getItem('gestor_ia_praca') || 'São Paulo / SP';
+            return;
+        }
+        localStorage.setItem('gestor_ia_praca', valor || 'São Paulo / SP');
+    };
+
     window.getCurrentOperationalCustoHora = function () {
         try {
             const caixa = window.caixaCache || [];
@@ -5472,7 +5487,12 @@ ${materiaisTxt}${extrasTxt}
 
     window.openGestorCatalogoIA = function (defaultEscopo = 'ambos') {
         const inputPraca = document.getElementById('gestor-ia-praca');
-        if (inputPraca) inputPraca.value = localStorage.getItem('gestor_ia_praca') || 'São Paulo / SP';
+        if (inputPraca) {
+            const salvo = (localStorage.getItem('gestor_ia_praca') || '').trim();
+            const valido = salvo && salvo.length <= 40 && salvo.split(/\s+/).length <= 6;
+            if (!valido) localStorage.setItem('gestor_ia_praca', 'São Paulo / SP');
+            inputPraca.value = valido ? salvo : 'São Paulo / SP';
+        }
         const selEscopo = document.getElementById('gestor-ia-escopo');
         if (selEscopo && defaultEscopo) selEscopo.value = defaultEscopo;
 
@@ -5521,7 +5541,7 @@ ${materiaisTxt}${extrasTxt}
                     <i class="fa-solid fa-wand-magic-sparkles fa-bounce" style="font-size: 2.5rem; color: #34d399; margin-bottom: 14px; display: block;"></i>
                     <strong style="font-size: 1.05rem; color: #fff;">O Gestor do Sistema IA está estruturando sua listagem...</strong>
                     <p style="font-size: 0.85rem; color: #94a3b8; max-width: 540px; margin: 8px auto 0;">
-                        Cruzando seu catálogo atual (${(window.servicosCache || []).length} serviços e ${(window.materiaisCache || []).length} materiais), seu custo/hora operacional (R$ ${window.getCurrentOperationalCustoHora().toFixed(2)}/h) e referências de mercado de ${(document.getElementById('gestor-ia-praca')?.value || 'São Paulo / SP')}.
+                        Cruzando seu catálogo atual (${(window.servicosCache || []).length} serviços e ${(window.materiaisCache || []).length} materiais), seu custo/hora operacional (R$ ${window.getCurrentOperationalCustoHora().toFixed(2)}/h) e referências de mercado de ${window.getGestorPraca()}.
                     </p>
                 </div>
             `;
@@ -5534,7 +5554,7 @@ ${materiaisTxt}${extrasTxt}
                 action: 'gestor_catalogo_ia',
                 comando,
                 escopo,
-                praca_referencia: (document.getElementById('gestor-ia-praca')?.value || localStorage.getItem('gestor_ia_praca') || 'São Paulo / SP').trim(),
+                praca_referencia: window.getGestorPraca(),
                 custo_hora: window.getCurrentOperationalCustoHora(),
                 catalogo_arvore: window.catalogoTree || {}
             };
@@ -5618,7 +5638,8 @@ ${materiaisTxt}${extrasTxt}
                 itens: consolidado.itens,
                 resumo_executivo: resumoFinal,
                 novas_subcategorias: consolidado.novas_subcategorias,
-                pesquisa_web: consolidado.pesquisa_web
+                pesquisa_web: consolidado.pesquisa_web,
+                modo: consolidado.modo
             }, comando);
         } catch (err) {
             console.error('[Gestor Catálogo IA] Erro:', err);
@@ -5734,7 +5755,7 @@ ${materiaisTxt}${extrasTxt}
             ${datalistHtml}
             <div style="background: rgba(16, 185, 129, 0.1); border-left: 4px solid #10b981; padding: 12px 16px; border-radius: 8px; color: #e2e8f0; font-size: 0.85rem; line-height: 1.45;">
                 <strong><i class="fa-solid fa-user-tie" style="color: #34d399;"></i> Parecer Executivo & Precificação:</strong>
-                ${data?.pesquisa_web ? '<span style="margin-left:8px; background: rgba(14,165,233,0.18); border: 1px solid rgba(14,165,233,0.4); color: #7dd3fc; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; font-weight: 700;"><i class="fa-solid fa-globe"></i> Preços pesquisados na web</span>' : '<span style="margin-left:8px; background: rgba(245,158,11,0.15); border: 1px solid rgba(245,158,11,0.4); color: #fbbf24; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; font-weight: 700;">Preços estimados (sem pesquisa web)</span>'}<br>
+                ${data?.pesquisa_web ? '<span style="margin-left:8px; background: rgba(14,165,233,0.18); border: 1px solid rgba(14,165,233,0.4); color: #7dd3fc; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; font-weight: 700;"><i class="fa-solid fa-globe"></i> Preços pesquisados na web</span>' : '<span style="margin-left:8px; background: rgba(245,158,11,0.15); border: 1px solid rgba(245,158,11,0.4); color: #fbbf24; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; font-weight: 700;">Preços estimados (sem pesquisa web)</span>'}${data?.modo === 'reorganizar' ? '<span style="margin-left:6px; background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.4); color: #6ee7b7; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; font-weight: 700;"><i class="fa-solid fa-sitemap"></i> Modo: reorganização do que já existe</span>' : '<span style="margin-left:6px; background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.4); color: #fca5a5; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; font-weight: 700;"><i class="fa-solid fa-plus"></i> Modo: criação de itens NOVOS</span>'}<br>
                 ${escapeAttr(resumo).replace(/\n/g, '<br>')}
                 ${novasSubsHtml}
             </div>

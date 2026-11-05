@@ -3854,7 +3854,7 @@
         </div>
     </div>
 
-    <script type="module" src="/js/app.js?v=5.9.9"></script>
+    <script type="module" src="/js/app.js?v=5.9.10"></script>
     <script type="module" src="/js/julia_engine.js"></script>
     <!-- Service Worker Desativado Temporariamente para Diagnóstico de Cache
     <script>
@@ -4259,9 +4259,11 @@
                         <option value="ambos">📦 Serviços + Materiais</option>
                         <option value="servicos">🛠️ Apenas Serviços</option>
                         <option value="materiais">🔩 Apenas Materiais / Peças</option>
-                        <option value="reorganizar">🗂️ Reorganizar Existentes</option>
+                        <option value="reorganizar_materiais">🗂️ Reorganizar Materiais Existentes</option>
+                        <option value="reorganizar_servicos">🗂️ Reorganizar Serviços Existentes</option>
+                        <option value="reorganizar">🗂️ Reorganizar Tudo (serviços + materiais)</option>
                     </select>
-                    <input type="text" id="gestor-ia-praca" class="modal-input" value="São Paulo / SP" title="Praça de referência dos preços (cidade / UF)" placeholder="Cidade / UF" style="width: 150px; margin: 0; background: #1e293b; color: #f8fafc; border: 1px solid rgba(255,255,255,0.14); border-radius: 10px; padding: 10px 12px; font-size: 0.85rem;" onchange="localStorage.setItem('gestor_ia_praca', this.value.trim())">
+                    <input type="text" id="gestor-ia-praca" class="modal-input" value="São Paulo / SP" title="Praça de referência dos preços (cidade / UF)" placeholder="Cidade / UF" maxlength="40" style="width: 150px; margin: 0; background: #1e293b; color: #f8fafc; border: 1px solid rgba(255,255,255,0.14); border-radius: 10px; padding: 10px 12px; font-size: 0.85rem;" onchange="window.salvarGestorPraca(this)">
                     <input type="text" id="gestor-ia-input" class="modal-input" placeholder="Ex: Crie uma lista de serviços relacionados ao PPR com preços e descrições técnicas..." style="flex: 1; min-width: 260px; margin: 0; background: #0f172a; color: #fff; border: 1px solid rgba(255,255,255,0.16); border-radius: 10px; padding: 10px 14px; font-size: 0.9rem;" onkeydown="if(event.key==='Enter'){event.preventDefault(); window.executarGestorCatalogoIA();}">
                     <button type="button" id="btn-gestor-ia-gerar" class="action-btn" onclick="window.executarGestorCatalogoIA()" style="background: linear-gradient(135deg, #0ea5e9, #10b981); color: #fff; font-weight: 800; padding: 0 22px; border-radius: 10px; display: flex; align-items: center; gap: 8px; white-space: nowrap;">
                         <i class="fa-solid fa-wand-magic-sparkles"></i> Gerar Proposta de Catálogo

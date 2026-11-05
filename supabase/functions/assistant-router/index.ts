@@ -1206,7 +1206,8 @@ MENSAGEM DO ARNALDO NO CRM:
   // === HANDLER: GESTOR DO SISTEMA & CATÁLOGO IA (CRIAÇÃO, PRECIFICAÇÃO E REORGANIZAÇÃO) ===
   if (payload?.action === 'gestor_catalogo_ia') {
       const comando = String(payload.comando || payload.mensagem || payload.text || '').trim();
-      const praca = String(payload.praca_referencia || 'São Paulo / SP').trim().slice(0, 80) || 'São Paulo / SP';
+      const pracaBruta = String(payload.praca_referencia || '').trim();
+      const praca = (pracaBruta && pracaBruta.length <= 40 && pracaBruta.split(/\s+/).length <= 6) ? pracaBruta : 'São Paulo / SP';
       const escopo = String(payload.escopo || 'ambos').trim(); // 'ambos' | 'servicos' | 'materiais' | 'reorganizar'
       const custoHoraClient = Number(payload.custo_hora || 0);
 
@@ -1263,10 +1264,10 @@ MENSAGEM DO ARNALDO NO CRM:
               ? (valoresServicos.reduce((a: number, b: number) => a + b, 0) / valoresServicos.length)
               : 180.00;
 
-          const intencaoReorg = escopo === 'reorganizar' || (/(reorganiz|organiz|padroniz|revis[ae]|audit|categoriz|subcategoriz|arrum|corrig|desorganiz|coisa fora|fora d[oe] lugar)/i.test(comando) && !/\b(crie|criar|gere|gerar|adicione|adicionar|cadastre|cadastrar)\b/i.test(comando));
+          const intencaoReorg = escopo.startsWith('reorganizar') || (/(reorganiz|organiz|padroniz|revis[ae]|audit|categoriz|subcategoriz|arrum|corrig|desorganiz|coisa fora|fora d[oe] lugar|distribu|classific|ajeit|direitinho|agrup|separ|mov[ae]r?\b|encaix|melhor[ae]r?\b|atualiz)/i.test(comando) && !/\b(crie|criar|gere|gerar|adicione|adicionar|cadastre|cadastrar)\b/i.test(comando));
           const modo = (payload.modo === 'criar' || payload.modo === 'reorganizar') ? String(payload.modo) : (intencaoReorg ? 'reorganizar' : 'criar');
-          const incluiServicos = escopo !== 'materiais';
-          const incluiMateriais = escopo !== 'servicos';
+          const incluiServicos = escopo !== 'materiais' && escopo !== 'reorganizar_materiais';
+          const incluiMateriais = escopo !== 'servicos' && escopo !== 'reorganizar_servicos';
           const loteTamanho = Math.min(30, Math.max(5, Number(payload.lote_tamanho) || 20));
           const loteInicio = Math.max(0, Number(payload.lote_inicio) || 0);
 
