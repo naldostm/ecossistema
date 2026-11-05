@@ -3366,6 +3366,7 @@ ${materiaisTxt}${extrasTxt}
                     action: 'gestor_catalogo_ia',
                     comando: payload.text || payload.comando || payload.prompt || '',
                     escopo: payload.escopo || 'ambos',
+                    praca_referencia: (localStorage.getItem('gestor_ia_praca') || 'São Paulo / SP'),
                     custo_hora: custoHora,
                     catalogo_arvore: window.catalogoTree || {}
                 }
@@ -5469,6 +5470,8 @@ ${materiaisTxt}${extrasTxt}
     };
 
     window.openGestorCatalogoIA = function (defaultEscopo = 'ambos') {
+        const inputPraca = document.getElementById('gestor-ia-praca');
+        if (inputPraca) inputPraca.value = localStorage.getItem('gestor_ia_praca') || 'São Paulo / SP';
         const selEscopo = document.getElementById('gestor-ia-escopo');
         if (selEscopo && defaultEscopo) selEscopo.value = defaultEscopo;
 
@@ -5517,7 +5520,7 @@ ${materiaisTxt}${extrasTxt}
                     <i class="fa-solid fa-wand-magic-sparkles fa-bounce" style="font-size: 2.5rem; color: #34d399; margin-bottom: 14px; display: block;"></i>
                     <strong style="font-size: 1.05rem; color: #fff;">O Gestor do Sistema IA está estruturando sua listagem...</strong>
                     <p style="font-size: 0.85rem; color: #94a3b8; max-width: 540px; margin: 8px auto 0;">
-                        Cruzando seu catálogo atual (${(window.servicosCache || []).length} serviços e ${(window.materiaisCache || []).length} materiais), seu custo/hora operacional (R$ ${window.getCurrentOperationalCustoHora().toFixed(2)}/h) e referências técnicas de Curitiba/PR.
+                        Cruzando seu catálogo atual (${(window.servicosCache || []).length} serviços e ${(window.materiaisCache || []).length} materiais), seu custo/hora operacional (R$ ${window.getCurrentOperationalCustoHora().toFixed(2)}/h) e referências de mercado de ${(document.getElementById('gestor-ia-praca')?.value || 'São Paulo / SP')}.
                     </p>
                 </div>
             `;
@@ -5530,6 +5533,7 @@ ${materiaisTxt}${extrasTxt}
                     action: 'gestor_catalogo_ia',
                     comando,
                     escopo,
+                    praca_referencia: (document.getElementById('gestor-ia-praca')?.value || localStorage.getItem('gestor_ia_praca') || 'São Paulo / SP').trim(),
                     custo_hora: window.getCurrentOperationalCustoHora(),
                     catalogo_arvore: window.catalogoTree || {}
                 }

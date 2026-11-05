@@ -1206,6 +1206,7 @@ MENSAGEM DO ARNALDO NO CRM:
   // === HANDLER: GESTOR DO SISTEMA & CATÁLOGO IA (CRIAÇÃO, PRECIFICAÇÃO E REORGANIZAÇÃO) ===
   if (payload?.action === 'gestor_catalogo_ia') {
       const comando = String(payload.comando || payload.mensagem || payload.text || '').trim();
+      const praca = String(payload.praca_referencia || 'São Paulo / SP').trim().slice(0, 80) || 'São Paulo / SP';
       const escopo = String(payload.escopo || 'ambos').trim(); // 'ambos' | 'servicos' | 'materiais' | 'reorganizar'
       const custoHoraClient = Number(payload.custo_hora || 0);
 
@@ -1271,7 +1272,7 @@ MENSAGEM DO ARNALDO NO CRM:
           ).join('\n');
 
           const promptGestor = `
-Você é o **Gestor do Sistema & Engenheiro de Custos e Catálogo** da **Arnaldo Trentin Serviços** (Curitiba/PR — Engenharia Residencial/Comercial de Alto Padrão, Elétrica, Hidráulica PPR/PEX/PVC, Climatização/HVAC, Gás e Manutenção).
+Você é o **Gestor do Sistema & Engenheiro de Custos e Catálogo** da **Arnaldo Trentin Serviços** (${praca} — Engenharia Residencial/Comercial de Alto Padrão, Elétrica, Hidráulica PPR/PEX/PVC, Climatização/HVAC, Gás e Manutenção).
 
 O diretor executivo Arnaldo Trentin solicitou:
 "${comando}"
@@ -1284,7 +1285,7 @@ ${JSON.stringify(arvoreAtiva, null, 2)}
 2. PARÂMETROS DE CUSTO OPERACIONAL E CATÁLOGO DO ARNALDO:
 - Custo Operacional por Hora Técnica (Calculadora do CRM): R$ ${custoHoraEfetivo.toFixed(2)} / hora (${diasUteis} dias úteis x ${horasDia}h/dia)
 - Ticket Médio dos Serviços já cadastrados no catálogo: R$ ${mediaServicos.toFixed(2)}
-- Praça de referência de mercado: Curitiba / Região Metropolitana (PR) - padrão técnico qualificado com garantia e emissão de nota/laudo.
+- Praça de referência de mercado: ${praca} (e região metropolitana) - padrão técnico qualificado com garantia e emissão de nota/laudo.
 
 3. SERVIÇOS JÁ CADASTRADOS NO BANCO (${servicosAtuais.length} itens):
 ${resumoServicos || 'Nenhum serviço cadastrado.'}
@@ -1300,7 +1301,7 @@ ${resumoMateriais || 'Nenhum material cadastrado.'}
    - Se o Arnaldo pediu para **criar uma lista** (ex: "crie uma lista de serviços relacionado ao PPR"), gere entre 6 e 15 itens bem estruturados com \`"acao": "criar"\` e \`"id_existente": null\`. Não duplique itens idênticos aos já cadastrados (a menos que queira propor melhoria de um existente usando \`"acao": "atualizar"\` e o \`id_existente\` real).
    - Se o Arnaldo pediu para **reorganizar, subcategorizar ou melhorar itens existentes**, use \`"acao": "atualizar"\` e preencha \`"id_existente"\` com o UUID exato do item listado acima, propondo a nova \`categoria_master\`, \`subcategoria\`, \`descricao_tecnica\` enriquecida e \`preco_venda_sugerido\` atualizado.
 3. **Precificação Inteligente (3 Pilares)**:
-   - Combine: (A) Referência real de mercado em Curitiba/PR + (B) Custo/Hora Operacional do Arnaldo (R$ ${custoHoraEfetivo.toFixed(2)}/h * \`horas_estimadas\`) + (C) Coerência com a média do catálogo atual (R$ ${mediaServicos.toFixed(2)}).
+   - Combine: (A) Referência real de mercado em ${praca} + (B) Custo/Hora Operacional do Arnaldo (R$ ${custoHoraEfetivo.toFixed(2)}/h * \`horas_estimadas\`) + (C) Coerência com a média do catálogo atual (R$ ${mediaServicos.toFixed(2)}).
    - Para **Serviços (\`"tipo": "service"\`)**: informe \`horas_estimadas\` (ex: 1.5, 2, 3.5), \`preco_custo_sugerido\` (= \`horas_estimadas\` * ${custoHoraEfetivo.toFixed(2)}) e \`preco_venda_sugerido\` (valor base comercial com margem saudável para mão de obra especializada).
    - Para **Materiais (\`"tipo": "material"\`)**: informe \`unidade\` ("un", "m", "barra", "kit", "rolo"), \`preco_custo_sugerido\` (preço médio de compra em distribuidor) e \`preco_venda_sugerido\` (preço de revenda/orçamento com BDI de 30% a 45%).
 4. **Fomento de Informações Técnicas (\`descricao_tecnica\`)**:
@@ -1326,7 +1327,7 @@ ${resumoMateriais || 'Nenhum material cadastrado.'}
       "preco_custo_sugerido": 130.00,
       "preco_venda_sugerido": 280.00,
       "descricao_tecnica": "Execução por termofusão conforme NBR 15813, incluindo alinhamento, fixação e teste de estanqueidade.",
-      "justificativa_preco": "2.0h técnicas (R$ 130 custo) + referência Curitiba para termofusão PPR"
+      "justificativa_preco": "2.0h técnicas (R$ 130 custo) + referência de mercado local para termofusão PPR"
     }
   ]
 }`;
@@ -1351,7 +1352,7 @@ ${resumoMateriais || 'Nenhum material cadastrado.'}
               let notasPesquisa = '';
               try {
                   notasPesquisa = await callGeminiRest({
-                      contents: [{ role: 'user', parts: [{ text: `Pesquise na web, com foco em Curitiba/PR e no Brasil, preços atuais de mercado (mão de obra e materiais) e normas técnicas aplicáveis para o seguinte pedido de um prestador de serviços de engenharia/instalações:\n"${comando}"\n\nResponda em português com tópicos curtos: itens típicos, faixas de preço em R$ (cite a fonte/faixa quando possível) e normas relevantes. Não invente valores: se não encontrar, diga "sem referência".` }] }],
+                      contents: [{ role: 'user', parts: [{ text: `Pesquise na web, com foco em ${praca} e no Brasil, preços atuais de mercado (mão de obra e materiais) e normas técnicas aplicáveis para o seguinte pedido de um prestador de serviços de engenharia/instalações:\n"${comando}"\n\nResponda em português com tópicos curtos: itens típicos, faixas de preço em R$ (cite a fonte/faixa quando possível) e normas relevantes. Não invente valores: se não encontrar, diga "sem referência".` }] }],
                       tools: [{ google_search: {} }]
                   });
                   pesquisaWeb = notasPesquisa.length > 0;
