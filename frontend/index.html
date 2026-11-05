@@ -1212,9 +1212,12 @@
                     <div class="glass-panel table-container">
                         <div class="widget-header">
                             <h2><i class="fa-solid fa-box"></i> Estoque Local (Pronta Entrega)</h2>
-                            <button class="action-btn" id="btn-nova-venda" style="background: var(--accent-green); margin-right: 10px;" onclick="openModal('modal-venda')"><i class="fa-solid fa-hand-holding-dollar"></i> Registrar Venda</button>
-                            <button class="action-btn" id="btn-novo-mat"><i class="fa-solid fa-plus"></i> Novo Material</button>
-                            <button class="action-btn auth-btn" onclick="openModal('modal-config-categorias')" title="Configurar Categorias e Subcategorias" style="padding: 10px; background: var(--bg-subtle);"><i class="fa-solid fa-gear"></i></button>
+                            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                                <button class="action-btn" type="button" style="background: linear-gradient(135deg, #0ea5e9, #10b981); color: #fff; font-weight: 700;" onclick="window.openGestorCatalogoIA('materiais')"><i class="fa-solid fa-wand-magic-sparkles"></i> Gestor de Catálogo IA</button>
+                                <button class="action-btn" id="btn-nova-venda" style="background: var(--accent-green);" onclick="openModal('modal-venda')"><i class="fa-solid fa-hand-holding-dollar"></i> Registrar Venda</button>
+                                <button class="action-btn" id="btn-novo-mat"><i class="fa-solid fa-plus"></i> Novo Material</button>
+                                <button class="action-btn auth-btn" onclick="openModal('modal-config-categorias')" title="Configurar Categorias e Subcategorias" style="padding: 10px; background: var(--bg-subtle);"><i class="fa-solid fa-gear"></i></button>
+                            </div>
                         </div>
                         
                         <!-- FILTER BAR: MATERIAIS COM ABAS DUPLAS DINÂMICAS (CATEGORIAS E SUBCATEGORIAS) -->
@@ -1296,8 +1299,11 @@
                     <div class="glass-panel table-container">
                         <div class="widget-header">
                             <h2><i class="fa-solid fa-briefcase"></i> Catálogo de Serviços</h2>
-                            <button class="action-btn" id="btn-novo-ser"><i class="fa-solid fa-plus"></i> Cadastrar Novo Serviço</button>
-                            <button class="action-btn auth-btn" onclick="openModal('modal-config-categorias')" title="Configurar Categorias e Subcategorias" style="padding: 10px; background: var(--bg-subtle);"><i class="fa-solid fa-gear"></i></button>
+                            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                                <button class="action-btn" type="button" style="background: linear-gradient(135deg, #0ea5e9, #10b981); color: #fff; font-weight: 700;" onclick="window.openGestorCatalogoIA('servicos')"><i class="fa-solid fa-wand-magic-sparkles"></i> Gestor de Catálogo IA</button>
+                                <button class="action-btn" id="btn-novo-ser"><i class="fa-solid fa-plus"></i> Cadastrar Novo Serviço</button>
+                                <button class="action-btn auth-btn" onclick="openModal('modal-config-categorias')" title="Configurar Categorias e Subcategorias" style="padding: 10px; background: var(--bg-subtle);"><i class="fa-solid fa-gear"></i></button>
+                            </div>
                         </div>
 
                         <!-- FILTER BAR: SERVICOS COM ABAS DUPLAS DINÂMICAS (CATEGORIAS E SUBCATEGORIAS) -->
@@ -3583,13 +3589,21 @@
         </div>
     </div>
 
-    <!-- CHAT DO ARQUITETO -->
+    <!-- CHAT DO GESTOR DO SISTEMA & CATÁLOGO IA (ANTIGO ARQUITETO) -->
     <div class="chat-container" id="chat-container">
-        <div class="chat-header" id="chat-header"><span><i class="fa-solid fa-robot"></i> Arquiteto IA</span><button id="close-chat"><i class="fa-solid fa-xmark"></i></button></div>
-        <div class="chat-messages" id="chat-messages"><div class="msg ai">Olá Arnaldo, sistema e Telas configurados.</div></div>
-        <div class="chat-input-area"><input type="text" id="chat-input" placeholder="Comande a IA..."><button id="send-chat"><i class="fa-solid fa-paper-plane"></i></button></div>
+        <div class="chat-header" id="chat-header" style="background: linear-gradient(135deg, #0ea5e9, #10b981);">
+            <span><i class="fa-solid fa-wand-magic-sparkles"></i> Gestor do Sistema IA</span>
+            <div style="display:flex; gap:6px; align-items:center;">
+                <button type="button" onclick="window.openGestorCatalogoIA('ambos')" title="Abrir Painel de Criação e Revisão em Massa" style="background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.3); color:#fff; border-radius:6px; padding:3px 8px; font-size:0.72rem; cursor:pointer;"><i class="fa-solid fa-table-list"></i> Painel</button>
+                <button id="close-chat"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+        </div>
+        <div class="chat-messages" id="chat-messages">
+            <div class="msg ai">Olá Arnaldo! Sou o <strong>Gestor do Sistema & Catálogo IA</strong>.<br>Você pode me pedir para criar listas completas (ex: <em>"crie uma lista de serviços e peças de PPR"</em>), sugerir preços com base no seu custo/hora ou reorganizar suas subcategorias!</div>
+        </div>
+        <div class="chat-input-area"><input type="text" id="chat-input" placeholder="Ex: Crie lista de serviços de PPR..."><button id="send-chat"><i class="fa-solid fa-paper-plane"></i></button></div>
     </div>
-    <button class="chat-toggle" id="chat-toggle"><i class="fa-solid fa-message"></i></button>
+    <button class="chat-toggle" id="chat-toggle" title="Gestor do Sistema & Catálogo IA"><i class="fa-solid fa-wand-magic-sparkles"></i></button>
 
     <!-- CHAT DO IAN GILLAN (SUPERVISOR) -->
     <div class="chat-container" id="chat-ian-container">
@@ -4146,7 +4160,12 @@
                         <span class="seletor-subtitle" id="seletor-modal-subtitle">Selecione múltiplos itens com checkbox e ajuste as quantidades</span>
                     </div>
                 </div>
-                <button type="button" class="modal-close" onclick="closeModal('modal-seletor-itens')"><i class="fa-solid fa-xmark"></i></button>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <button type="button" class="action-btn" onclick="window.openGestorCatalogoIA('ambos')" style="background: linear-gradient(135deg, #0ea5e9, #10b981); color: #fff; font-size: 0.78rem; padding: 6px 12px; border-radius: 8px; font-weight: 700;" title="Criar novos serviços/materiais ou organizar catálogo com IA">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i> Gestor IA
+                    </button>
+                    <button type="button" class="modal-close" onclick="closeModal('modal-seletor-itens')"><i class="fa-solid fa-xmark"></i></button>
+                </div>
             </div>
 
             <!-- Toolbar: Busca e Filtros -->
@@ -4164,10 +4183,17 @@
                     <button type="button" class="seletor-type-btn" data-type="material" onclick="window.crmItemSelector.setTypeFilter('material')"><i class="fa-solid fa-box"></i> Materiais / Peças</button>
                 </div>
 
-                <!-- Chips de Categorias -->
+                <!-- Linha 1: Chips de Categorias Principais -->
                 <div class="seletor-chips-wrapper">
                     <div class="seletor-chips-container" id="seletor-chips-container">
                         <!-- Chips gerados dinamicamente via JS -->
+                    </div>
+                </div>
+
+                <!-- Linha 2: Chips de Subcategorias (aparece ao clicar numa Categoria Principal) -->
+                <div class="seletor-chips-wrapper" id="seletor-subchips-wrapper" style="display: none; padding-top: 6px; margin-top: 2px; border-top: 1px solid rgba(255, 255, 255, 0.08);">
+                    <div class="seletor-chips-container" id="seletor-subchips-container">
+                        <!-- Subcategorias geradas dinamicamente via JS -->
                     </div>
                 </div>
             </div>
@@ -4189,6 +4215,81 @@
                     </button>
                     <button type="button" class="btn-seletor-confirm" id="btn-seletor-confirm" onclick="window.crmItemSelector.confirm()">
                         <i class="fa-solid fa-check-double"></i> Adicionar Selecionados
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: GESTOR DO SISTEMA & CATÁLOGO IA (CRIAÇÃO, PRECIFICAÇÃO E REORGANIZAÇÃO) -->
+    <div class="modal-overlay" id="modal-gestor-catalogo-ia" style="display: none; z-index: 10600;">
+        <div class="modal-content glass-panel-dark" style="width: 96%; max-width: 1120px; max-height: 92vh; display: flex; flex-direction: column; padding: 0; overflow: hidden; border-radius: 16px; border: 1px solid rgba(16, 185, 129, 0.35);">
+            <!-- Header -->
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px 22px; background: linear-gradient(135deg, rgba(14, 165, 233, 0.16), rgba(16, 185, 129, 0.14)); border-bottom: 1px solid rgba(255, 255, 255, 0.08);">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <div style="width: 42px; height: 42px; border-radius: 10px; background: rgba(16, 185, 129, 0.2); border: 1px solid #10b981; display: flex; align-items: center; justify-content: center; color: #34d399; font-size: 1.2rem;">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i>
+                    </div>
+                    <div>
+                        <h2 style="margin: 0; font-size: 1.15rem; color: #f8fafc;">Gestor do Sistema & Catálogo IA</h2>
+                        <span style="font-size: 0.78rem; color: #94a3b8;">Crie listas técnicas completas (ex: PPR), precifique com base no seu custo/hora + mercado de Curitiba e padronize subcategorias</span>
+                    </div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span id="gestor-ia-custo-pill" style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); color: #fbbf24; padding: 4px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 700;">
+                        <i class="fa-solid fa-clock"></i> Custo/Hora: calculando...
+                    </span>
+                    <button type="button" class="modal-close" onclick="closeModal('modal-gestor-catalogo-ia')"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+            </div>
+
+            <!-- Área de Comando e Atalhos -->
+            <div style="padding: 16px 22px; background: rgba(15, 23, 42, 0.75); border-bottom: 1px solid rgba(255, 255, 255, 0.06);">
+                <!-- Atalhos Rápidos -->
+                <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; align-items: center;">
+                    <span style="font-size: 0.74rem; color: #94a3b8; margin-right: 4px;"><i class="fa-solid fa-bolt" style="color: #fbbf24;"></i> Sugestões rápidas:</span>
+                    <button type="button" class="seletor-chip" onclick="window.setGestorIAPrompt('Crie uma lista completa de serviços e materiais relacionados a tubulação PPR (termofusão, pontos de água quente/fria, reparos, teste de pressurização e conexões principais) com subcategoria PPR, descrições técnicas NBR 15813 e sugestão de preços.', 'ambos')">🔧 Linha Completa Hidráulica PPR</button>
+                    <button type="button" class="seletor-chip" onclick="window.setGestorIAPrompt('Crie uma lista de serviços de Hidráulica PEX (instalação de pontos, manifold, passagem de tubulação monocamada/multicamada e reparos) com descrições técnicas e preços.', 'servicos')">💧 Serviços de Hidráulica PEX</button>
+                    <button type="button" class="seletor-chip" onclick="window.setGestorIAPrompt('Analise meus serviços atuais de Elétrica e proponha a reorganização em subcategorias claras (Cabos e Fios, Quadros e Painéis, Tomadas e Interruptores, Disjuntores) melhorando as descrições técnicas.', 'reorganizar')">⚡ Reorganizar & Enriquecer Elétrica</button>
+                    <button type="button" class="seletor-chip" onclick="window.setGestorIAPrompt('Crie uma lista completa de serviços de Infraestrutura e Manutenção de Ar-Condicionado Split e Inverter com descrições técnicas e precificação atualizada.', 'servicos')">❄️ Lista Infra & Manutenção Ar-Condicionado</button>
+                </div>
+
+                <div style="display: flex; gap: 10px; align-items: stretch; flex-wrap: wrap;">
+                    <select id="gestor-ia-escopo" class="modal-input" style="width: 210px; margin: 0; background: #1e293b; color: #f8fafc; border: 1px solid rgba(255,255,255,0.14); border-radius: 10px; padding: 10px 12px; font-size: 0.85rem;">
+                        <option value="ambos">📦 Serviços + Materiais</option>
+                        <option value="servicos">🛠️ Apenas Serviços</option>
+                        <option value="materiais">🔩 Apenas Materiais / Peças</option>
+                        <option value="reorganizar">🗂️ Reorganizar Existentes</option>
+                    </select>
+                    <input type="text" id="gestor-ia-input" class="modal-input" placeholder="Ex: Crie uma lista de serviços relacionados ao PPR com preços e descrições técnicas..." style="flex: 1; min-width: 260px; margin: 0; background: #0f172a; color: #fff; border: 1px solid rgba(255,255,255,0.16); border-radius: 10px; padding: 10px 14px; font-size: 0.9rem;" onkeydown="if(event.key==='Enter'){event.preventDefault(); window.executarGestorCatalogoIA();}">
+                    <button type="button" id="btn-gestor-ia-gerar" class="action-btn" onclick="window.executarGestorCatalogoIA()" style="background: linear-gradient(135deg, #0ea5e9, #10b981); color: #fff; font-weight: 800; padding: 0 22px; border-radius: 10px; display: flex; align-items: center; gap: 8px; white-space: nowrap;">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i> Gerar Proposta de Catálogo
+                    </button>
+                </div>
+            </div>
+
+            <!-- Corpo: Resumo Executivo + Tabela Editável de Revisão -->
+            <div id="gestor-ia-body" style="flex: 1; overflow-y: auto; padding: 16px 22px; display: flex; flex-direction: column; gap: 14px; min-height: 280px;">
+                <div style="text-align: center; padding: 45px 20px; color: #94a3b8;">
+                    <i class="fa-solid fa-boxes-packing" style="font-size: 2.4rem; color: #38bdf8; margin-bottom: 12px; display: block; opacity: 0.8;"></i>
+                    <strong style="color: #e2e8f0; font-size: 1rem;">Pronto para estruturar e precificar seu catálogo</strong>
+                    <p style="font-size: 0.85rem; max-width: 580px; margin: 8px auto 0;">Digite acima o que deseja criar ou organizar (ou clique em uma sugestão rápida). Você poderá revisar e editar cada item, subcategoria, descrição técnica e preço antes de salvar no sistema.</p>
+                </div>
+            </div>
+
+            <!-- Rodapé de Aprovação em Massa -->
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 14px 22px; background: rgba(15, 23, 42, 0.95); border-top: 1px solid rgba(255, 255, 255, 0.08); flex-wrap: wrap; gap: 10px;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; color: #cbd5e1; cursor: pointer;">
+                        <input type="checkbox" id="gestor-ia-select-all" checked onchange="window.toggleAllGestorIAItems(this.checked)">
+                        Selecionar Todos
+                    </label>
+                    <span id="gestor-ia-count-badge" class="seletor-counter-badge">0 itens prontos</span>
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <button type="button" class="btn-seletor-clear" onclick="closeModal('modal-gestor-catalogo-ia')">Fechar</button>
+                    <button type="button" id="btn-gestor-ia-salvar" class="btn-seletor-confirm" onclick="window.salvarItensGestorCatalogoIA()" disabled>
+                        <i class="fa-solid fa-check-double"></i> Aprovar e Salvar Selecionados no Catálogo
                     </button>
                 </div>
             </div>

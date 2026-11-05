@@ -3325,19 +3325,26 @@ ${materiaisTxt}${extrasTxt}
         // "Agent Typing" Indicator
         const typingMsg = document.createElement('div');
         typingMsg.className = 'msg ai typing';
-        typingMsg.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Arquiteto processando...';
+        typingMsg.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Gestor do Sistema analisando catálogo e custos...';
         chatMessages.appendChild(typingMsg);
         chatMessages.scrollTop = chatMessages.scrollHeight;
 
-        // Arquitetura V2: Timeout (3s) e Fallback
-        callAIWithTimeout('Arquiteto', { text: text }).then(res => {
+        callAIWithTimeout('Arquiteto', { text: text }, 35000).then(res => {
             typingMsg.classList.remove('typing');
 
             if (res.status === 'success') {
-                typingMsg.innerHTML = `<strong>Arquiteto Central:</strong><br>${res.data.dados}<br><span style="font-size:0.6rem; opacity:0.5;">ID: ${res.correlationId}</span>`;
+                const rawData = res.data || {};
+                const resumo = rawData.resumo_executivo || rawData.dados || 'Processamento concluído.';
+                const itensCount = Array.isArray(rawData.itens) ? rawData.itens.length : 0;
+                let btnHtml = '';
+                if (itensCount > 0 && typeof window.loadGestorIAResponseIntoModal === 'function') {
+                    window.loadGestorIAResponseIntoModal(rawData, text);
+                    btnHtml = `<div style="margin-top:10px;"><button type="button" onclick="window.openModal('modal-gestor-catalogo-ia', true)" style="background:linear-gradient(135deg,#0ea5e9,#10b981); color:#fff; border:none; border-radius:8px; padding:7px 12px; font-size:0.78rem; font-weight:700; cursor:pointer; width:100%;"><i class="fa-solid fa-table-list"></i> Revisar e Aprovar ${itensCount} Itens Sugeridos</button></div>`;
+                    window.openModal('modal-gestor-catalogo-ia', true);
+                }
+                typingMsg.innerHTML = `<strong>Gestor do Sistema IA:</strong><br>${resumo.replace(/\n/g, '<br>')}${btnHtml}<br><span style="font-size:0.6rem; opacity:0.5;">ID: ${res.correlationId}</span>`;
             } else {
-                // FALLBACK PARCIAL
-                typingMsg.innerHTML = `<strong>Aviso do Sistema:</strong><br>A análise pesada excedeu 3 segundos. <span style="color:var(--accent-orange)"><i class="fa-solid fa-clock"></i> Tarefa movida para Background.</span> Notificarei via painel quando a matriz for gerada.<br><span style="font-size:0.6rem; opacity:0.5;">ID: ${res.correlationId}</span>`;
+                typingMsg.innerHTML = `<strong>Aviso do Sistema:</strong><br>A estruturação solicitada levou mais tempo que o esperado (${res.message || 'timeout'}). Tente pelo botão <b>Gestor de Catálogo IA</b>.<br><span style="font-size:0.6rem; opacity:0.5;">ID: ${res.correlationId}</span>`;
             }
             chatMessages.scrollTop = chatMessages.scrollHeight;
         });
@@ -3351,7 +3358,27 @@ ${materiaisTxt}${extrasTxt}
         console.log(`[Agent Engine] Connect: ${agentName} | CorrID: ${correlationId}`);
 
         let fetchPromise;
-        if (agentName === 'Maria Cecília') {
+        if (agentName === 'Arquiteto' || agentName === 'GestorCatalogo') {
+            const supa = getSupa();
+            const custoHora = typeof window.getCurrentOperationalCustoHora === 'function' ? window.getCurrentOperationalCustoHora() : 0;
+            fetchPromise = supa.functions.invoke('assistant-router', {
+                body: {
+                    action: 'gestor_catalogo_ia',
+                    comando: payload.text || payload.comando || payload.prompt || '',
+                    escopo: payload.escopo || 'ambos',
+                    custo_hora: custoHora,
+                    catalogo_arvore: window.catalogoTree || {}
+                }
+            }).then(res => {
+                if (res.error) throw new Error(res.error.message || JSON.stringify(res.error));
+                if (res.data?.error) throw new Error(res.data.error);
+                return {
+                    ...res.data,
+                    dados: res.data?.resumo_executivo || 'Lista gerada com sucesso.',
+                    correlationId
+                };
+            });
+        } else if (agentName === 'Maria Cecília') {
             // Modo Unificado: Maria Cecília Executiva via Supabase Edge Router (mesma mente e memória do WhatsApp)
             const supa = getSupa();
             fetchPromise = supa.functions.invoke('assistant-router', {
@@ -4865,6 +4892,7 @@ ${materiaisTxt}${extrasTxt}
         context: 'proposta', // 'proposta' | 'super-os-servicos' | 'super-os-materiais'
         typeFilter: 'all',   // 'all' | 'service' | 'material'
         categoryFilter: 'all',
+        subcategoryFilter: 'all',
         searchText: '',
         selectedItems: {},   // { `${type}_${id}`: { item, type, id, qty, price, name, category, unit } }
 
@@ -4872,6 +4900,7 @@ ${materiaisTxt}${extrasTxt}
             this.context = options.context || 'proposta';
             this.searchText = '';
             this.categoryFilter = 'all';
+            this.subcategoryFilter = 'all';
             this.selectedItems = {};
 
             const searchInput = document.getElementById('seletor-input-busca');
@@ -4916,6 +4945,7 @@ ${materiaisTxt}${extrasTxt}
         setTypeFilter(type) {
             this.typeFilter = type;
             this.categoryFilter = 'all';
+            this.subcategoryFilter = 'all';
             document.querySelectorAll('.seletor-type-btn').forEach(b => {
                 b.classList.toggle('active', b.dataset.type === type);
             });
@@ -4925,8 +4955,15 @@ ${materiaisTxt}${extrasTxt}
 
         setCategoryFilter(cat) {
             this.categoryFilter = cat;
-            document.querySelectorAll('.seletor-chip').forEach(c => {
-                c.classList.toggle('active', c.dataset.cat === cat);
+            this.subcategoryFilter = 'all';
+            this.renderCategories();
+            this.renderList();
+        },
+
+        setSubcategoryFilter(sub) {
+            this.subcategoryFilter = sub;
+            document.querySelectorAll('.seletor-subchip').forEach(c => {
+                c.classList.toggle('active', c.dataset.sub === sub);
             });
             this.renderList();
         },
@@ -4945,16 +4982,23 @@ ${materiaisTxt}${extrasTxt}
             input?.focus();
         },
 
-        // Monta a lista unificada de itens disponíveis
+        // Monta a lista unificada de itens disponíveis com Categoria Principal e Subcategoria separadas
         getAllAvailableItems() {
             const items = [];
             if (this.typeFilter === 'all' || this.typeFilter === 'service') {
                 (window.servicosCache || []).forEach(s => {
+                    const parsed = typeof window.parseItemCategory === 'function'
+                        ? window.parseItemCategory(s.categoria)
+                        : { master: s.categoria || 'Geral', sub: '' };
+                    const master = parsed.master || 'Geral';
+                    const sub = parsed.sub || '';
                     items.push({
                         id: s.id,
                         type: 'service',
                         name: s.nome_servico,
-                        category: s.categoria || 'Geral',
+                        masterCategory: master,
+                        subCategory: sub,
+                        category: sub ? `${master} | ${sub}` : master,
                         unit: 'serviço',
                         price: parseFloat(s.valor_base || 0),
                         description: s.descricao || ''
@@ -4963,11 +5007,18 @@ ${materiaisTxt}${extrasTxt}
             }
             if (this.typeFilter === 'all' || this.typeFilter === 'material') {
                 (window.materiaisCache || []).forEach(m => {
+                    const parsed = typeof window.parseItemCategory === 'function'
+                        ? window.parseItemCategory(m.campo_uso)
+                        : { master: m.campo_uso || 'Geral', sub: '' };
+                    const master = parsed.master || 'Geral';
+                    const sub = parsed.sub || '';
                     items.push({
                         id: m.id,
                         type: 'material',
                         name: m.nome_material,
-                        category: (m.campo_uso || 'Geral').replace(' | ', ' - '),
+                        masterCategory: master,
+                        subCategory: sub,
+                        category: sub ? `${master} | ${sub}` : master,
                         unit: m.unidade_medida || 'un',
                         price: parseFloat(m.valor_unitario || 0),
                         description: m.descricao || ''
@@ -4977,19 +5028,104 @@ ${materiaisTxt}${extrasTxt}
             return items;
         },
 
-        // Renderiza os chips de categorias baseados no tipo atual
+        // Renderiza Linha 1 (Categorias Principais) e Linha 2 (Subcategorias ao clicar numa Categoria Principal)
         renderCategories() {
             const container = document.getElementById('seletor-chips-container');
+            const subWrapper = document.getElementById('seletor-subchips-wrapper');
+            const subContainer = document.getElementById('seletor-subchips-container');
             if (!container) return;
 
             const items = this.getAllAvailableItems();
-            const cats = ['all', ...new Set(items.map(i => i.category).filter(Boolean))];
+            const masterCounts = {};
+            const subCountsByMaster = {};
+            const directCountsByMaster = {};
 
-            container.innerHTML = cats.map(cat => {
-                const label = cat === 'all' ? 'Todas as Categorias' : cat;
+            const treeMasters = Object.keys(window.catalogoTree || {});
+            treeMasters.forEach(m => {
+                masterCounts[m] = 0;
+                subCountsByMaster[m] = {};
+                directCountsByMaster[m] = 0;
+                (window.catalogoTree[m] || []).forEach(sub => {
+                    subCountsByMaster[m][sub] = 0;
+                });
+            });
+
+            items.forEach(it => {
+                const m = it.masterCategory || 'Geral';
+                masterCounts[m] = (masterCounts[m] || 0) + 1;
+                if (!subCountsByMaster[m]) subCountsByMaster[m] = {};
+                if (directCountsByMaster[m] === undefined) directCountsByMaster[m] = 0;
+
+                if (it.subCategory) {
+                    let matchedKey = null;
+                    for (const k of Object.keys(subCountsByMaster[m])) {
+                        if (k.toLowerCase() === it.subCategory.toLowerCase()) {
+                            matchedKey = k;
+                            break;
+                        }
+                    }
+                    const finalSub = matchedKey || it.subCategory;
+                    subCountsByMaster[m][finalSub] = (subCountsByMaster[m][finalSub] || 0) + 1;
+                } else {
+                    directCountsByMaster[m]++;
+                }
+            });
+
+            // Categorias principais que possuem itens (ou estão selecionadas)
+            const orderedMasters = Array.from(new Set([...treeMasters, ...Object.keys(masterCounts)]))
+                .filter(m => (masterCounts[m] || 0) > 0 || this.categoryFilter === m);
+
+            const allActive = this.categoryFilter === 'all';
+            let masterHtml = `<button type="button" class="seletor-chip ${allActive ? 'active' : ''}" data-cat="all" onclick="window.crmItemSelector.setCategoryFilter('all')"><i class="fa-solid fa-border-all"></i> Todas as Categorias (${items.length})</button>`;
+
+            orderedMasters.forEach(cat => {
                 const isActive = this.categoryFilter === cat;
-                return `<button type="button" class="seletor-chip ${isActive ? 'active' : ''}" data-cat="${cat}" onclick="window.crmItemSelector.setCategoryFilter('${cat}')">${label}</button>`;
-            }).join('');
+                const count = masterCounts[cat] || 0;
+                const icon = typeof window.getCategoryIcon === 'function' ? window.getCategoryIcon(cat) : 'fa-folder';
+                const safeCat = cat.replace(/'/g, "\\'");
+                masterHtml += `<button type="button" class="seletor-chip ${isActive ? 'active' : ''}" data-cat="${cat}" onclick="window.crmItemSelector.setCategoryFilter('${safeCat}')"><i class="fa-solid ${icon}"></i> ${cat} <span style="opacity:0.75;">(${count})</span></button>`;
+            });
+
+            container.innerHTML = masterHtml;
+
+            // Linha 2: Subcategorias da Categoria Principal ativa
+            if (!subWrapper || !subContainer) return;
+
+            if (!this.categoryFilter || this.categoryFilter === 'all') {
+                subWrapper.style.display = 'none';
+                subContainer.innerHTML = '';
+                return;
+            }
+
+            const activeMaster = this.categoryFilter;
+            const treeSubs = window.catalogoTree?.[activeMaster] || [];
+            const discoveredSubs = Object.keys(subCountsByMaster[activeMaster] || {});
+            const mergedSubs = [];
+            [...treeSubs, ...discoveredSubs].forEach(s => {
+                if (s && !mergedSubs.some(existing => existing.toLowerCase() === s.toLowerCase())) {
+                    mergedSubs.push(s);
+                }
+            });
+
+            subWrapper.style.display = 'block';
+            const totalInMaster = masterCounts[activeMaster] || 0;
+            const directCount = directCountsByMaster[activeMaster] || 0;
+
+            let subHtml = `<button type="button" class="seletor-subchip ${this.subcategoryFilter === 'all' ? 'active' : ''}" data-sub="all" onclick="window.crmItemSelector.setSubcategoryFilter('all')"><i class="fa-solid fa-layer-group"></i> Todas de ${activeMaster} (${totalInMaster})</button>`;
+
+            mergedSubs.forEach(sub => {
+                const subCount = subCountsByMaster[activeMaster]?.[sub] || 0;
+                const isSubActive = (this.subcategoryFilter || '').toLowerCase() === sub.toLowerCase();
+                const safeSub = sub.replace(/'/g, "\\'");
+                subHtml += `<button type="button" class="seletor-subchip ${isSubActive ? 'active' : ''}" data-sub="${sub}" onclick="window.crmItemSelector.setSubcategoryFilter('${safeSub}')">${sub}${subCount > 0 ? ` <span style="opacity:0.8;">(${subCount})</span>` : ''}</button>`;
+            });
+
+            if (directCount > 0 && mergedSubs.length > 0) {
+                const isDirectActive = this.subcategoryFilter === '__direct__';
+                subHtml += `<button type="button" class="seletor-subchip ${isDirectActive ? 'active' : ''}" data-sub="__direct__" onclick="window.crmItemSelector.setSubcategoryFilter('__direct__')">Geral / Sem Sub (${directCount})</button>`;
+            }
+
+            subContainer.innerHTML = subHtml;
         },
 
         // Verifica se o item já existe no alvo (Proposta ou OS)
@@ -5025,9 +5161,16 @@ ${materiaisTxt}${extrasTxt}
 
             let items = this.getAllAvailableItems();
 
-            // Filtro por categoria
+            // Filtro por Categoria Principal + Subcategoria
             if (this.categoryFilter && this.categoryFilter !== 'all') {
-                items = items.filter(i => i.category === this.categoryFilter);
+                items = items.filter(i => (i.masterCategory || '').toLowerCase() === this.categoryFilter.toLowerCase());
+                if (this.subcategoryFilter && this.subcategoryFilter !== 'all') {
+                    if (this.subcategoryFilter === '__direct__') {
+                        items = items.filter(i => !i.subCategory);
+                    } else {
+                        items = items.filter(i => (i.subCategory || '').toLowerCase() === this.subcategoryFilter.toLowerCase());
+                    }
+                }
             }
 
             // Filtro por busca
@@ -5061,7 +5204,8 @@ ${materiaisTxt}${extrasTxt}
                                 <div class="seletor-item-name" title="${item.name}">${item.name}</div>
                                 <div class="seletor-item-meta">
                                     <span class="seletor-badge-type ${item.type}">${item.type === 'service' ? 'Serviço' : 'Peça'}</span>
-                                    <span class="seletor-badge-cat">${item.category}</span>
+                                    <span class="seletor-badge-cat">${item.masterCategory}</span>
+                                    ${item.subCategory ? `<span class="seletor-badge-cat" style="background: rgba(14, 165, 233, 0.16); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.35);">${item.subCategory}</span>` : ''}
                                     ${item.unit ? `<span class="seletor-badge-cat">${item.unit}</span>` : ''}
                                     ${existingQtd > 0 ? `<span class="seletor-badge-already"><i class="fa-solid fa-check"></i> Já na lista (${existingQtd})</span>` : ''}
                                 </div>
@@ -5287,6 +5431,456 @@ ${materiaisTxt}${extrasTxt}
             window.closeModal('modal-seletor-itens');
             if (typeof triggerSaveSuccess === 'function') {
                 triggerSaveSuccess(`${selectedList.length} ite${selectedList.length > 1 ? 'ns adicionados' : 'm adicionado'} com sucesso!`);
+            }
+        }
+    };
+
+    // =========================================================================
+    // GESTOR DO SISTEMA & CATÁLOGO IA (CRIAÇÃO, PRECIFICAÇÃO E SUBCATEGORIZAÇÃO)
+    // =========================================================================
+    window._gestorIALastResult = null;
+
+    window.getCurrentOperationalCustoHora = function () {
+        try {
+            const caixa = window.caixaCache || [];
+            const savedConfig = window._calcConfig || JSON.parse(localStorage.getItem('calcConfig') || '{}') || {};
+            const diasUteis = parseInt(savedConfig.diasUteis) || 22;
+            const horasDia = parseInt(savedConfig.horasDia) || 8;
+            const now = new Date();
+            const mesAtual = now.getMonth();
+            const anoAtual = now.getFullYear();
+
+            let totalDespesas = 0;
+            caixa.forEach(cx => {
+                if (cx.tipo_movimento === 'Saida') {
+                    const d = new Date(cx.data_ocorrencia || cx.created_at);
+                    if (d.getMonth() === mesAtual && d.getFullYear() === anoAtual) {
+                        totalDespesas += parseFloat(cx.valor) || 0;
+                    }
+                }
+            });
+
+            const horasMes = Math.max(1, diasUteis * horasDia);
+            const custoHora = totalDespesas > 0 ? (totalDespesas / horasMes) : 0;
+            return custoHora > 15 ? Number(custoHora.toFixed(2)) : 65.00;
+        } catch (_) {
+            return 65.00;
+        }
+    };
+
+    window.openGestorCatalogoIA = function (defaultEscopo = 'ambos') {
+        const selEscopo = document.getElementById('gestor-ia-escopo');
+        if (selEscopo && defaultEscopo) selEscopo.value = defaultEscopo;
+
+        const custoHora = window.getCurrentOperationalCustoHora();
+        const pill = document.getElementById('gestor-ia-custo-pill');
+        if (pill) {
+            pill.innerHTML = `<i class="fa-solid fa-clock"></i> Custo/Hora Ref: R$ ${custoHora.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}/h`;
+        }
+
+        window.openModal('modal-gestor-catalogo-ia', true);
+        setTimeout(() => document.getElementById('gestor-ia-input')?.focus(), 150);
+    };
+
+    window.setGestorIAPrompt = function (promptText, escopo = 'ambos') {
+        const input = document.getElementById('gestor-ia-input');
+        const selEscopo = document.getElementById('gestor-ia-escopo');
+        if (input) input.value = promptText;
+        if (selEscopo && escopo) selEscopo.value = escopo;
+        window.executarGestorCatalogoIA();
+    };
+
+    window.executarGestorCatalogoIA = async function () {
+        const input = document.getElementById('gestor-ia-input');
+        const selEscopo = document.getElementById('gestor-ia-escopo');
+        const btnGerar = document.getElementById('btn-gestor-ia-gerar');
+        const body = document.getElementById('gestor-ia-body');
+
+        const comando = (input?.value || '').trim();
+        const escopo = selEscopo?.value || 'ambos';
+
+        if (!comando) {
+            alert('Digite o que deseja criar ou organizar no catálogo (ex: "Crie uma lista de serviços relacionados ao PPR").');
+            input?.focus();
+            return;
+        }
+
+        const originalBtnHtml = btnGerar ? btnGerar.innerHTML : '';
+        if (btnGerar) {
+            btnGerar.disabled = true;
+            btnGerar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Estruturando Catálogo...';
+        }
+
+        if (body) {
+            body.innerHTML = `
+                <div style="text-align: center; padding: 55px 20px; color: #cbd5e1;">
+                    <i class="fa-solid fa-wand-magic-sparkles fa-bounce" style="font-size: 2.5rem; color: #34d399; margin-bottom: 14px; display: block;"></i>
+                    <strong style="font-size: 1.05rem; color: #fff;">O Gestor do Sistema IA está estruturando sua listagem...</strong>
+                    <p style="font-size: 0.85rem; color: #94a3b8; max-width: 540px; margin: 8px auto 0;">
+                        Cruzando seu catálogo atual (${(window.servicosCache || []).length} serviços e ${(window.materiaisCache || []).length} materiais), seu custo/hora operacional (R$ ${window.getCurrentOperationalCustoHora().toFixed(2)}/h) e referências técnicas de Curitiba/PR.
+                    </p>
+                </div>
+            `;
+        }
+
+        try {
+            const supa = getSupa();
+            const { data, error } = await supa.functions.invoke('assistant-router', {
+                body: {
+                    action: 'gestor_catalogo_ia',
+                    comando,
+                    escopo,
+                    custo_hora: window.getCurrentOperationalCustoHora(),
+                    catalogo_arvore: window.catalogoTree || {}
+                }
+            });
+
+            if (error) throw new Error(error.message || JSON.stringify(error));
+            if (data?.error) throw new Error(data.error);
+
+            window.loadGestorIAResponseIntoModal(data, comando);
+        } catch (err) {
+            console.error('[Gestor Catálogo IA] Erro:', err);
+            if (body) {
+                body.innerHTML = `
+                    <div style="text-align: center; padding: 40px 20px; color: #f87171;">
+                        <i class="fa-solid fa-triangle-exclamation" style="font-size: 2rem; margin-bottom: 10px; display: block;"></i>
+                        <strong>Falha ao consultar o Gestor de Catálogo IA</strong>
+                        <p style="font-size: 0.85rem; color: #94a3b8; margin-top: 6px;">${err.message || err}</p>
+                    </div>
+                `;
+            }
+        } finally {
+            if (btnGerar) {
+                btnGerar.disabled = false;
+                btnGerar.innerHTML = originalBtnHtml || '<i class="fa-solid fa-wand-magic-sparkles"></i> Gerar Proposta de Catálogo';
+            }
+        }
+    };
+
+    window.loadGestorIAResponseIntoModal = function (data, comandoOriginal = '') {
+        window._gestorIALastResult = data || {};
+        const body = document.getElementById('gestor-ia-body');
+        if (!body) return;
+
+        const itens = Array.isArray(data?.itens) ? data.itens : [];
+        const resumo = data?.resumo_executivo || 'Proposta gerada pelo Gestor do Sistema IA.';
+        const novasSubs = data?.novas_subcategorias || {};
+
+        const escapeAttr = (str) => String(str ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+        let novasSubsHtml = '';
+        const novasEntries = Object.entries(novasSubs).filter(([_, arr]) => Array.isArray(arr) && arr.length > 0);
+        if (novasEntries.length > 0) {
+            novasSubsHtml = `
+                <div style="margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">
+                    <span style="font-size: 0.75rem; color: #38bdf8; font-weight: 700;"><i class="fa-solid fa-sitemap"></i> Subcategorias mapeadas na árvore:</span>
+                    ${novasEntries.map(([m, subs]) => subs.map(s => `<span style="background: rgba(14, 165, 233, 0.16); border: 1px solid rgba(14, 165, 233, 0.35); color: #bae6fd; padding: 2px 8px; border-radius: 12px; font-size: 0.72rem;">${escapeAttr(m)} | <strong>${escapeAttr(s)}</strong></span>`).join('')).join('')}
+                </div>
+            `;
+        }
+
+        const mastersList = Object.keys(window.catalogoTree || {});
+        const datalistHtml = `<datalist id="datalist-gestor-masters">${mastersList.map(m => `<option value="${escapeAttr(m)}">`).join('')}</datalist>`;
+
+        if (itens.length === 0) {
+            body.innerHTML = `
+                <div style="background: rgba(16, 185, 129, 0.1); border-left: 4px solid #10b981; padding: 14px 16px; border-radius: 8px; color: #e2e8f0; font-size: 0.88rem; line-height: 1.5;">
+                    <strong><i class="fa-solid fa-user-tie" style="color: #34d399;"></i> Parecer do Gestor do Sistema:</strong><br>
+                    ${escapeAttr(resumo).replace(/\n/g, '<br>')}
+                    ${novasSubsHtml}
+                </div>
+                <div style="text-align: center; padding: 30px; color: #94a3b8;">Nenhum item estruturado retornado para inserção direta.</div>
+            `;
+            window.updateGestorIASummary();
+            return;
+        }
+
+        const rowsHtml = itens.map((it, idx) => {
+            const isUpdate = it.acao === 'atualizar' && it.id_existente;
+            const isService = (it.tipo || 'service') !== 'material';
+            const badgeAction = isUpdate
+                ? `<span style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); padding: 2px 7px; border-radius: 6px; font-size: 0.68rem; font-weight: 700;">ATUALIZAR</span>`
+                : `<span style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); padding: 2px 7px; border-radius: 6px; font-size: 0.68rem; font-weight: 700;">NOVO</span>`;
+
+            const horasVal = parseFloat(it.horas_estimadas) || 2;
+            const custoVal = parseFloat(it.preco_custo_sugerido) || 0;
+            const vendaVal = parseFloat(it.preco_venda_sugerido) || 0;
+
+            return `
+                <tr class="gestor-ia-row" data-idx="${idx}" data-acao="${escapeAttr(it.acao || 'criar')}" data-id-existente="${escapeAttr(it.id_existente || '')}" style="border-bottom: 1px solid rgba(255,255,255,0.06); background: rgba(15, 23, 42, 0.45);">
+                    <td style="padding: 10px 8px; text-align: center; vertical-align: top;">
+                        <input type="checkbox" class="gestor-ia-row-chk seletor-checkbox" data-idx="${idx}" checked onchange="window.updateGestorIASummary()">
+                    </td>
+                    <td style="padding: 10px 6px; vertical-align: top; width: 115px;">
+                        <div style="display: flex; flex-direction: column; gap: 5px;">
+                            ${badgeAction}
+                            <select class="gestor-ia-tipo modal-input" style="margin: 0; padding: 4px 6px; font-size: 0.75rem; background: #1e293b; color: #fff; border-radius: 6px; border: 1px solid rgba(255,255,255,0.12);">
+                                <option value="service" ${isService ? 'selected' : ''}>🛠️ Serviço</option>
+                                <option value="material" ${!isService ? 'selected' : ''}>🔩 Material</option>
+                            </select>
+                        </div>
+                    </td>
+                    <td style="padding: 10px 6px; vertical-align: top; min-width: 240px;">
+                        <input type="text" class="gestor-ia-nome modal-input" value="${escapeAttr(it.nome)}" style="margin: 0 0 6px 0; padding: 6px 8px; font-size: 0.84rem; font-weight: 700; width: 100%; background: #0f172a; color: #f8fafc; border: 1px solid rgba(255,255,255,0.14); border-radius: 6px;" placeholder="Nome do Serviço / Material">
+                        <textarea class="gestor-ia-desc modal-input" rows="2" style="margin: 0; padding: 5px 8px; font-size: 0.76rem; width: 100%; background: rgba(15,23,42,0.7); color: #cbd5e1; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; resize: vertical;" placeholder="Descrição técnica para proposta...">${escapeAttr(it.descricao_tecnica || '')}</textarea>
+                        ${it.justificativa_preco ? `<div style="font-size: 0.7rem; color: #38bdf8; margin-top: 3px;"><i class="fa-solid fa-calculator"></i> ${escapeAttr(it.justificativa_preco)}</div>` : ''}
+                    </td>
+                    <td style="padding: 10px 6px; vertical-align: top; width: 185px;">
+                        <label style="font-size: 0.68rem; color: #94a3b8; display: block;">Categoria Principal</label>
+                        <input type="text" list="datalist-gestor-masters" class="gestor-ia-master modal-input" value="${escapeAttr(it.categoria_master || 'Geral')}" style="margin: 0 0 6px 0; padding: 5px 8px; font-size: 0.78rem; width: 100%; background: #0f172a; color: #fff; border: 1px solid rgba(255,255,255,0.14); border-radius: 6px;">
+                        <label style="font-size: 0.68rem; color: #38bdf8; display: block;">Subcategoria</label>
+                        <input type="text" class="gestor-ia-sub modal-input" value="${escapeAttr(it.subcategoria || '')}" placeholder="Ex: PPR, Cabos..." style="margin: 0; padding: 5px 8px; font-size: 0.78rem; font-weight: 600; width: 100%; background: rgba(14, 165, 233, 0.12); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.35); border-radius: 6px;">
+                    </td>
+                    <td style="padding: 10px 6px; vertical-align: top; width: 105px;">
+                        <label style="font-size: 0.68rem; color: #94a3b8; display: block;">Unidade</label>
+                        <input type="text" class="gestor-ia-unidade modal-input" value="${escapeAttr(it.unidade || (isService ? 'serviço' : 'un'))}" style="margin: 0 0 6px 0; padding: 5px 6px; font-size: 0.76rem; width: 100%; background: #0f172a; color: #cbd5e1; border: 1px solid rgba(255,255,255,0.12); border-radius: 6px;">
+                        <label style="font-size: 0.68rem; color: #fbbf24; display: block;">Horas Est.</label>
+                        <input type="number" step="0.5" min="0.2" class="gestor-ia-horas modal-input" value="${horasVal}" style="margin: 0; padding: 5px 6px; font-size: 0.78rem; font-weight: 700; width: 100%; background: rgba(245, 158, 11, 0.12); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 6px;">
+                    </td>
+                    <td style="padding: 10px 6px; vertical-align: top; width: 135px;">
+                        <label style="font-size: 0.68rem; color: #94a3b8; display: block;">Custo Ref. (R$)</label>
+                        <input type="number" step="0.01" class="gestor-ia-custo modal-input" value="${custoVal.toFixed(2)}" style="margin: 0 0 6px 0; padding: 5px 8px; font-size: 0.78rem; width: 100%; background: #0f172a; color: #94a3b8; border: 1px solid rgba(255,255,255,0.12); border-radius: 6px;">
+                        <label style="font-size: 0.68rem; color: #34d399; font-weight: 700; display: block;">Preço Venda (R$)</label>
+                        <input type="number" step="0.01" class="gestor-ia-preco modal-input" value="${vendaVal.toFixed(2)}" style="margin: 0; padding: 6px 8px; font-size: 0.88rem; font-weight: 800; width: 100%; background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid #10b981; border-radius: 6px;">
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        body.innerHTML = `
+            ${datalistHtml}
+            <div style="background: rgba(16, 185, 129, 0.1); border-left: 4px solid #10b981; padding: 12px 16px; border-radius: 8px; color: #e2e8f0; font-size: 0.85rem; line-height: 1.45;">
+                <strong><i class="fa-solid fa-user-tie" style="color: #34d399;"></i> Parecer Executivo & Precificação:</strong><br>
+                ${escapeAttr(resumo).replace(/\n/g, '<br>')}
+                ${novasSubsHtml}
+            </div>
+            <div style="overflow-x: auto; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 0.82rem;">
+                    <thead>
+                        <tr style="background: rgba(30, 41, 59, 0.9); color: #94a3b8; text-align: left; font-size: 0.74rem; text-transform: uppercase;">
+                            <th style="padding: 10px 8px; width: 36px; text-align: center;">✓</th>
+                            <th style="padding: 10px 6px;">Tipo / Ação</th>
+                            <th style="padding: 10px 6px;">Nome Comercial & Descrição Técnica</th>
+                            <th style="padding: 10px 6px;">Categoria & Subcategoria</th>
+                            <th style="padding: 10px 6px;">Unid / Horas</th>
+                            <th style="padding: 10px 6px;">Custo & Preço (R$)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rowsHtml}
+                    </tbody>
+                </table>
+            </div>
+        `;
+
+        const selectAllChk = document.getElementById('gestor-ia-select-all');
+        if (selectAllChk) selectAllChk.checked = true;
+        window.updateGestorIASummary();
+    };
+
+    window.toggleAllGestorIAItems = function (checked) {
+        document.querySelectorAll('.gestor-ia-row-chk').forEach(chk => {
+            chk.checked = checked;
+        });
+        window.updateGestorIASummary();
+    };
+
+    window.updateGestorIASummary = function () {
+        const chks = Array.from(document.querySelectorAll('.gestor-ia-row-chk'));
+        const checkedCount = chks.filter(c => c.checked).length;
+        const badge = document.getElementById('gestor-ia-count-badge');
+        const btnSalvar = document.getElementById('btn-gestor-ia-salvar');
+
+        if (badge) badge.textContent = `${checkedCount} de ${chks.length} selecionados`;
+        if (btnSalvar) {
+            btnSalvar.disabled = checkedCount === 0;
+            btnSalvar.innerHTML = checkedCount > 0
+                ? `<i class="fa-solid fa-check-double"></i> Aprovar e Salvar (${checkedCount} iten${checkedCount > 1 ? 's' : ''})`
+                : `<i class="fa-solid fa-check-double"></i> Aprovar e Salvar Selecionados`;
+        }
+    };
+
+    window.salvarItensGestorCatalogoIA = async function () {
+        const rows = Array.from(document.querySelectorAll('.gestor-ia-row'));
+        const selectedRows = rows.filter(r => r.querySelector('.gestor-ia-row-chk')?.checked);
+
+        if (selectedRows.length === 0) {
+            alert('Selecione ao menos um item para salvar no catálogo.');
+            return;
+        }
+
+        const btnSalvar = document.getElementById('btn-gestor-ia-salvar');
+        const origHtml = btnSalvar ? btnSalvar.innerHTML : '';
+        if (btnSalvar) {
+            btnSalvar.disabled = true;
+            btnSalvar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Salvando no Catálogo...';
+        }
+
+        try {
+            const supa = getSupa();
+            const newServices = [];
+            const updateServices = [];
+            const newMaterials = [];
+            const updateMaterials = [];
+            const hoursByServiceName = {};
+
+            if (!window.catalogoTree) window.catalogoTree = {};
+
+            // Incorpora subcategorias sugeridas na árvore
+            const novasSubs = window._gestorIALastResult?.novas_subcategorias || {};
+            for (const [mCat, subArr] of Object.entries(novasSubs)) {
+                const cleanM = (mCat || '').trim();
+                if (!cleanM) continue;
+                if (!window.catalogoTree[cleanM]) window.catalogoTree[cleanM] = [];
+                if (Array.isArray(subArr)) {
+                    subArr.forEach(s => {
+                        const cleanS = (s || '').trim();
+                        if (cleanS && !window.catalogoTree[cleanM].some(x => x.toLowerCase() === cleanS.toLowerCase())) {
+                            window.catalogoTree[cleanM].push(cleanS);
+                        }
+                    });
+                }
+            }
+
+            selectedRows.forEach(row => {
+                const acao = row.dataset.acao || 'criar';
+                const idExistente = (row.dataset.idExistente || '').trim();
+                const tipo = row.querySelector('.gestor-ia-tipo')?.value || 'service';
+                const nome = (row.querySelector('.gestor-ia-nome')?.value || '').trim();
+                const desc = (row.querySelector('.gestor-ia-desc')?.value || '').trim();
+                const master = (row.querySelector('.gestor-ia-master')?.value || 'Geral').trim() || 'Geral';
+                const sub = (row.querySelector('.gestor-ia-sub')?.value || '').trim();
+                const unidade = (row.querySelector('.gestor-ia-unidade')?.value || 'un').trim();
+                const horas = parseFloat(row.querySelector('.gestor-ia-horas')?.value) || 2;
+                const custo = parseFloat(row.querySelector('.gestor-ia-custo')?.value) || 0;
+                const preco = parseFloat(row.querySelector('.gestor-ia-preco')?.value) || 0;
+
+                if (!nome) return;
+
+                // Garante que a Categoria Principal e Subcategoria existam em window.catalogoTree
+                if (!window.catalogoTree[master]) window.catalogoTree[master] = [];
+                if (sub && !window.catalogoTree[master].some(x => x.toLowerCase() === sub.toLowerCase())) {
+                    window.catalogoTree[master].push(sub);
+                }
+
+                const fullCat = sub ? `${master} | ${sub}` : master;
+
+                if (tipo === 'service') {
+                    hoursByServiceName[nome.toLowerCase()] = horas;
+                    if (acao === 'atualizar' && idExistente) {
+                        updateServices.push({
+                            id: idExistente,
+                            nome_servico: nome,
+                            categoria: fullCat,
+                            descricao: desc,
+                            valor_base: preco,
+                            horas
+                        });
+                    } else {
+                        newServices.push({
+                            nome_servico: nome,
+                            categoria: fullCat,
+                            descricao: desc,
+                            valor_base: preco
+                        });
+                    }
+                } else {
+                    if (acao === 'atualizar' && idExistente) {
+                        updateMaterials.push({
+                            id: idExistente,
+                            nome_material: nome,
+                            campo_uso: fullCat,
+                            unidade_medida: unidade || 'un',
+                            preco_compra: custo,
+                            valor_unitario: preco
+                        });
+                    } else {
+                        newMaterials.push({
+                            nome_material: nome,
+                            campo_uso: fullCat,
+                            unidade_medida: unidade || 'un',
+                            preco_compra: custo,
+                            valor_unitario: preco,
+                            quantidade: 0
+                        });
+                    }
+                }
+            });
+
+            // 1. Salva a árvore de categorias atualizada
+            localStorage.setItem('catalogo_arvore', JSON.stringify(window.catalogoTree));
+            await supa.from('sistema_configuracoes').upsert({
+                chave: 'catalogo_arvore',
+                valor: window.catalogoTree
+            }, { onConflict: 'chave' });
+
+            // 2. Insere novos serviços
+            if (newServices.length > 0) {
+                const { data: insertedServs, error: errInsS } = await supa.from('servicos').insert(newServices).select('id, nome_servico');
+                if (errInsS) throw errInsS;
+                (insertedServs || []).forEach(s => {
+                    const h = hoursByServiceName[(s.nome_servico || '').toLowerCase()];
+                    if (h) window._calcHorasEstimadas[s.id] = h;
+                });
+            }
+
+            // 3. Atualiza serviços existentes
+            for (const sUpd of updateServices) {
+                const { horas, id, ...payloadUpd } = sUpd;
+                await supa.from('servicos').update(payloadUpd).eq('id', id);
+                if (horas) window._calcHorasEstimadas[id] = horas;
+            }
+
+            // 4. Insere novos materiais
+            if (newMaterials.length > 0) {
+                const { error: errInsM } = await supa.from('materiais').insert(newMaterials);
+                if (errInsM) throw errInsM;
+            }
+
+            // 5. Atualiza materiais existentes
+            for (const mUpd of updateMaterials) {
+                const { id, ...payloadUpd } = mUpd;
+                await supa.from('materiais').update(payloadUpd).eq('id', id);
+            }
+
+            // 6. Persiste horas estimadas na Calculadora Operacional
+            if (typeof window.saveCalcConfigDB === 'function') {
+                window.saveCalcConfigDB();
+            }
+
+            // 7. Recarrega caches de Serviços e Materiais e atualiza todas as telas
+            const [resServ, resMat] = await Promise.all([
+                supa.from('servicos').select('*').order('nome_servico'),
+                supa.from('materiais').select('*').order('nome_material')
+            ]);
+            if (resServ.data) window.servicosCache = resServ.data;
+            if (resMat.data) window.materiaisCache = resMat.data;
+
+            if (typeof window.syncCategorySystem === 'function') window.syncCategorySystem();
+            if (typeof window.renderServicos === 'function') window.renderServicos();
+            if (typeof window.renderMateriais === 'function') window.renderMateriais();
+            if (typeof window.populateProposalSelects === 'function') window.populateProposalSelects();
+            if (typeof window.renderCalcCustos === 'function') window.renderCalcCustos();
+
+            // Se o seletor de orçamento estiver aberto ao fundo, atualiza imediatamente
+            const modalSeletor = document.getElementById('modal-seletor-itens');
+            if (modalSeletor && modalSeletor.style.display !== 'none') {
+                window.crmItemSelector.renderCategories();
+                window.crmItemSelector.renderList();
+            }
+
+            window.closeModal('modal-gestor-catalogo-ia');
+            if (typeof triggerSaveSuccess === 'function') {
+                triggerSaveSuccess(`${selectedRows.length} ite${selectedRows.length > 1 ? 'ns salvos/organizados' : 'm salvo/organizado'} no catálogo com sucesso!`);
+            }
+        } catch (err) {
+            console.error('[Salvar Gestor IA] Erro:', err);
+            alert('Erro ao salvar itens no catálogo: ' + (err.message || err));
+        } finally {
+            if (btnSalvar) {
+                btnSalvar.disabled = false;
+                btnSalvar.innerHTML = origHtml;
             }
         }
     };

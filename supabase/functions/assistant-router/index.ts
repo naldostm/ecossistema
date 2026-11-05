@@ -1203,6 +1203,169 @@ MENSAGEM DO ARNALDO NO CRM:
       }
   }
 
+  // === HANDLER: GESTOR DO SISTEMA & CATÁLOGO IA (CRIAÇÃO, PRECIFICAÇÃO E REORGANIZAÇÃO) ===
+  if (payload?.action === 'gestor_catalogo_ia') {
+      const comando = String(payload.comando || payload.mensagem || payload.text || '').trim();
+      const escopo = String(payload.escopo || 'ambos').trim(); // 'ambos' | 'servicos' | 'materiais' | 'reorganizar'
+      const custoHoraClient = Number(payload.custo_hora || 0);
+
+      if (!comando) {
+          return new Response(JSON.stringify({ error: 'Comando vazio para o Gestor de Catálogo IA.' }), {
+              status: 400,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+      }
+
+      try {
+          const currentMonthStart = new Date();
+          currentMonthStart.setDate(1);
+          currentMonthStart.setHours(0, 0, 0, 0);
+
+          const [qServicos, qMateriais, qConfigs, qCaixa] = await Promise.all([
+              supabase.from('servicos').select('id, nome_servico, categoria, descricao, valor_base').order('nome_servico').limit(250),
+              supabase.from('materiais').select('id, nome_material, campo_uso, unidade_medida, preco_compra, valor_unitario, quantidade').order('nome_material').limit(250),
+              supabase.from('sistema_configuracoes').select('chave, valor').in('chave', ['catalogo_arvore', 'calc_config']),
+              supabase.from('fluxo_caixa').select('valor, tipo_movimento').eq('tipo_movimento', 'Saida').gte('created_at', currentMonthStart.toISOString())
+          ]);
+
+          const servicosAtuais = qServicos.data || [];
+          const materiaisAtuais = qMateriais.data || [];
+          let arvoreAtiva: Record<string, string[]> = payload.catalogo_arvore || {
+              "Elétrica": ["Cabos e Fios", "Disjuntores", "Tomadas e Interruptores", "Quadros e Painéis", "Iluminação"],
+              "Hidráulica": ["PEX", "PPR", "PVC / CPVC", "Básica", "Premium", "Louças e Metais"],
+              "Infraestrutura de Ar-Condicionado": ["Tubulação de Cobre", "Suportes e Coxins", "Isolamento Térmico", "Dreno", "Carga de Gás"],
+              "Ferramentas": ["Manuais", "Elétricas", "Medição e Teste"],
+              "Gás": ["Tubulações e Flexíveis", "Válvulas e Reguladores", "Conexões"],
+              "Iluminação": ["Spots e Embutidos", "Fitas de LED", "Luminárias", "Refletores"],
+              "Geral": ["Uso Geral", "Fixação e Parafusos", "Taxas e Visitas"]
+          };
+
+          let diasUteis = 22;
+          let horasDia = 8;
+          (qConfigs.data || []).forEach((row: any) => {
+              if (row.chave === 'catalogo_arvore' && row.valor && typeof row.valor === 'object') {
+                  arvoreAtiva = row.valor;
+              }
+              if (row.chave === 'calc_config' && row.valor?.params) {
+                  diasUteis = Number(row.valor.params.diasUteis) || 22;
+                  horasDia = Number(row.valor.params.horasDia) || 8;
+              }
+          });
+
+          const totalDespesasMes = (qCaixa.data || []).reduce((acc: number, c: any) => acc + (Number(c.valor) || 0), 0);
+          const horasMes = Math.max(1, diasUteis * horasDia);
+          const custoHoraCalc = totalDespesasMes > 0 ? (totalDespesasMes / horasMes) : 0;
+          const custoHoraEfetivo = custoHoraClient > 0 ? custoHoraClient : (custoHoraCalc > 15 ? custoHoraCalc : 65.00);
+
+          const valoresServicos = servicosAtuais.map((s: any) => Number(s.valor_base) || 0).filter((v: number) => v > 0);
+          const mediaServicos = valoresServicos.length > 0
+              ? (valoresServicos.reduce((a: number, b: number) => a + b, 0) / valoresServicos.length)
+              : 180.00;
+
+          const resumoServicos = servicosAtuais.slice(0, 120).map((s: any) =>
+              `- [ID:${s.id}] "${s.nome_servico}" | Cat: "${s.categoria || 'Geral'}" | R$ ${Number(s.valor_base || 0).toFixed(2)} | Desc: ${(s.descricao || '').slice(0, 70)}`
+          ).join('\n');
+
+          const resumoMateriais = materiaisAtuais.slice(0, 100).map((m: any) =>
+              `- [ID:${m.id}] "${m.nome_material}" | Cat: "${m.campo_uso || 'Geral'}" | Un: ${m.unidade_medida || 'un'} | Custo: R$ ${Number(m.preco_compra || 0).toFixed(2)} | Venda: R$ ${Number(m.valor_unitario || 0).toFixed(2)}`
+          ).join('\n');
+
+          const promptGestor = `
+Você é o **Gestor do Sistema & Engenheiro de Custos e Catálogo** da **Arnaldo Trentin Serviços** (Curitiba/PR — Engenharia Residencial/Comercial de Alto Padrão, Elétrica, Hidráulica PPR/PEX/PVC, Climatização/HVAC, Gás e Manutenção).
+
+O diretor executivo Arnaldo Trentin solicitou:
+"${comando}"
+Escopo preferencial selecionado na tela: "${escopo}" (ambos = serviços e materiais; servicos = focar em serviços; materiais = focar em materiais/peças; reorganizar = auditar/subcategorizar/melhorar itens já existentes).
+
+=== DADOS REAIS DO SISTEMA PARA BASEAR SUA INTELIGÊNCIA ===
+1. ÁRVORE DE CATEGORIAS E SUBCATEGORIAS ATUAL:
+${JSON.stringify(arvoreAtiva, null, 2)}
+
+2. PARÂMETROS DE CUSTO OPERACIONAL E CATÁLOGO DO ARNALDO:
+- Custo Operacional por Hora Técnica (Calculadora do CRM): R$ ${custoHoraEfetivo.toFixed(2)} / hora (${diasUteis} dias úteis x ${horasDia}h/dia)
+- Ticket Médio dos Serviços já cadastrados no catálogo: R$ ${mediaServicos.toFixed(2)}
+- Praça de referência de mercado: Curitiba / Região Metropolitana (PR) - padrão técnico qualificado com garantia e emissão de nota/laudo.
+
+3. SERVIÇOS JÁ CADASTRADOS NO BANCO (${servicosAtuais.length} itens):
+${resumoServicos || 'Nenhum serviço cadastrado.'}
+
+4. MATERIAIS / PEÇAS JÁ CADASTRADOS NO BANCO (${materiaisAtuais.length} itens):
+${resumoMateriais || 'Nenhum material cadastrado.'}
+
+=== REGRAS DE ENGENHARIA E GESTÃO DO CATÁLOGO ===
+1. **Categorização Estruturada (Pai + Subcategoria)**:
+   - Todo item DEVE ter \`categoria_master\` (ex: "Hidráulica", "Elétrica", "Infraestrutura de Ar-Condicionado", "Gás", "Iluminação", "Geral") e \`subcategoria\` clara e específica (ex: "PPR", "PEX", "Cabos e Fios", "Quadros e Painéis", "Tubulação de Cobre").
+   - Sempre que usar uma subcategoria nova ou existente relevante, inclua também no objeto \`novas_subcategorias\` para que a árvore do sistema seja atualizada automaticamente.
+2. **Criação vs. Reorganização**:
+   - Se o Arnaldo pediu para **criar uma lista** (ex: "crie uma lista de serviços relacionado ao PPR"), gere entre 6 e 15 itens bem estruturados com \`"acao": "criar"\` e \`"id_existente": null\`. Não duplique itens idênticos aos já cadastrados (a menos que queira propor melhoria de um existente usando \`"acao": "atualizar"\` e o \`id_existente\` real).
+   - Se o Arnaldo pediu para **reorganizar, subcategorizar ou melhorar itens existentes**, use \`"acao": "atualizar"\` e preencha \`"id_existente"\` com o UUID exato do item listado acima, propondo a nova \`categoria_master\`, \`subcategoria\`, \`descricao_tecnica\` enriquecida e \`preco_venda_sugerido\` atualizado.
+3. **Precificação Inteligente (3 Pilares)**:
+   - Combine: (A) Referência real de mercado em Curitiba/PR + (B) Custo/Hora Operacional do Arnaldo (R$ ${custoHoraEfetivo.toFixed(2)}/h * \`horas_estimadas\`) + (C) Coerência com a média do catálogo atual (R$ ${mediaServicos.toFixed(2)}).
+   - Para **Serviços (\`"tipo": "service"\`)**: informe \`horas_estimadas\` (ex: 1.5, 2, 3.5), \`preco_custo_sugerido\` (= \`horas_estimadas\` * ${custoHoraEfetivo.toFixed(2)}) e \`preco_venda_sugerido\` (valor base comercial com margem saudável para mão de obra especializada).
+   - Para **Materiais (\`"tipo": "material"\`)**: informe \`unidade\` ("un", "m", "barra", "kit", "rolo"), \`preco_custo_sugerido\` (preço médio de compra em distribuidor) e \`preco_venda_sugerido\` (preço de revenda/orçamento com BDI de 30% a 45%).
+4. **Fomento de Informações Técnicas (\`descricao_tecnica\`)**:
+   - Escreva uma descrição técnica rica, objetiva e profissional (1 a 2 frases completas) que valorize o orçamento do Arnaldo perante clientes e arquitetos (mencionando método executivo, normas técnicas aplicáveis como NBR 15813 para PPR, NBR 5410 para elétrica, testes de estanqueidade/pressurização, acabamento, etc.).
+5. **Formato de Saída**:
+   - Retorne APENAS um JSON válido seguindo exatamente esta estrutura:
+{
+  "resumo_executivo": "Texto claro e executivo explicando ao Arnaldo como a lista foi pensada, como os preços foram calculados e dicas práticas sobre a execução/venda desses serviços.",
+  "custo_hora_referencia": ${custoHoraEfetivo.toFixed(2)},
+  "novas_subcategorias": {
+    "NomeCategoriaMaster": ["Subcategoria1", "Subcategoria2"]
+  },
+  "itens": [
+    {
+      "acao": "criar",
+      "id_existente": null,
+      "tipo": "service",
+      "nome": "Nome Comercial e Técnico do Serviço ou Material",
+      "categoria_master": "Hidráulica",
+      "subcategoria": "PPR",
+      "unidade": "serviço",
+      "horas_estimadas": 2.0,
+      "preco_custo_sugerido": 130.00,
+      "preco_venda_sugerido": 280.00,
+      "descricao_tecnica": "Execução por termofusão conforme NBR 15813, incluindo alinhamento, fixação e teste de estanqueidade.",
+      "justificativa_preco": "2.0h técnicas (R$ 130 custo) + referência Curitiba para termofusão PPR"
+    }
+  ]
+}`;
+
+          let model = genAI.getGenerativeModel({
+              model: "gemini-2.5-flash",
+              generationConfig: {
+                  temperature: 0.25,
+                  maxOutputTokens: 8192,
+                  responseMimeType: "application/json"
+              }
+          });
+
+          const res = await model.generateContent(promptGestor);
+          const rawText = res.response.text().trim();
+          let parsedJson: any = null;
+          try {
+              parsedJson = JSON.parse(rawText);
+          } catch {
+              const cleaned = rawText.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
+              parsedJson = JSON.parse(cleaned);
+          }
+
+          return new Response(JSON.stringify({
+              success: true,
+              ...parsedJson
+          }), {
+              status: 200,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+      } catch (gestorErr: any) {
+          console.error('[GESTOR CATALOGO IA ERRO]:', gestorErr);
+          return new Response(JSON.stringify({ error: String(gestorErr?.message || gestorErr) }), {
+              status: 500,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+      }
+  }
+
   // 1.1 EXECUÇÃO DE MISSÕES DA AGENDA DA MARIA (PILOTO AUTOMÁTICO)
   if (payload?.action === 'execute_maria_task' || payload?.action === 'process_maria_agenda') {
       const manualUazapiUrl = (payload?.BaseUrl || Deno.env.get('UAZAPI_URL') || 'https://arnaldotrentin.uazapi.com').replace(/\/$/, '');
