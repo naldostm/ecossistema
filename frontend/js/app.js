@@ -3334,7 +3334,8 @@ ${materiaisTxt}${extrasTxt}
 
             if (res.status === 'success') {
                 const rawData = res.data || {};
-                const resumo = rawData.resumo_executivo || rawData.dados || 'Processamento concluído.';
+                const parcial = rawData.proximo_inicio != null ? `\n\n⚠️ Este pedido envolve ${rawData.total_itens} itens; mostrei só o primeiro lote. Use o botão Gestor de Catálogo IA (nas telas de Serviços/Materiais) para revisar tudo em lotes.` : '';
+                const resumo = (rawData.resumo_executivo || rawData.dados || 'Processamento concluído.') + parcial;
                 const itensCount = Array.isArray(rawData.itens) ? rawData.itens.length : 0;
                 let btnHtml = '';
                 if (itensCount > 0 && typeof window.loadGestorIAResponseIntoModal === 'function') {
@@ -5528,21 +5529,85 @@ ${materiaisTxt}${extrasTxt}
 
         try {
             const supa = window.supabaseClient || supabase;
-            const { data, error } = await supa.functions.invoke('assistant-router', {
-                body: {
-                    action: 'gestor_catalogo_ia',
-                    comando,
-                    escopo,
-                    praca_referencia: (document.getElementById('gestor-ia-praca')?.value || localStorage.getItem('gestor_ia_praca') || 'São Paulo / SP').trim(),
-                    custo_hora: window.getCurrentOperationalCustoHora(),
-                    catalogo_arvore: window.catalogoTree || {}
+            const baseBody = {
+                action: 'gestor_catalogo_ia',
+                comando,
+                escopo,
+                praca_referencia: (document.getElementById('gestor-ia-praca')?.value || localStorage.getItem('gestor_ia_praca') || 'São Paulo / SP').trim(),
+                custo_hora: window.getCurrentOperationalCustoHora(),
+                catalogo_arvore: window.catalogoTree || {}
+            };
+
+            const consolidado = { itens: [], novas_subcategorias: {}, resumos: [], pesquisa_web: false, modo: 'criar' };
+            let notasPesquisa = '';
+            let inicio = 0;
+            let totalItens = 0;
+            let falhas = 0;
+            let guarda = 0;
+
+            const invocarLote = async (loteInicio) => {
+                for (let tentativa = 1; tentativa <= 2; tentativa++) {
+                    try {
+                        const { data, error } = await supa.functions.invoke('assistant-router', {
+                            body: { ...baseBody, lote_inicio: loteInicio, notas_pesquisa: notasPesquisa }
+                        });
+                        if (error) throw new Error(error.message || JSON.stringify(error));
+                        if (data?.error) throw new Error(data.error);
+                        return data;
+                    } catch (e) {
+                        if (tentativa === 2) throw e;
+                    }
                 }
-            });
+            };
 
-            if (error) throw new Error(error.message || JSON.stringify(error));
-            if (data?.error) throw new Error(data.error);
+            while (guarda++ < 25) {
+                let data;
+                try {
+                    data = await invocarLote(inicio);
+                } catch (e) {
+                    if (inicio === 0) throw e;
+                    falhas++;
+                    console.warn('[Gestor Catálogo IA] Lote falhou e foi pulado:', e);
+                    break;
+                }
 
-            window.loadGestorIAResponseIntoModal(data, comando);
+                consolidado.modo = data.modo || 'criar';
+                consolidado.pesquisa_web = consolidado.pesquisa_web || !!data.pesquisa_web;
+                totalItens = data.total_itens || totalItens;
+                (data.itens || []).forEach(it => consolidado.itens.push(it));
+                Object.entries(data.novas_subcategorias || {}).forEach(([m, subs]) => {
+                    if (!Array.isArray(subs)) return;
+                    if (!consolidado.novas_subcategorias[m]) consolidado.novas_subcategorias[m] = [];
+                    subs.forEach(s => {
+                        if (s && !consolidado.novas_subcategorias[m].some(x => x.toLowerCase() === String(s).toLowerCase())) {
+                            consolidado.novas_subcategorias[m].push(s);
+                        }
+                    });
+                });
+                if (data.resumo_executivo) consolidado.resumos.push(data.resumo_executivo);
+                if (data.notas_pesquisa) notasPesquisa = data.notas_pesquisa;
+
+                if (consolidado.modo !== 'reorganizar' || data.proximo_inicio == null) break;
+                inicio = data.proximo_inicio;
+
+                const totalLotes = Math.ceil(totalItens / 20);
+                const loteAtualNum = Math.floor(inicio / 20) + 1;
+                const progressoEl = body?.querySelector('p');
+                if (progressoEl) {
+                    progressoEl.innerHTML = `<strong style="color:#34d399;">Revisando o catálogo em lotes: ${inicio} de ${totalItens} itens analisados (lote ${loteAtualNum} de ${totalLotes}).</strong><br>${consolidado.itens.length} ajustes sugeridos até agora. Não feche esta janela.`;
+                }
+            }
+
+            const resumoFinal = consolidado.modo === 'reorganizar'
+                ? `Revisão em lote concluída: ${totalItens} itens analisados e ${consolidado.itens.length} com ajuste sugerido (os demais já estavam corretos).${falhas ? ' ⚠️ Um lote falhou e foi pulado: rode novamente para completar.' : ''}\n${consolidado.resumos[0] || ''}`
+                : (consolidado.resumos[0] || 'Proposta gerada pelo Gestor do Sistema IA.');
+
+            window.loadGestorIAResponseIntoModal({
+                itens: consolidado.itens,
+                resumo_executivo: resumoFinal,
+                novas_subcategorias: consolidado.novas_subcategorias,
+                pesquisa_web: consolidado.pesquisa_web
+            }, comando);
         } catch (err) {
             console.error('[Gestor Catálogo IA] Erro:', err);
             if (body) {

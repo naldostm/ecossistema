@@ -1223,8 +1223,8 @@ MENSAGEM DO ARNALDO NO CRM:
           currentMonthStart.setHours(0, 0, 0, 0);
 
           const [qServicos, qMateriais, qConfigs, qCaixa] = await Promise.all([
-              supabase.from('servicos').select('id, nome_servico, categoria, descricao, valor_base').order('nome_servico').limit(250),
-              supabase.from('materiais').select('id, nome_material, campo_uso, unidade_medida, preco_compra, valor_unitario, quantidade').order('nome_material').limit(250),
+              supabase.from('servicos').select('id, nome_servico, categoria, descricao, valor_base').order('nome_servico').limit(1000),
+              supabase.from('materiais').select('id, nome_material, campo_uso, unidade_medida, preco_compra, valor_unitario, quantidade').order('nome_material').limit(1000),
               supabase.from('sistema_configuracoes').select('chave, valor').in('chave', ['catalogo_arvore', 'calc_config']),
               supabase.from('fluxo_caixa').select('valor, tipo_movimento').eq('tipo_movimento', 'Saida').gte('created_at', currentMonthStart.toISOString())
           ]);
@@ -1263,13 +1263,33 @@ MENSAGEM DO ARNALDO NO CRM:
               ? (valoresServicos.reduce((a: number, b: number) => a + b, 0) / valoresServicos.length)
               : 180.00;
 
-          const resumoServicos = servicosAtuais.slice(0, 120).map((s: any) =>
-              `- [ID:${s.id}] "${s.nome_servico}" | Cat: "${s.categoria || 'Geral'}" | R$ ${Number(s.valor_base || 0).toFixed(2)} | Desc: ${(s.descricao || '').slice(0, 70)}`
+          const intencaoReorg = escopo === 'reorganizar' || (/(reorganiz|organiz|padroniz|revis[ae]|audit|categoriz|subcategoriz|arrum|corrig|desorganiz|coisa fora|fora d[oe] lugar)/i.test(comando) && !/\b(crie|criar|gere|gerar|adicione|adicionar|cadastre|cadastrar)\b/i.test(comando));
+          const modo = (payload.modo === 'criar' || payload.modo === 'reorganizar') ? String(payload.modo) : (intencaoReorg ? 'reorganizar' : 'criar');
+          const incluiServicos = escopo !== 'materiais';
+          const incluiMateriais = escopo !== 'servicos';
+          const loteTamanho = Math.min(30, Math.max(5, Number(payload.lote_tamanho) || 20));
+          const loteInicio = Math.max(0, Number(payload.lote_inicio) || 0);
+
+          const alvosReorg: any[] = modo === 'reorganizar'
+              ? [
+                  ...(incluiServicos ? servicosAtuais.map((s: any) => ({ id: s.id, tipo: 'service', nome: s.nome_servico || '', cat: s.categoria || 'Geral', un: 'serviço', custo: 0, venda: Number(s.valor_base || 0), desc: s.descricao || '' })) : []),
+                  ...(incluiMateriais ? materiaisAtuais.map((m: any) => ({ id: m.id, tipo: 'material', nome: m.nome_material || '', cat: m.campo_uso || 'Geral', un: m.unidade_medida || 'un', custo: Number(m.preco_compra || 0), venda: Number(m.valor_unitario || 0), desc: '' })) : [])
+              ].sort((a: any, b: any) => a.tipo.localeCompare(b.tipo) || a.cat.localeCompare(b.cat, 'pt-BR') || String(a.nome).localeCompare(String(b.nome), 'pt-BR'))
+              : [];
+          const alvoTotal = alvosReorg.length;
+          const loteAtual = alvosReorg.slice(loteInicio, loteInicio + loteTamanho);
+          const proximoInicio = (modo === 'reorganizar' && loteInicio + loteTamanho < alvoTotal) ? loteInicio + loteTamanho : null;
+          const listaLote = loteAtual.map((i: any) =>
+              `- [ID:${i.id}] tipo=${i.tipo} | "${i.nome}" | Cat atual: "${i.cat}" | Un: ${i.un} | ${i.tipo === 'material' ? `Custo: R$ ${i.custo.toFixed(2)} | ` : ''}Venda: R$ ${i.venda.toFixed(2)}${i.desc ? ` | Desc: ${String(i.desc).slice(0, 80)}` : ''}`
           ).join('\n');
 
-          const resumoMateriais = materiaisAtuais.slice(0, 100).map((m: any) =>
-              `- [ID:${m.id}] "${m.nome_material}" | Cat: "${m.campo_uso || 'Geral'}" | Un: ${m.unidade_medida || 'un'} | Custo: R$ ${Number(m.preco_compra || 0).toFixed(2)} | Venda: R$ ${Number(m.valor_unitario || 0).toFixed(2)}`
-          ).join('\n');
+          const resumoServicos = modo === 'reorganizar'
+              ? '(omitido neste modo: veja ITENS DO LOTE ao final)'
+              : servicosAtuais.map((s: any) => `- [ID:${s.id}] "${s.nome_servico}" | Cat: "${s.categoria || 'Geral'}" | R$ ${Number(s.valor_base || 0).toFixed(2)}`).join('\n');
+
+          const resumoMateriais = modo === 'reorganizar'
+              ? '(omitido neste modo: veja ITENS DO LOTE ao final)'
+              : materiaisAtuais.map((m: any) => `- [ID:${m.id}] "${m.nome_material}" | Cat: "${m.campo_uso || 'Geral'}" | Un: ${m.unidade_medida || 'un'} | Venda: R$ ${Number(m.valor_unitario || 0).toFixed(2)}`).join('\n');
 
           const promptGestor = `
 Você é o **Gestor do Sistema & Engenheiro de Custos e Catálogo** da **Arnaldo Trentin Serviços** (${praca} — Engenharia Residencial/Comercial de Alto Padrão, Elétrica, Hidráulica PPR/PEX/PVC, Climatização/HVAC, Gás e Manutenção).
@@ -1332,6 +1352,29 @@ ${resumoMateriais || 'Nenhum material cadastrado.'}
   ]
 }`;
 
+          const focoPesquisa = modo === 'reorganizar'
+              ? `${comando}\nItens em revisão (amostra): ${loteAtual.slice(0, 25).map((i: any) => i.nome).join('; ')}`
+              : comando;
+
+          const modoExtra = modo === 'reorganizar'
+              ? `
+
+=== MODO DE OPERAÇÃO: REORGANIZAÇÃO EM LOTE (itens ${loteInicio + 1} a ${loteInicio + loteAtual.length} de ${alvoTotal}) ===
+Revise SOMENTE os itens do lote abaixo. Para cada um, avalie: (a) se a categoria/subcategoria está correta segundo a árvore e se não há fragmentação desnecessária de subcategorias; (b) se o nome está padronizado; (c) se há descrição técnica adequada; (d) se o preço está coerente com o mercado de ${praca}.
+- Devolva em "itens" APENAS os itens que precisam de ajuste, com "acao": "atualizar", "id_existente" = ID exato listado abaixo e "tipo" igual ao do item. Itens já corretos NÃO devem ser devolvidos.
+- NUNCA crie itens novos neste modo. Se o preço atual já estiver coerente, repita-o em "preco_venda_sugerido".
+- Em "justificativa_preco" explique em poucas palavras o que mudou (ex.: "movido de 'Hidráulica | Água Fria 25mm' para Hidráulica | PVC").
+- No "resumo_executivo" escreva 2 a 3 frases sobre este lote.
+
+ITENS DO LOTE:
+${listaLote || '(lote vazio)'}`
+              : `
+
+=== MODO DE OPERAÇÃO: CRIAÇÃO ===
+Gere somente itens NOVOS (não devolva itens que já existam no catálogo). Respeite a quantidade pedida pelo Arnaldo, até no máximo 30 itens (a regra de 6 a 15 vale apenas quando ele não indicar quantidade).`;
+
+          const promptGestorFull = promptGestor + modoExtra;
+
           const GESTOR_MODEL = 'gemini-3.6-flash';
           const geminiKey = Deno.env.get('GEMINI_API_KEY') ?? '';
           const callGeminiRest = async (body: Record<string, any>): Promise<string> => {
@@ -1346,13 +1389,13 @@ ${resumoMateriais || 'Nenhum material cadastrado.'}
           };
 
           let rawText = '';
-          let pesquisaWeb = false;
+          let notasPesquisa = String(payload.notas_pesquisa || '').slice(0, 6000);
+          let pesquisaWeb = notasPesquisa.length > 0;
           try {
               // Etapa 1: pesquisa de preços e normas com Google Search grounding
-              let notasPesquisa = '';
-              try {
+              if (!notasPesquisa) try {
                   notasPesquisa = await callGeminiRest({
-                      contents: [{ role: 'user', parts: [{ text: `Pesquise na web, com foco em ${praca} e no Brasil, preços atuais de mercado (mão de obra e materiais) e normas técnicas aplicáveis para o seguinte pedido de um prestador de serviços de engenharia/instalações:\n"${comando}"\n\nResponda em português com tópicos curtos: itens típicos, faixas de preço em R$ (cite a fonte/faixa quando possível) e normas relevantes. Não invente valores: se não encontrar, diga "sem referência".` }] }],
+                      contents: [{ role: 'user', parts: [{ text: `Pesquise na web, com foco em ${praca} e no Brasil, preços atuais de mercado (mão de obra e materiais) e normas técnicas aplicáveis para o seguinte pedido de um prestador de serviços de engenharia/instalações:\n"${focoPesquisa}"\n\nResponda em português com tópicos curtos: itens típicos, faixas de preço em R$ (cite a fonte/faixa quando possível) e normas relevantes. Não invente valores: se não encontrar, diga "sem referência".` }] }],
                       tools: [{ google_search: {} }]
                   });
                   pesquisaWeb = notasPesquisa.length > 0;
@@ -1362,8 +1405,8 @@ ${resumoMateriais || 'Nenhum material cadastrado.'}
 
               // Etapa 2: estruturação em JSON (sem ferramentas, para garantir saída válida)
               const promptFinal = notasPesquisa
-                  ? `${promptGestor}\n\n=== PESQUISA WEB RECENTE (use como referência de mercado; mencione em "justificativa_preco" quando um preço vier da pesquisa) ===\n${notasPesquisa.slice(0, 6000)}`
-                  : promptGestor;
+                  ? `${promptGestorFull}\n\n=== PESQUISA WEB RECENTE (use como referência de mercado; mencione em "justificativa_preco" quando um preço vier da pesquisa) ===\n${notasPesquisa.slice(0, 6000)}`
+                  : promptGestorFull;
               rawText = await callGeminiRest({
                   contents: [{ role: 'user', parts: [{ text: promptFinal }] }],
                   generationConfig: { maxOutputTokens: 16384, responseMimeType: 'application/json' }
@@ -1374,7 +1417,7 @@ ${resumoMateriais || 'Nenhum material cadastrado.'}
                   model: 'gemini-2.5-flash',
                   generationConfig: { temperature: 0.25, maxOutputTokens: 8192, responseMimeType: 'application/json' }
               });
-              const fbRes = await fallbackModel.generateContent(promptGestor);
+              const fbRes = await fallbackModel.generateContent(promptGestorFull);
               rawText = fbRes.response.text().trim();
           }
           let parsedJson: any = null;
@@ -1385,9 +1428,22 @@ ${resumoMateriais || 'Nenhum material cadastrado.'}
               parsedJson = JSON.parse(cleaned);
           }
 
+          if (!Array.isArray(parsedJson?.itens)) parsedJson = { ...(parsedJson || {}), itens: [] };
+          if (modo === 'reorganizar') {
+              const mapaLote = new Map(loteAtual.map((i: any) => [String(i.id), i]));
+              parsedJson.itens = parsedJson.itens
+                  .filter((it: any) => mapaLote.has(String(it.id_existente)))
+                  .map((it: any) => ({ ...it, acao: 'atualizar', tipo: (mapaLote.get(String(it.id_existente)) as any).tipo }));
+          }
+
           return new Response(JSON.stringify({
               success: true,
               pesquisa_web: pesquisaWeb,
+              modo,
+              total_itens: alvoTotal,
+              itens_revisados: loteAtual.length,
+              proximo_inicio: proximoInicio,
+              notas_pesquisa: modo === 'reorganizar' ? notasPesquisa : '',
               ...parsedJson
           }), {
               status: 200,
