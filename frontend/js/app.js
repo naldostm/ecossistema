@@ -1231,7 +1231,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Atribuição de técnico instantânea na tabela
     window.updateOSTechnician = async function(osId, techId) {
         try {
-            const supa = getSupa();
+            const supa = window.supabaseClient || supabase;
             const tech = (window.colabCache || []).find(c => c.id === techId);
             const techName = tech ? tech.nome_completo : (techId || 'Não Definido');
 
@@ -3359,7 +3359,7 @@ ${materiaisTxt}${extrasTxt}
 
         let fetchPromise;
         if (agentName === 'Arquiteto' || agentName === 'GestorCatalogo') {
-            const supa = getSupa();
+            const supa = window.supabaseClient || supabase;
             const custoHora = typeof window.getCurrentOperationalCustoHora === 'function' ? window.getCurrentOperationalCustoHora() : 0;
             fetchPromise = supa.functions.invoke('assistant-router', {
                 body: {
@@ -3380,7 +3380,7 @@ ${materiaisTxt}${extrasTxt}
             });
         } else if (agentName === 'Maria Cecília') {
             // Modo Unificado: Maria Cecília Executiva via Supabase Edge Router (mesma mente e memória do WhatsApp)
-            const supa = getSupa();
+            const supa = window.supabaseClient || supabase;
             fetchPromise = supa.functions.invoke('assistant-router', {
                 body: {
                     action: 'crm_chat_maria',
@@ -5524,7 +5524,7 @@ ${materiaisTxt}${extrasTxt}
         }
 
         try {
-            const supa = getSupa();
+            const supa = window.supabaseClient || supabase;
             const { data, error } = await supa.functions.invoke('assistant-router', {
                 body: {
                     action: 'gestor_catalogo_ia',
@@ -5719,7 +5719,7 @@ ${materiaisTxt}${extrasTxt}
         }
 
         try {
-            const supa = getSupa();
+            const supa = window.supabaseClient || supabase;
             const newServices = [];
             const updateServices = [];
             const newMaterials = [];
