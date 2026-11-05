@@ -3329,7 +3329,7 @@ ${materiaisTxt}${extrasTxt}
         chatMessages.appendChild(typingMsg);
         chatMessages.scrollTop = chatMessages.scrollHeight;
 
-        callAIWithTimeout('Arquiteto', { text: text }, 35000).then(res => {
+        callAIWithTimeout('Arquiteto', { text: text }, 120000).then(res => {
             typingMsg.classList.remove('typing');
 
             if (res.status === 'success') {
@@ -5651,7 +5651,8 @@ ${materiaisTxt}${extrasTxt}
         body.innerHTML = `
             ${datalistHtml}
             <div style="background: rgba(16, 185, 129, 0.1); border-left: 4px solid #10b981; padding: 12px 16px; border-radius: 8px; color: #e2e8f0; font-size: 0.85rem; line-height: 1.45;">
-                <strong><i class="fa-solid fa-user-tie" style="color: #34d399;"></i> Parecer Executivo & Precificação:</strong><br>
+                <strong><i class="fa-solid fa-user-tie" style="color: #34d399;"></i> Parecer Executivo & Precificação:</strong>
+                ${data?.pesquisa_web ? '<span style="margin-left:8px; background: rgba(14,165,233,0.18); border: 1px solid rgba(14,165,233,0.4); color: #7dd3fc; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; font-weight: 700;"><i class="fa-solid fa-globe"></i> Preços pesquisados na web</span>' : '<span style="margin-left:8px; background: rgba(245,158,11,0.15); border: 1px solid rgba(245,158,11,0.4); color: #fbbf24; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; font-weight: 700;">Preços estimados (sem pesquisa web)</span>'}<br>
                 ${escapeAttr(resumo).replace(/\n/g, '<br>')}
                 ${novasSubsHtml}
             </div>

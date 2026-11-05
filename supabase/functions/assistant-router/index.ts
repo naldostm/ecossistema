@@ -1331,17 +1331,51 @@ ${resumoMateriais || 'Nenhum material cadastrado.'}
   ]
 }`;
 
-          let model = genAI.getGenerativeModel({
-              model: "gemini-2.5-flash",
-              generationConfig: {
-                  temperature: 0.25,
-                  maxOutputTokens: 8192,
-                  responseMimeType: "application/json"
-              }
-          });
+          const GESTOR_MODEL = 'gemini-3.6-flash';
+          const geminiKey = Deno.env.get('GEMINI_API_KEY') ?? '';
+          const callGeminiRest = async (body: Record<string, any>): Promise<string> => {
+              const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GESTOR_MODEL}:generateContent`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiKey },
+                  body: JSON.stringify(body)
+              });
+              if (!r.ok) throw new Error(`Gemini ${GESTOR_MODEL} HTTP ${r.status}: ${(await r.text()).slice(0, 300)}`);
+              const j = await r.json();
+              return (j?.candidates?.[0]?.content?.parts || []).map((p: any) => p.text || '').join('').trim();
+          };
 
-          const res = await model.generateContent(promptGestor);
-          const rawText = res.response.text().trim();
+          let rawText = '';
+          let pesquisaWeb = false;
+          try {
+              // Etapa 1: pesquisa de preços e normas com Google Search grounding
+              let notasPesquisa = '';
+              try {
+                  notasPesquisa = await callGeminiRest({
+                      contents: [{ role: 'user', parts: [{ text: `Pesquise na web, com foco em Curitiba/PR e no Brasil, preços atuais de mercado (mão de obra e materiais) e normas técnicas aplicáveis para o seguinte pedido de um prestador de serviços de engenharia/instalações:\n"${comando}"\n\nResponda em português com tópicos curtos: itens típicos, faixas de preço em R$ (cite a fonte/faixa quando possível) e normas relevantes. Não invente valores: se não encontrar, diga "sem referência".` }] }],
+                      tools: [{ google_search: {} }]
+                  });
+                  pesquisaWeb = notasPesquisa.length > 0;
+              } catch (searchErr) {
+                  console.warn('[GESTOR CATALOGO] Pesquisa web indisponível, seguindo sem ela:', searchErr);
+              }
+
+              // Etapa 2: estruturação em JSON (sem ferramentas, para garantir saída válida)
+              const promptFinal = notasPesquisa
+                  ? `${promptGestor}\n\n=== PESQUISA WEB RECENTE (use como referência de mercado; mencione em "justificativa_preco" quando um preço vier da pesquisa) ===\n${notasPesquisa.slice(0, 6000)}`
+                  : promptGestor;
+              rawText = await callGeminiRest({
+                  contents: [{ role: 'user', parts: [{ text: promptFinal }] }],
+                  generationConfig: { maxOutputTokens: 16384, responseMimeType: 'application/json' }
+              });
+          } catch (modelErr) {
+              console.warn(`[GESTOR CATALOGO] ${GESTOR_MODEL} falhou, usando gemini-2.5-flash:`, modelErr);
+              const fallbackModel = genAI.getGenerativeModel({
+                  model: 'gemini-2.5-flash',
+                  generationConfig: { temperature: 0.25, maxOutputTokens: 8192, responseMimeType: 'application/json' }
+              });
+              const fbRes = await fallbackModel.generateContent(promptGestor);
+              rawText = fbRes.response.text().trim();
+          }
           let parsedJson: any = null;
           try {
               parsedJson = JSON.parse(rawText);
@@ -1352,6 +1386,7 @@ ${resumoMateriais || 'Nenhum material cadastrado.'}
 
           return new Response(JSON.stringify({
               success: true,
+              pesquisa_web: pesquisaWeb,
               ...parsedJson
           }), {
               status: 200,
