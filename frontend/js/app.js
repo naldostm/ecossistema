@@ -5948,6 +5948,47 @@ ${materiaisTxt}${extrasTxt}
                 await supa.from('materiais').update(payloadUpd).eq('id', id);
             }
 
+            // 5.1 Sincroniza a localização (categoria/subcategoria) dos itens atualizados nas propostas existentes
+            const updatedCatById = {};
+            updateServices.forEach(s => { if (s.id && s.categoria) updatedCatById[s.id] = s.categoria; });
+            updateMaterials.forEach(m => { if (m.id && m.campo_uso) updatedCatById[m.id] = m.campo_uso; });
+            if (Object.keys(updatedCatById).length > 0) {
+                if (Array.isArray(window.currentPropItems) && window.currentPropItems.length > 0) {
+                    let curChanged = false;
+                    window.currentPropItems.forEach(it => {
+                        const cid = it.id_db || it.id;
+                        if (cid && updatedCatById[cid] && it.category !== updatedCatById[cid]) {
+                            it.category = updatedCatById[cid];
+                            curChanged = true;
+                        }
+                    });
+                    if (curChanged && typeof window.renderPropItemsTable === 'function') {
+                        window.renderPropItemsTable();
+                    }
+                }
+                try {
+                    const { data: allProps } = await supa.from('propostas').select('id, itens_json');
+                    for (const prop of (allProps || [])) {
+                        if (!Array.isArray(prop.itens_json)) continue;
+                        let propChanged = false;
+                        const nextItems = prop.itens_json.map(it => {
+                            if (!it || typeof it !== 'object') return it;
+                            const cid = it.id_db || it.id;
+                            if (cid && updatedCatById[cid] && it.category !== updatedCatById[cid]) {
+                                propChanged = true;
+                                return { ...it, category: updatedCatById[cid] };
+                            }
+                            return it;
+                        });
+                        if (propChanged) {
+                            await supa.from('propostas').update({ itens_json: nextItems }).eq('id', prop.id);
+                        }
+                    }
+                } catch (syncErr) {
+                    console.warn('[Salvar Gestor IA] Aviso ao sincronizar localização nas propostas:', syncErr);
+                }
+            }
+
             // 6. Persiste horas estimadas na Calculadora Operacional
             if (typeof window.saveCalcConfigDB === 'function') {
                 window.saveCalcConfigDB();
